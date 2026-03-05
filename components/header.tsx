@@ -42,10 +42,10 @@ export default function Header() {
         {/* Desktop CTAs */}
         <div className="hidden items-center gap-3 md:flex">
           <Button variant="ghost" className="text-muted-foreground hover:text-foreground" asChild>
-            <Link href="/dashboard">התחבר</Link>
+            <Link href="/login">התחבר</Link>
           </Button>
           <Button className="bg-primary text-primary-foreground hover:bg-primary/90" asChild>
-            <Link href="/dashboard">התחל ניסיון חינם</Link>
+            <Link href="/signup">התחל ניסיון חינם</Link>
           </Button>
         </div>
 
@@ -79,10 +79,10 @@ export default function Header() {
             ))}
             <div className="mt-4 flex flex-col gap-3">
               <Button variant="outline" className="w-full" asChild>
-                <Link href="/dashboard">התחבר</Link>
+                <Link href="/login">התחבר</Link>
               </Button>
               <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" asChild>
-                <Link href="/dashboard">התחל ניסיון חינם</Link>
+                <Link href="/signup">התחל ניסיון חינם</Link>
               </Button>
             </div>
           </nav>
