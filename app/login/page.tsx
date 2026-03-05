@@ -35,7 +35,7 @@ export default function LoginPage() {
         password,
       })
       if (error) throw error
-      router.push('/dashboard')
+      router.push('/app/dashboard')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'אימייל או סיסמה שגויים')
     } finally {
