@@ -1,73 +1,95 @@
-import { NextResponse } from "next/server"
+import { generateText, Output } from 'ai'
+import { z } from 'zod'
+import { createClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+const competitorSchema = z.object({
+  competitors: z.array(
+    z.object({
+      name: z.string().describe('שם המתחרה'),
+      website: z.string().describe('כתובת האתר'),
+      similarity: z.number().min(1).max(100).describe('אחוז דמיון ל-1 עד 100'),
+      description: z.string().describe('תיאור קצר של המתחרה בעברית'),
+      strengths: z.array(z.string()).describe('נקודות חוזק'),
+      threatLevel: z.enum(['גבוה', 'בינוני', 'נמוך']).describe('רמת האיום'),
+    })
+  ).describe('רשימת 5 מתחרים'),
+})
 
 export async function POST(request: Request) {
   try {
-    const { companyName, industry } = await request.json()
+    const { website, industry, companyName } = await request.json()
 
-    // Simulated competitor discovery based on industry
-    // In production, this would call an AI service or web scraping API
-    const competitorsByIndustry: Record<string, Array<{ name: string; website: string }>> = {
-      "טכנולוגיה": [
-        { name: "TechVision Israel", website: "https://techvision.co.il" },
-        { name: "InnovateTech", website: "https://innovatetech.io" },
-        { name: "Digital Solutions Ltd", website: "https://digitalsolutions.co.il" },
-      ],
-      "פינטק": [
-        { name: "PayTech Israel", website: "https://paytech.co.il" },
-        { name: "FinanceAI", website: "https://financeai.io" },
-        { name: "SmartPay Solutions", website: "https://smartpay.co.il" },
-      ],
-      "סייבר": [
-        { name: "CyberShield", website: "https://cybershield.co.il" },
-        { name: "SecureNet Israel", website: "https://securenet.io" },
-        { name: "DefenseTech", website: "https://defensetech.co.il" },
-      ],
-      "בריאות דיגיטלית": [
-        { name: "HealthTech IL", website: "https://healthtech.co.il" },
-        { name: "MedAI Solutions", website: "https://medai.io" },
-        { name: "Digital Health Pro", website: "https://dhpro.co.il" },
-      ],
-      "מסחר אלקטרוני": [
-        { name: "eCommerce Plus", website: "https://ecommerceplus.co.il" },
-        { name: "ShopSmart Israel", website: "https://shopsmart.io" },
-        { name: "OnlineRetail Pro", website: "https://onlineretail.co.il" },
-      ],
-      "SaaS": [
-        { name: "CloudSoft Israel", website: "https://cloudsoft.co.il" },
-        { name: "SaaSPro", website: "https://saaspro.io" },
-        { name: "AppCloud Solutions", website: "https://appcloud.co.il" },
-      ],
-      "תוכנה": [
-        { name: "SoftDev Israel", website: "https://softdev.co.il" },
-        { name: "CodeMasters", website: "https://codemasters.io" },
-        { name: "DevPro Solutions", website: "https://devpro.co.il" },
-      ],
-      "שירותים עסקיים": [
-        { name: "BizServices IL", website: "https://bizservices.co.il" },
-        { name: "ProBusiness", website: "https://probusiness.io" },
-        { name: "Enterprise Solutions", website: "https://enterprise.co.il" },
-      ],
+    if (!industry) {
+      return NextResponse.json(
+        { success: false, error: 'נדרש לציין תעשייה' },
+        { status: 400 }
+      )
     }
 
-    // Get competitors for the industry or return generic ones
-    const competitors = competitorsByIndustry[industry] || [
-      { name: "Competitor A", website: "https://competitor-a.com" },
-      { name: "Competitor B", website: "https://competitor-b.com" },
-      { name: "Competitor C", website: "https://competitor-c.com" },
-    ]
+    const { output } = await generateText({
+      model: 'anthropic/claude-sonnet-4-20250514',
+      output: Output.object({
+        schema: competitorSchema,
+      }),
+      messages: [
+        {
+          role: 'system',
+          content: `אתה מומחה לניתוח תחרותי בשוק הישראלי.
+תפקידך לזהות ולנתח מתחרים פוטנציאליים לעסקים ישראליים.
+התמקד במתחרים ישראליים ובינלאומיים הפועלים בישראל.
+כל התשובות שלך חייבות להיות בעברית מלאה.`,
+        },
+        {
+          role: 'user',
+          content: `זהה 5 מתחרים עבור:
 
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+${companyName ? `שם החברה: ${companyName}` : ''}
+${website ? `אתר: ${website}` : ''}
+תעשייה: ${industry}
+
+עבור כל מתחרה ספק:
+- שם החברה
+- כתובת אתר (השתמש בפורמט תקין)
+- אחוז דמיון (1-100)
+- תיאור קצר בעברית
+- נקודות חוזק
+- רמת איום (גבוה/בינוני/נמוך)
+
+התמקד במתחרים אמיתיים ורלוונטיים בשוק הישראלי.`,
+        },
+      ],
+    })
+
+    if (!output) {
+      return NextResponse.json(
+        { success: false, error: 'לא התקבלה תשובה מהמודל' },
+        { status: 500 }
+      )
+    }
+
+    // Save competitors to Supabase
+    const supabase = await createClient()
+    for (const competitor of output.competitors) {
+      await supabase.from('competitors').insert({
+        name: competitor.name,
+        activity_type: 'זיהוי אוטומטי',
+        change_description: competitor.description,
+        impact: competitor.threatLevel,
+        threat_score: competitor.similarity,
+        services: competitor.strengths.join(', '),
+      })
+    }
 
     return NextResponse.json({
       success: true,
       companyName,
-      competitors,
+      competitors: output.competitors,
     })
   } catch (error) {
-    console.error("Error finding competitors:", error)
+    console.error('Error finding competitors:', error)
     return NextResponse.json(
-      { success: false, error: "Failed to find competitors" },
+      { success: false, error: 'שגיאה באיתור מתחרים' },
       { status: 500 }
     )
   }
