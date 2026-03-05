@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Menu, X, Radar } from "lucide-react"
 
@@ -40,11 +41,11 @@ export default function Header() {
 
         {/* Desktop CTAs */}
         <div className="hidden items-center gap-3 md:flex">
-          <Button variant="ghost" className="text-muted-foreground hover:text-foreground">
-            התחבר
+          <Button variant="ghost" className="text-muted-foreground hover:text-foreground" asChild>
+            <Link href="/dashboard">התחבר</Link>
           </Button>
-          <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-            התחל ניסיון חינם
+          <Button className="bg-primary text-primary-foreground hover:bg-primary/90" asChild>
+            <Link href="/dashboard">התחל ניסיון חינם</Link>
           </Button>
         </div>
 
@@ -77,11 +78,11 @@ export default function Header() {
               </a>
             ))}
             <div className="mt-4 flex flex-col gap-3">
-              <Button variant="outline" className="w-full">
-                התחבר
+              <Button variant="outline" className="w-full" asChild>
+                <Link href="/dashboard">התחבר</Link>
               </Button>
-              <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                התחל ניסיון חינם
+              <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" asChild>
+                <Link href="/dashboard">התחל ניסיון חינם</Link>
               </Button>
             </div>
           </nav>
