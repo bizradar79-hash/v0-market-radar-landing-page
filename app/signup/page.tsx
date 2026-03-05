@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { Radar, Loader2 } from 'lucide-react'
 
 export default function SignupPage() {
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [companyName, setCompanyName] = useState('')
