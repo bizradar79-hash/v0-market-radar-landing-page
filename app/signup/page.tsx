@@ -40,6 +40,7 @@ export default function SignupPage() {
             process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
             `${window.location.origin}/onboarding`,
           data: {
+            full_name: fullName,
             company_name: companyName,
           },
         },
@@ -80,6 +81,18 @@ export default function SignupPage() {
           <CardContent>
             <form onSubmit={handleSignUp}>
               <div className="flex flex-col gap-5">
+                <div className="grid gap-2">
+                  <Label htmlFor="fullName" className="text-foreground">שם מלא</Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="השם המלא שלך"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="border-border bg-input text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary"
+                  />
+                </div>
                 <div className="grid gap-2">
                   <Label htmlFor="company" className="text-foreground">שם החברה</Label>
                   <Input
