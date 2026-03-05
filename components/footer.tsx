@@ -5,7 +5,7 @@ const footerLinks = {
     title: "מוצר",
     links: [
       { label: "יכולות", href: "#features" },
-      { label: "מחירים", href: "#pricing" },
+      { label: "תמחור", href: "#pricing" },
       { label: "אינטגרציות", href: "#" },
       { label: "API", href: "#" },
     ],
@@ -41,24 +41,24 @@ const footerLinks = {
 
 export default function Footer() {
   return (
-    <footer className="border-t border-border bg-card">
+    <footer className="border-t border-[#1e3a5f] bg-[#0a1929]">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
         <div className="grid gap-8 lg:grid-cols-6">
           {/* Logo and description */}
           <div className="lg:col-span-2">
             <a href="#" className="mb-4 flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-                <Radar className="h-6 w-6 text-primary-foreground" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-primary/50">
+                <Radar className="h-5 w-5 text-primary" />
               </div>
-              <span className="text-lg font-bold text-foreground">Market Radar</span>
+              <span className="text-lg font-semibold text-white">Market Radar</span>
             </a>
-            <p className="mb-6 max-w-xs text-sm leading-relaxed text-muted-foreground">
+            <p className="mb-6 max-w-xs text-sm leading-relaxed text-gray-400">
               מודיעין עסקי אוטומטי לעסקים בישראל. מופעל על ידי בינה מלאכותית מתקדמת.
             </p>
             <div className="flex gap-4">
               <a 
                 href="#" 
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="text-gray-400 transition-colors hover:text-white"
                 aria-label="LinkedIn"
               >
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
@@ -67,7 +67,7 @@ export default function Footer() {
               </a>
               <a 
                 href="#" 
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="text-gray-400 transition-colors hover:text-white"
                 aria-label="Twitter"
               >
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
@@ -76,7 +76,7 @@ export default function Footer() {
               </a>
               <a 
                 href="#" 
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="text-gray-400 transition-colors hover:text-white"
                 aria-label="Facebook"
               >
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
@@ -89,13 +89,13 @@ export default function Footer() {
           {/* Links */}
           {Object.values(footerLinks).map((section, index) => (
             <div key={index}>
-              <h3 className="mb-4 font-semibold text-foreground">{section.title}</h3>
+              <h3 className="mb-4 font-semibold text-white">{section.title}</h3>
               <ul className="space-y-3">
                 {section.links.map((link, linkIndex) => (
                   <li key={linkIndex}>
                     <a
                       href={link.href}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      className="text-sm text-gray-400 transition-colors hover:text-white"
                     >
                       {link.label}
                     </a>
@@ -107,12 +107,12 @@ export default function Footer() {
         </div>
 
         {/* Bottom */}
-        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border pt-8 sm:flex-row">
-          <p className="text-sm text-muted-foreground">
-            © 2026 Market Radar Israel. כל הזכויות שמורות.
+        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-[#1e3a5f] pt-8 sm:flex-row">
+          <p className="text-sm text-gray-400">
+            2026 Market Radar Israel. כל הזכויות שמורות.
           </p>
-          <p className="text-sm text-muted-foreground">
-            נבנה באהבה בתל אביב 🇮🇱
+          <p className="text-sm text-gray-400">
+            נבנה באהבה בתל אביב
           </p>
         </div>
       </div>

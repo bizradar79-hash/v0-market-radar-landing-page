@@ -1,70 +1,72 @@
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Check } from "lucide-react"
 
 const plans = [
   {
-    name: "בסיסי",
-    price: "₪299",
-    period: "לחודש",
-    description: "מתאים לעסקים קטנים שרוצים להתחיל",
+    name: "סטארטר",
+    price: "חינם",
+    period: "",
+    description: "לעסקים שרוצים להתחיל",
     features: [
-      "עד 50 התראות בחודש",
-      "מעקב אחר 3 מתחרים",
-      "דוחות שבועיים",
-      "תמיכה באימייל",
-      "גישה לדשבורד בסיסי",
+      "עד 3 מתחרים",
+      "10 לידים בחודש",
+      "סריקת מכרזים בסיסית",
+      "דוח שבועי",
     ],
-    cta: "התחל ניסיון חינם",
+    cta: "התחל בחינם",
+    ctaVariant: "outline" as const,
     popular: false,
   },
   {
-    name: "עסקי",
-    price: "₪699",
-    period: "לחודש",
-    description: "לעסקים שרוצים יתרון תחרותי אמיתי",
+    name: "מקצועי",
+    price: "299",
+    period: "/חודש",
+    description: "לעסקים שרוצים לגדול",
     features: [
-      "התראות ללא הגבלה",
-      "מעקב אחר 10 מתחרים",
-      "גילוי לידים אוטומטי",
-      "מודיעין מכרזים",
-      "API גישה",
-      "תמיכה בוואטסאפ",
-      "דוחות מותאמים אישית",
+      "עד 15 מתחרים",
+      "לידים ללא הגבלה",
+      "סריקת מכרזים מתקדמת",
+      "ניטור חדשות",
+      "התראות בזמן אמת",
+      "דוחות PDF",
+      "ניתוח AI מתקדם",
     ],
-    cta: "התחל ניסיון חינם",
+    cta: "התחל ניסיון",
+    ctaVariant: "default" as const,
     popular: true,
   },
   {
     name: "ארגוני",
-    price: "₪1,499",
-    period: "לחודש",
-    description: "לארגונים עם צרכים מתקדמים",
+    price: "799",
+    period: "/חודש",
+    description: "לארגונים גדולים",
     features: [
-      "כל התכונות של עסקי",
-      "מעקב ללא הגבלה",
-      "אינטגרציה עם CRM",
-      "מנהל לקוח ייעודי",
-      "דוחות מותאמים אישית",
+      "מתחרים ללא הגבלה",
+      "לידים ללא הגבלה",
+      "סריקה מותאמת אישית",
+      "API גישה",
+      "מנהל חשבון ייעודי",
       "SLA מובטח",
-      "הדרכה צוותית",
-      "גישה מוקדמת לפיצ׳רים",
+      "דוחות מותאמים",
     ],
     cta: "צור קשר",
+    ctaVariant: "outline" as const,
     popular: false,
   },
 ]
 
 export default function Pricing() {
   return (
-    <section id="pricing" className="py-20 sm:py-32">
+    <section id="pricing" className="bg-[#f1f5f9] py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="mx-auto mb-16 max-w-2xl text-center">
-          <h2 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl text-balance">
-            מחירים שקופים, בלי הפתעות
+          <h2 className="mb-4 text-3xl font-bold text-[#1e3a5f] sm:text-4xl text-balance">
+            תמחור פשוט ושקוף
           </h2>
-          <p className="text-lg text-muted-foreground text-pretty">
-            בחר את התוכנית המתאימה לעסק שלך. כל התוכניות כוללות 14 ימי ניסיון חינם.
+          <p className="text-lg text-gray-600 text-pretty">
+            בחרו את התוכנית המתאימה לעסק שלכם
           </p>
         </div>
 
@@ -73,49 +75,53 @@ export default function Pricing() {
           {plans.map((plan, index) => (
             <div
               key={index}
-              className={`relative rounded-2xl border p-8 ${
-                plan.popular
-                  ? "border-primary bg-card shadow-lg shadow-primary/10"
-                  : "border-border bg-card"
+              className={`relative rounded-2xl bg-white p-8 shadow-sm ${
+                plan.popular ? "ring-2 ring-primary" : ""
               }`}
             >
               {plan.popular && (
-                <div className="absolute -top-4 right-8 rounded-full bg-primary px-4 py-1 text-sm font-medium text-primary-foreground">
+                <div className="absolute -top-4 right-1/2 translate-x-1/2 rounded-full bg-[#e85a7e] px-4 py-1.5 text-sm font-medium text-white">
                   הכי פופולרי
                 </div>
               )}
 
-              <div className="mb-6">
-                <h3 className="mb-2 text-xl font-semibold text-foreground">
+              <div className="mb-6 text-center">
+                <h3 className="mb-2 text-2xl font-bold text-[#1e3a5f]">
                   {plan.name}
                 </h3>
-                <p className="text-sm text-muted-foreground">{plan.description}</p>
+                <p className="text-sm text-gray-500">{plan.description}</p>
               </div>
 
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-foreground">{plan.price}</span>
-                <span className="text-muted-foreground">/{plan.period}</span>
+              <div className="mb-6 text-center">
+                {plan.price === "חינם" ? (
+                  <span className="text-4xl font-bold text-[#1e3a5f]">{plan.price}</span>
+                ) : (
+                  <>
+                    <span className="text-4xl font-bold text-[#1e3a5f]">₪{plan.price}</span>
+                    <span className="text-gray-500">{plan.period}</span>
+                  </>
+                )}
               </div>
 
               <ul className="mb-8 space-y-3">
                 {plan.features.map((feature, featureIndex) => (
                   <li key={featureIndex} className="flex items-center gap-3">
-                    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10">
-                      <Check className="h-3 w-3 text-primary" />
-                    </div>
-                    <span className="text-sm text-muted-foreground">{feature}</span>
+                    <Check className="h-5 w-5 text-primary flex-shrink-0" />
+                    <span className="text-sm text-gray-600">{feature}</span>
                   </li>
                 ))}
               </ul>
 
               <Button
-                className={`w-full ${
-                  plan.popular
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                className={`w-full rounded-lg py-5 ${
+                  plan.ctaVariant === "default"
+                    ? "bg-primary text-[#0a1929] font-semibold hover:bg-primary/90"
+                    : "border-2 border-gray-300 bg-white text-[#1e3a5f] hover:bg-gray-50"
                 }`}
+                variant={plan.ctaVariant}
+                asChild
               >
-                {plan.cta}
+                <Link href="/signup">{plan.cta}</Link>
               </Button>
             </div>
           ))}

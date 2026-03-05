@@ -9,39 +9,28 @@ import {
 
 const faqs = [
   {
-    question: "כמה זמן לוקח עד שמתחילים לקבל תובנות?",
-    answer: "לאחר הגדרת החשבון, המערכת מתחילה לסרוק ולנתח מידע מיד. בדרך כלל תתחילו לקבל את ההתראות הראשונות תוך 24-48 שעות. ככל שהמערכת לומדת יותר על העסק שלכם, התובנות הופכות למדויקות יותר.",
+    question: "אילו מקורות נתונים המערכת סורקת?",
+    answer: "המערכת סורקת מגוון רחב של מקורות ישראליים כולל אתרי חדשות, פורטלים עסקיים, מאגרי מכרזים, רשתות חברתיות, ומקורות ממשלתיים. אנו מעדכנים ומרחיבים את המקורות באופן שוטף.",
   },
   {
-    question: "האם אפשר לשלב את המערכת עם כלים אחרים?",
-    answer: "בהחלט! אנחנו מציעים אינטגרציות עם מערכות CRM פופולריות כמו Salesforce, HubSpot ו-Monday.com. בנוסף, יש לנו API פתוח שמאפשר לכם לבנות אינטגרציות מותאמות אישית לצרכים שלכם.",
+    question: "האם הנתונים מעודכנים בזמן אמת?",
+    answer: "כן, המערכת סורקת ומעדכנת נתונים באופן רציף לאורך כל היום. התראות על הזדמנויות חדשות, לידים ושינויים אצל מתחרים נשלחות בזמן אמת.",
   },
   {
-    question: "מה קורה אם אני רוצה לבטל?",
-    answer: "אתם יכולים לבטל את המנוי בכל עת, ללא התחייבות. הגישה תישאר פעילה עד סוף תקופת החיוב הנוכחית. אנחנו גם מציעים אפשרות להקפיא את החשבון למשך עד 3 חודשים אם אתם צריכים הפסקה.",
-  },
-  {
-    question: "איך המערכת שומרת על פרטיות המידע שלי?",
-    answer: "אבטחת המידע שלכם היא בראש סדר העדיפויות שלנו. כל המידע מוצפן בתקן AES-256, השרתים שלנו ממוקמים בישראל ועומדים בתקני SOC 2 ו-ISO 27001. אנחנו לעולם לא משתפים את המידע שלכם עם צד שלישי.",
-  },
-  {
-    question: "האם יש תמיכה בעברית?",
-    answer: "כן! כל הממשק, התמיכה והתיעוד שלנו זמינים בעברית מלאה. צוות התמיכה שלנו זמין בימים א׳-ה׳ בין 9:00-18:00, ולקוחות בתוכנית ארגונית מקבלים תמיכה 24/7.",
+    question: "האם ניתן לבטל בכל זמן?",
+    answer: "בהחלט. אין התחייבות לטווח ארוך וניתן לבטל את המנוי בכל עת. הגישה תישאר פעילה עד סוף תקופת החיוב הנוכחית.",
   },
 ]
 
 export default function FAQ() {
   return (
-    <section id="faq" className="bg-muted/30 py-20 sm:py-32">
+    <section id="faq" className="bg-[#f1f5f9] py-20 sm:py-28">
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="mb-12 text-center">
-          <h2 className="mb-4 text-3xl font-bold text-foreground sm:text-4xl text-balance">
+          <h2 className="mb-4 text-3xl font-bold text-[#1e3a5f] sm:text-4xl text-balance">
             שאלות נפוצות
           </h2>
-          <p className="text-lg text-muted-foreground text-pretty">
-            לא מצאתם תשובה? צרו איתנו קשר ונשמח לעזור.
-          </p>
         </div>
 
         {/* FAQ Accordion */}
@@ -50,12 +39,12 @@ export default function FAQ() {
             <AccordionItem
               key={index}
               value={`item-${index}`}
-              className="rounded-xl border border-border bg-card px-6"
+              className="rounded-xl border-0 bg-white px-6 shadow-sm"
             >
-              <AccordionTrigger className="py-6 text-right text-foreground hover:text-primary hover:no-underline [&>svg]:text-muted-foreground">
+              <AccordionTrigger className="py-5 text-right text-[#1e3a5f] font-medium hover:text-primary hover:no-underline [&>svg]:text-gray-400">
                 {faq.question}
               </AccordionTrigger>
-              <AccordionContent className="pb-6 text-muted-foreground leading-relaxed">
+              <AccordionContent className="pb-5 text-gray-600 leading-relaxed">
                 {faq.answer}
               </AccordionContent>
             </AccordionItem>
