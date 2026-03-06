@@ -38,12 +38,36 @@ export default function AppDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState("")
+  const [autoAnalyzing, setAutoAnalyzing] = useState(false)
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     fetchDashboardData()
   }, [])
+
+  // Auto-run analysis if never analyzed or >24h ago
+  useEffect(() => {
+    if (!data || loading || scanning || autoAnalyzing) return
+    
+    const shouldAutoAnalyze = () => {
+      // If no data at all, don't auto-analyze (user should click button)
+      if (data.opportunitiesCount === 0 && data.leadsCount === 0) return false
+      
+      // If never analyzed, run analysis
+      if (!data.lastAnalyzed) return true
+      
+      // If last analyzed >24h ago, run analysis
+      const lastAnalyzed = new Date(data.lastAnalyzed)
+      const now = new Date()
+      const diffHours = (now.getTime() - lastAnalyzed.getTime()) / (1000 * 60 * 60)
+      return diffHours >= 24
+    }
+
+    if (shouldAutoAnalyze()) {
+      runAutoAnalysis()
+    }
+  }, [data, loading])
 
   async function fetchDashboardData() {
     // Fetch counts from all tables - RLS will filter to current user
@@ -81,6 +105,32 @@ export default function AppDashboardPage() {
       lastAnalyzed: companyData?.last_analyzed || null,
     })
     setLoading(false)
+  }
+
+  async function runAutoAnalysis() {
+    setAutoAnalyzing(true)
+    try {
+      const [analyzeRes, leadsRes] = await Promise.all([
+        fetch("/api/analyze", { method: "POST" }),
+        fetch("/api/generate-leads", { method: "POST" }),
+      ])
+      
+      const analyzeData = await analyzeRes.json()
+      const leadsData = await leadsRes.json()
+      
+      await fetchDashboardData()
+      
+      if (analyzeData.success || leadsData.success) {
+        toast({
+          title: "עדכון אוטומטי הושלם",
+          description: `נמצאו ${analyzeData.count || 0} הזדמנויות ו-${leadsData.count || 0} לידים חדשים`,
+        })
+      }
+    } catch (error) {
+      console.error("Error in auto analysis:", error)
+    } finally {
+      setAutoAnalyzing(false)
+    }
   }
 
   async function runFirstScan() {
@@ -175,6 +225,14 @@ export default function AppDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Auto-analyzing banner */}
+      {autoAnalyzing && (
+        <div className="flex items-center justify-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-4">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          <span className="text-sm font-medium text-primary">מנתח את השוק עבורך...</span>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
