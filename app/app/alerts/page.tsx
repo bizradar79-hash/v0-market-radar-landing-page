@@ -28,54 +28,7 @@ interface Alert {
   created_at: string
 }
 
-// Mock data for when DB is empty
-const mockAlerts: Alert[] = [
-  {
-    id: "1",
-    company_id: "",
-    title: "מתחרה חדש בשוק",
-    message: "זוהתה חברה חדשה שנכנסת לתחום הפעילות שלך - StartupAI Ltd",
-    type: "warning",
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-  {
-    id: "2",
-    company_id: "",
-    title: "הזדמנות מכרז",
-    message: "מכרז חדש רלוונטי פורסם - משרד הבריאות, תקציב 5 מיליון ש\"ח",
-    type: "info",
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
-  },
-  {
-    id: "3",
-    company_id: "",
-    title: "ליד חם",
-    message: "ליד בעל ציון 90+ נכנס למערכת - חדשנות ישראל בע\"מ",
-    type: "success",
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 8).toISOString(),
-  },
-  {
-    id: "4",
-    company_id: "",
-    title: "שינוי מחירים אצל מתחרה",
-    message: "DataPro Solutions הורידו מחירים ב-15% בחבילה העסקית",
-    type: "warning",
-    is_read: true,
-    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-  {
-    id: "5",
-    company_id: "",
-    title: "טרנד עולה",
-    message: "עלייה משמעותית בחיפושים לבינה מלאכותית גנרטיבית בישראל",
-    type: "info",
-    is_read: false,
-    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-  },
-]
+
 
 function getAlertIcon(type: string) {
   switch (type) {
