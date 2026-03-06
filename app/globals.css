@@ -3,41 +3,41 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Market Radar Israel AI - Dark Navy Theme */
+/* Market Radar Israel AI - Clean Light Theme */
 :root {
-  --background: #050914;
-  --foreground: #f0f4f8;
-  --card: #0a1628;
-  --card-foreground: #f0f4f8;
-  --popover: #0a1628;
-  --popover-foreground: #f0f4f8;
-  --primary: #00d4aa;
-  --primary-foreground: #050914;
-  --secondary: #1a2744;
-  --secondary-foreground: #f0f4f8;
-  --muted: #0d1a2d;
-  --muted-foreground: #8b9dc3;
-  --accent: #00d4aa;
-  --accent-foreground: #050914;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #0d9488;
+  --accent-foreground: #ffffff;
   --destructive: #ef4444;
   --destructive-foreground: #fef2f2;
-  --border: #1e3a5f;
-  --input: #1a2744;
-  --ring: #00d4aa;
-  --chart-1: #00d4aa;
+  --border: #e2e8f0;
+  --input: #f1f5f9;
+  --ring: #0d9488;
+  --chart-1: #0d9488;
   --chart-2: #3b82f6;
   --chart-3: #8b5cf6;
   --chart-4: #f59e0b;
   --chart-5: #ef4444;
   --radius: 0.75rem;
-  --sidebar: #0a1628;
-  --sidebar-foreground: #f0f4f8;
-  --sidebar-primary: #00d4aa;
-  --sidebar-primary-foreground: #050914;
-  --sidebar-accent: #1a2744;
-  --sidebar-accent-foreground: #f0f4f8;
-  --sidebar-border: #1e3a5f;
-  --sidebar-ring: #00d4aa;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #0d9488;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f5f9;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #0d9488;
 }
 
 @theme inline {
@@ -87,5 +87,19 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Print styles for PDF export */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
   }
 }

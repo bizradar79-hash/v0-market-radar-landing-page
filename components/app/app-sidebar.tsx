@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -18,6 +18,7 @@ import {
   Radar,
   X,
   LogOut,
+  Calendar,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -33,22 +34,79 @@ interface UserData {
   initials: string
 }
 
-const navItems = [
+interface NavCounts {
+  opportunities: number
+  leads: number
+  tenders: number
+  alerts: number
+  competitors: number
+  trends: number
+  news: number
+  conferences: number
+}
+
+const getNavItems = (counts: NavCounts) => [
   { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
-  { href: "/app/opportunities", label: "הזדמנויות", icon: Lightbulb, badge: 12 },
-  { href: "/app/competitors", label: "מתחרים", icon: Target },
-  { href: "/app/leads", label: "לידים", icon: Users, badge: 8 },
-  { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: 3 },
-  { href: "/app/trends", label: "טרנדים", icon: TrendingUp },
-  { href: "/app/news", label: "חדשות", icon: Newspaper },
+  { href: "/app/opportunities", label: "הזדמנויות", icon: Lightbulb, badge: counts.opportunities || undefined },
+  { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
+  { href: "/app/leads", label: "לידים", icon: Users, badge: counts.leads || undefined },
+  { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
+  { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
+  { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
+  { href: "/app/conferences", label: "כנסים", icon: Calendar, badge: counts.conferences || undefined },
   { href: "/app/reports", label: "דוחות", icon: FileBarChart },
-  { href: "/app/alerts", label: "התראות", icon: Bell, badge: 5 },
+  { href: "/app/alerts", label: "התראות", icon: Bell, badge: counts.alerts || undefined },
   { href: "/app/settings", label: "הגדרות", icon: Settings },
 ]
 
 export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const pathname = usePathname()
   const [user, setUser] = useState<UserData | null>(null)
+  const [counts, setCounts] = useState<NavCounts>({
+    opportunities: 0,
+    leads: 0,
+    tenders: 0,
+    alerts: 0,
+    competitors: 0,
+    trends: 0,
+    news: 0,
+    conferences: 0,
+  })
+
+  const fetchCounts = useCallback(async () => {
+    const supabase = createClient()
+    
+    const [
+      { count: opportunitiesCount },
+      { count: leadsCount },
+      { count: tendersCount },
+      { count: alertsCount },
+      { count: competitorsCount },
+      { count: trendsCount },
+      { count: newsCount },
+      { count: conferencesCount },
+    ] = await Promise.all([
+      supabase.from("opportunities").select("*", { count: "exact", head: true }),
+      supabase.from("leads").select("*", { count: "exact", head: true }),
+      supabase.from("tenders").select("*", { count: "exact", head: true }),
+      supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
+      supabase.from("competitors").select("*", { count: "exact", head: true }),
+      supabase.from("trends").select("*", { count: "exact", head: true }),
+      supabase.from("news").select("*", { count: "exact", head: true }),
+      supabase.from("conferences").select("*", { count: "exact", head: true }),
+    ])
+
+    setCounts({
+      opportunities: opportunitiesCount || 0,
+      leads: leadsCount || 0,
+      tenders: tendersCount || 0,
+      alerts: alertsCount || 0,
+      competitors: competitorsCount || 0,
+      trends: trendsCount || 0,
+      news: newsCount || 0,
+      conferences: conferencesCount || 0,
+    })
+  }, [])
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -56,13 +114,11 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       
       if (authUser) {
-        // Get name from user metadata or email
         const fullName = authUser.user_metadata?.full_name || 
                          authUser.user_metadata?.name ||
                          authUser.email?.split('@')[0] || 
                          'משתמש'
         
-        // Create initials from name or email
         const nameParts = fullName.split(' ')
         let initials = ''
         if (nameParts.length >= 2) {
@@ -80,7 +136,17 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     }
 
     fetchUser()
-  }, [])
+    fetchCounts()
+
+    // Refresh counts every 30 seconds
+    const interval = setInterval(fetchCounts, 30000)
+    return () => clearInterval(interval)
+  }, [fetchCounts])
+
+  // Expose refresh function globally for other components to trigger
+  useEffect(() => {
+    (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts = fetchCounts
+  }, [fetchCounts])
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -88,10 +154,12 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     window.location.href = '/login'
   }
 
+  const navItems = getNavItems(counts)
+
   return (
     <aside
       className={cn(
-        "fixed right-0 top-0 z-50 h-full w-64 border-l border-border bg-[#0a1628] transition-transform duration-300 lg:static lg:translate-x-0",
+        "fixed right-0 top-0 z-50 h-full w-64 border-l border-border bg-card transition-transform duration-300 lg:static lg:translate-x-0",
         isOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0"
       )}
     >
@@ -118,7 +186,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = pathname === item.href
             return (
@@ -137,7 +205,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                   <item.icon className="h-5 w-5" />
                   <span>{item.label}</span>
                 </div>
-                {item.badge && (
+                {item.badge !== undefined && item.badge > 0 && (
                   <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-semibold text-primary">
                     {item.badge}
                   </span>
