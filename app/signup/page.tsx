@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Radar, Loader2 } from 'lucide-react'
+import { Radar, Loader2, Mail, CheckCircle2 } from 'lucide-react'
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState('')
@@ -23,6 +23,7 @@ export default function SignupPage() {
   const [companyName, setCompanyName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
   const router = useRouter()
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -36,9 +37,7 @@ export default function SignupPage() {
         email,
         password,
         options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-            `${window.location.origin}/onboarding`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: fullName,
             company_name: companyName,
@@ -46,7 +45,8 @@ export default function SignupPage() {
         },
       })
       if (error) throw error
-      router.push('/onboarding')
+      // Show success message instead of redirecting
+      setIsSuccess(true)
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'אירעה שגיאה, נסה שוב')
     } finally {
@@ -71,7 +71,42 @@ export default function SignupPage() {
           <span className="text-xl font-bold text-foreground">Market Radar</span>
         </div>
 
-        <Card className="border-border bg-card/80 backdrop-blur-sm">
+        {isSuccess ? (
+          <Card className="border-border bg-card/80 backdrop-blur-sm">
+            <CardContent className="pt-8 pb-8">
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                  <Mail className="h-8 w-8 text-primary" />
+                </div>
+                <div className="flex items-center gap-2 text-primary">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="font-medium">החשבון נוצר בהצלחה!</span>
+                </div>
+                <h2 className="text-xl font-bold text-foreground">נשלח אליך מייל אימות</h2>
+                <p className="text-muted-foreground max-w-sm">
+                  אנא בדוק את תיבת הדואר שלך ולחץ על הקישור לאישור החשבון.
+                  <br />
+                  <span className="text-sm">אם לא קיבלת את המייל, בדוק את תיקיית הספאם.</span>
+                </p>
+                <div className="mt-4 flex flex-col gap-3 w-full">
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => window.open('https://mail.google.com', '_blank')}
+                  >
+                    פתח את Gmail
+                  </Button>
+                  <Link href="/login" className="w-full">
+                    <Button variant="ghost" className="w-full text-muted-foreground">
+                      חזור לדף ההתחברות
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-border bg-card/80 backdrop-blur-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold text-foreground">צור חשבון חדש</CardTitle>
             <CardDescription className="text-muted-foreground">
@@ -164,13 +199,16 @@ export default function SignupPage() {
             </form>
           </CardContent>
         </Card>
+        )}
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          בלחיצה על &quot;צור חשבון&quot; אתה מסכים ל
-          <Link href="#" className="text-primary hover:underline">תנאי השימוש</Link>
-          {' '}ול
-          <Link href="#" className="text-primary hover:underline">מדיניות הפרטיות</Link>
-        </p>
+        {!isSuccess && (
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            בלחיצה על &quot;צור חשבון&quot; אתה מסכים ל
+            <Link href="#" className="text-primary hover:underline">תנאי השימוש</Link>
+            {' '}ול
+            <Link href="#" className="text-primary hover:underline">מדיניות הפרטיות</Link>
+          </p>
+        )}
       </div>
     </div>
   )
