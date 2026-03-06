@@ -110,40 +110,41 @@ export default function AppDashboardPage() {
 
   async function runAutoAnalysis() {
     setAutoAnalyzing(true)
-    let totalOpportunities = 0, totalLeads = 0, totalTenders = 0
+    const results = { opportunities: 0, competitors: 0, leads: 0, tenders: 0, trends: 0, news: 0, conferences: 0 }
     
+    const steps = [
+      { api: '/api/analyze', label: 'מנתח הזדמנויות...', key: 'opportunities' },
+      { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
+      { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
+      { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
+      { api: '/api/generate-trends', label: 'מנתח טרנדים...', key: 'trends' },
+      { api: '/api/generate-news', label: 'אוסף חדשות...', key: 'news' },
+      { api: '/api/generate-conferences', label: 'מחפש כנסים...', key: 'conferences' },
+    ]
+
     try {
-      // Step 1: Analyze opportunities
-      setScanProgress("מחפש הזדמנויות עסקיות...")
-      const analyzeRes = await fetch("/api/analyze", { method: "POST" })
-      const analyzeData = await analyzeRes.json()
-      totalOpportunities = analyzeData.count || 0
-      
-      // Step 2: Generate leads
-      setScanProgress("מאתר לידים פוטנציאליים...")
-      const leadsRes = await fetch("/api/generate-leads", { method: "POST" })
-      const leadsData = await leadsRes.json()
-      totalLeads = leadsData.count || 0
-      
-      // Step 3: Find tenders
-      setScanProgress("סורק מכרזים רלוונטיים...")
-      const tendersRes = await fetch("/api/generate-tenders", { method: "POST" })
-      const tendersData = await tendersRes.json()
-      totalTenders = tendersData.count || 0
-      
-      // Step 4: Get news, trends, conferences in parallel (less critical)
-      setScanProgress("אוסף חדשות וטרנדים...")
-      await Promise.all([
-        fetch("/api/generate-news", { method: "POST" }),
-        fetch("/api/generate-trends", { method: "POST" }),
-        fetch("/api/generate-conferences", { method: "POST" }),
-      ])
-      
+      for (const step of steps) {
+        setScanProgress(step.label)
+        try {
+          const res = await fetch(step.api, { method: 'POST' })
+          const data = await res.json()
+          results[step.key as keyof typeof results] = data.count || 0
+        } catch (e) {
+          console.error(`Error in ${step.api}:`, e)
+        }
+      }
+
+      setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
+      
+      // Refresh sidebar counts
+      if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
+        (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
+      }
       
       toast({
         title: "הניתוח הושלם בהצלחה!",
-        description: `נמצאו ${totalOpportunities} הזדמנויות, ${totalLeads} לידים ו-${totalTenders} מכרזים`,
+        description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.tenders} מכרזים`,
       })
     } catch (error) {
       console.error("Error in auto analysis:", error)
@@ -160,42 +161,39 @@ export default function AppDashboardPage() {
 
   async function runFirstScan() {
     setScanning(true)
+    const results = { opportunities: 0, competitors: 0, leads: 0, tenders: 0 }
+    
+    const steps = [
+      { api: '/api/analyze', label: 'מנתח הזדמנויות...', key: 'opportunities' },
+      { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
+      { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
+      { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
+    ]
+
     try {
-      setScanProgress("סורק את השוק...")
-      await new Promise(r => setTimeout(r, 500))
-      
-      setScanProgress("מנתח נתונים...")
-      const [analyzeRes, leadsRes, competitorsRes] = await Promise.all([
-        fetch("/api/analyze", { method: "POST" }),
-        fetch("/api/generate-leads", { method: "POST" }),
-        fetch("/api/find-competitors", { method: "POST" }),
-      ])
-      
-      setScanProgress("יוצר המלצות...")
-      const analyzeData = await analyzeRes.json()
-      const leadsData = await leadsRes.json()
-      const competitorsData = await competitorsRes.json()
-      
+      for (const step of steps) {
+        setScanProgress(step.label)
+        try {
+          const res = await fetch(step.api, { method: 'POST' })
+          const data = await res.json()
+          results[step.key as keyof typeof results] = data.count || 0
+        } catch (e) {
+          console.error(`Error in ${step.api}:`, e)
+        }
+      }
+
+      setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
       
-      if (analyzeData.success || leadsData.success || competitorsData.success) {
-        toast({
-          title: "הסריקה הושלמה בהצלחה!",
-          description: `נמצאו ${analyzeData.count || 0} הזדמנויות, ${leadsData.count || 0} לידים ו-${competitorsData.count || 0} מתחרים`,
-        })
-      } else if (analyzeData.throttled) {
-        toast({
-          title: "יש להמתין",
-          description: analyzeData.error,
-          variant: "destructive",
-        })
-      } else {
-        toast({
-          title: "לא נמצאו תוצאות",
-          description: "נסה לעדכן את פרטי החברה בהגדרות",
-          variant: "destructive",
-        })
+      // Refresh sidebar counts
+      if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
+        (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
       }
+      
+      toast({
+        title: "הסריקה הושלמה בהצלחה!",
+        description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.competitors} מתחרים`,
+      })
     } catch (error) {
       console.error("Error running scan:", error)
       toast({
