@@ -27,49 +27,7 @@ interface Trend {
   created_at: string
 }
 
-// Mock data for when DB is empty
-const mockTrends: Trend[] = [
-  {
-    id: "1",
-    company_id: "",
-    name: "בינה מלאכותית גנרטיבית",
-    category: "טכנולוגיה",
-    score: 95,
-    direction: "up",
-    description: "עלייה חדה באימוץ כלי AI גנרטיבי בעסקים ישראליים",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    company_id: "",
-    name: "אוטומציה עסקית",
-    category: "תפעול",
-    score: 82,
-    direction: "up",
-    description: "גידול בביקוש לפתרונות אוטומציה של תהליכים",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "3",
-    company_id: "",
-    name: "סייבר סקיוריטי",
-    category: "אבטחה",
-    score: 78,
-    direction: "stable",
-    description: "ביקוש יציב לפתרונות אבטחת מידע",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "4",
-    company_id: "",
-    name: "פינטק",
-    category: "פיננסים",
-    score: 71,
-    direction: "down",
-    description: "ירידה קלה בהשקעות בסטארטאפי פינטק",
-    created_at: new Date().toISOString(),
-  },
-]
+
 
 function getTrendIcon(direction: string) {
   switch (direction) {
@@ -108,11 +66,8 @@ export default function TrendsPage() {
       .select("*")
       .order("score", { ascending: false })
 
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       setTrends(data)
-    } else {
-      // Use mock data if no data in DB
-      setTrends(mockTrends)
     }
     setLoading(false)
   }

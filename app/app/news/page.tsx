@@ -20,57 +20,7 @@ interface NewsItem {
   created_at: string
 }
 
-// Mock data for when DB is empty
-const mockNews: NewsItem[] = [
-  {
-    id: "1",
-    company_id: "",
-    title: "סטארטאפ ישראלי גייס 50 מיליון דולר בסבב B",
-    summary: "חברת טכנולוגיה ישראלית בתחום ה-AI השלימה סבב גיוס משמעותי בהובלת קרן אמריקאית",
-    source: "כלכליסט",
-    url: "#",
-    category: "גיוסים",
-    sentiment: "positive",
-    published_at: new Date(Date.now() - 3600000).toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    company_id: "",
-    title: "רגולציה חדשה בתחום הפינטק נכנסת לתוקף",
-    summary: "בנק ישראל פרסם הנחיות חדשות המחייבות חברות פינטק לעמוד בתקנים מחמירים",
-    source: "גלובס",
-    url: "#",
-    category: "רגולציה",
-    sentiment: "neutral",
-    published_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "3",
-    company_id: "",
-    title: "שיתוף פעולה בין חברות טכנולוגיה מובילות",
-    summary: "שתי חברות ישראליות מובילות הכריזו על שותפות אסטרטגית לפיתוח פתרונות AI",
-    source: "TheMarker",
-    url: "#",
-    category: "שותפויות",
-    sentiment: "positive",
-    published_at: new Date(Date.now() - 3600000 * 6).toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "4",
-    company_id: "",
-    title: "דוח: ירידה בהשקעות הון סיכון ברבעון האחרון",
-    summary: "על פי נתוני IVC, חלה ירידה של 15% בהשקעות בסטארטאפים ישראליים",
-    source: "Geektime",
-    url: "#",
-    category: "השקעות",
-    sentiment: "negative",
-    published_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-    created_at: new Date().toISOString(),
-  },
-]
+
 
 function getSentimentBadge(sentiment: string) {
   switch (sentiment) {
@@ -139,11 +89,8 @@ export default function NewsPage() {
       .select("*")
       .order("published_at", { ascending: false })
 
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       setNews(data)
-    } else {
-      // Use mock data if no data in DB
-      setNews(mockNews)
     }
     setLoading(false)
   }

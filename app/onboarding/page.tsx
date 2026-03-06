@@ -64,6 +64,7 @@ export default function OnboardingPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isFindingCompetitors, setIsFindingCompetitors] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   
   // Step 1 - Company Details
   const [companyName, setCompanyName] = useState("")
@@ -159,17 +160,22 @@ export default function OnboardingPage() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true)
+    setError(null)
+    
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
       
-      if (!user) {
+      console.log("[v0] Onboarding submit - user:", user?.id, "error:", userError)
+      
+      if (userError || !user) {
+        console.log("[v0] No authenticated user, redirecting to login")
         router.push("/login")
         return
       }
 
       // Step 1: Save company profile
-      const { error: companyError } = await supabase.from("companies").upsert({
+      const companyData = {
         id: user.id,
         name: companyName,
         website,
@@ -177,15 +183,24 @@ export default function OnboardingPage() {
         city,
         size: companySize,
         description,
-        competitors,
+        competitors: competitors.map(c => ({ name: c.name, website: c.website })),
         keywords: [...keywords, ...industriesTags, ...productsTags],
         modules: Object.entries(selectedModules)
           .filter(([, enabled]) => enabled)
           .map(([id]) => id),
         onboarding_completed: true,
-      })
+      }
+      
+      console.log("[v0] Saving company data:", companyData)
+      
+      const { data: companyResult, error: companyError } = await supabase.from("companies").upsert(companyData).select()
+      
+      console.log("[v0] Company save result:", companyResult, "error:", companyError)
 
-      if (companyError) throw companyError
+      if (companyError) {
+        setError(`שגיאה בשמירת נתוני החברה: ${companyError.message}`)
+        throw companyError
+      }
 
       // Step 2: Insert competitors into competitors table
       if (competitors.length > 0) {
@@ -211,7 +226,7 @@ export default function OnboardingPage() {
           confidence_score: 92,
           priority: "גבוהה",
           type: industry,
-          actions: ["לפנות ללקוחות פוטנציאליים", "להכין הצעת מחיר", "לתאם פגישת הדגמה"],
+          actions: ["לפנות ללקוח��ת פוטנציאליים", "להכין הצעת מחיר", "לתאם פגישת הדגמה"],
           sources: ["ניתוח שוק"]
         },
         {
@@ -316,9 +331,15 @@ export default function OnboardingPage() {
       ]
       await supabase.from("alerts").insert(sampleAlerts)
 
+      console.log("[v0] Onboarding complete, redirecting to dashboard")
       router.push("/app/dashboard")
-    } catch (error) {
-      console.error("Error saving onboarding data:", error)
+    } catch (error: unknown) {
+      console.error("[v0] Error saving onboarding data:", error)
+      if (error instanceof Error) {
+        setError(`שגיאה בשמירת הנתונים: ${error.message}`)
+      } else {
+        setError("שגיאה בלתי צפויה, נסה שוב")
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -350,6 +371,11 @@ export default function OnboardingPage() {
           </div>
           <h1 className="text-2xl font-bold text-foreground">הגדרת החשבון</h1>
           <p className="mt-2 text-muted-foreground">מלא את הפרטים כדי להתאים את המערכת לצרכים שלך</p>
+          {error && (
+            <div className="mt-4 rounded-lg bg-destructive/10 p-4 text-destructive text-sm">
+              {error}
+            </div>
+          )}
         </div>
 
         {/* Progress Bar */}
