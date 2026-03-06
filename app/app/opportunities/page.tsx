@@ -43,6 +43,7 @@ type SortOption = "score" | "date" | "priority"
 export default function OpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
+  const [analyzing, setAnalyzing] = useState(false)
   const [typeFilter, setTypeFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [minScore, setMinScore] = useState<number>(0)
@@ -63,6 +64,21 @@ export default function OpportunitiesPage() {
       setOpportunities(data)
     }
     setLoading(false)
+  }
+
+  async function analyzeWithAI() {
+    setAnalyzing(true)
+    try {
+      const response = await fetch("/api/analyze", { method: "POST" })
+      const data = await response.json()
+      if (data.success) {
+        await fetchOpportunities()
+      }
+    } catch (error) {
+      console.error("Error analyzing:", error)
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
   const filteredOpportunities = opportunities
@@ -144,6 +160,23 @@ export default function OpportunitiesPage() {
             {filteredOpportunities.length} הזדמנויות נמצאו
           </p>
         </div>
+        <Button 
+          onClick={analyzeWithAI} 
+          disabled={analyzing}
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          {analyzing ? (
+            <>
+              <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+              מנתח את השוק הישראלי...
+            </>
+          ) : (
+            <>
+              <Lightbulb className="ml-2 h-4 w-4" />
+              נתח הזדמנויות עם AI
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Filters */}

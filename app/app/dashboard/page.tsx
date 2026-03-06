@@ -33,6 +33,8 @@ interface DashboardData {
 export default function AppDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState("")
   const supabase = createClient()
 
   useEffect(() => {
@@ -72,6 +74,31 @@ export default function AppDashboardPage() {
       upcomingTenders: upcomingTenders || [],
     })
     setLoading(false)
+  }
+
+  async function runFirstScan() {
+    setScanning(true)
+    try {
+      setScanProgress("סורק את השוק...")
+      await new Promise(r => setTimeout(r, 500))
+      
+      setScanProgress("מנתח נתונים...")
+      const [analyzeRes, leadsRes] = await Promise.all([
+        fetch("/api/analyze", { method: "POST" }),
+        fetch("/api/generate-leads", { method: "POST" }),
+      ])
+      
+      setScanProgress("יוצר המלצות...")
+      await analyzeRes.json()
+      await leadsRes.json()
+      
+      await fetchDashboardData()
+    } catch (error) {
+      console.error("Error running scan:", error)
+    } finally {
+      setScanning(false)
+      setScanProgress("")
+    }
   }
 
   const kpiCards = [
@@ -151,16 +178,23 @@ export default function AppDashboardPage() {
             </div>
             <h3 className="text-lg font-semibold text-foreground mb-2">ברוכים הבאים ל-Market Radar!</h3>
             <p className="text-muted-foreground max-w-md mb-4">
-              המערכת שלך מוכנה לפעולה. כדי להתחיל לקבל מודיעין עסקי, 
-              ודא שהגדרות החברה שלך מעודכנות בדף ההגדרות.
+              המערכת שלך מוכנה לפעולה. הפעל סריקה ראשונה כדי להתחיל לקבל מודיעין עסקי.
             </p>
-            <Link 
-              href="/app/settings" 
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              עבור להגדרות
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+            {scanning ? (
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">{scanProgress}</p>
+              </div>
+            ) : (
+              <Button
+                onClick={runFirstScan}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+                size="lg"
+              >
+                <BarChart3 className="ml-2 h-5 w-5" />
+                הפעל סריקה ראשונה
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (

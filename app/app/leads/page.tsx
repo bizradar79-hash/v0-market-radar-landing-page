@@ -55,6 +55,7 @@ interface Lead {
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [discovering, setDiscovering] = useState(false)
   const [industryFilter, setIndustryFilter] = useState<string>("all")
   const [cityFilter, setCityFilter] = useState<string>("all")
   const supabase = createClient()
@@ -73,6 +74,21 @@ export default function LeadsPage() {
       setLeads(data)
     }
     setLoading(false)
+  }
+
+  async function discoverWithAI() {
+    setDiscovering(true)
+    try {
+      const response = await fetch("/api/generate-leads", { method: "POST" })
+      const data = await response.json()
+      if (data.success) {
+        await fetchLeads()
+      }
+    } catch (error) {
+      console.error("Error discovering leads:", error)
+    } finally {
+      setDiscovering(false)
+    }
   }
 
   const getScoreColor = (score: number) => {
@@ -130,10 +146,25 @@ export default function LeadsPage() {
             {filteredLeads.length} לידים פוטנציאליים
           </p>
         </div>
-        <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-          <Users className="ml-2 h-4 w-4" />
-          ייצא לידים
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={discoverWithAI} 
+            disabled={discovering}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {discovering ? (
+              <>
+                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                מחפש לידים פוטנציאליים...
+              </>
+            ) : (
+              <>
+                <Users className="ml-2 h-4 w-4" />
+                גלה לידים חדשים עם AI
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

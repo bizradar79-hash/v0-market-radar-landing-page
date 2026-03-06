@@ -78,6 +78,8 @@ export default function OnboardingPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [newCompetitorName, setNewCompetitorName] = useState("")
   const [newCompetitorWebsite, setNewCompetitorWebsite] = useState("")
+  const [aiCompetitors, setAiCompetitors] = useState<Array<{ name: string; website: string; reason: string; similarity: number; selected: boolean }>>([])
+  const [competitorError, setCompetitorError] = useState<string | null>(null)
   
   // Step 3 - Keywords
   const [keywords, setKeywords] = useState<string[]>([])
@@ -111,21 +113,40 @@ export default function OnboardingPage() {
 
   const findCompetitorsAuto = async () => {
     setIsFindingCompetitors(true)
+    setCompetitorError(null)
+    setAiCompetitors([])
     try {
       const response = await fetch("/api/find-competitors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName, industry, website }),
+        body: JSON.stringify({ industry, description, city, website }),
       })
       const data = await response.json()
-      if (data.competitors) {
-        setCompetitors([...competitors, ...data.competitors])
+      if (data.success && data.competitors) {
+        // Show AI results as selectable cards
+        setAiCompetitors(data.competitors.map((c: { name: string; website: string; reason: string; similarity: number }) => ({
+          ...c,
+          selected: true, // default selected
+        })))
+      } else {
+        setCompetitorError(data.error || "לא הצלחנו למצוא מתחרים, נסה שנית")
       }
     } catch (error) {
       console.error("Error finding competitors:", error)
+      setCompetitorError("לא הצלחנו למצוא מתחרים, נסה שנית")
     } finally {
       setIsFindingCompetitors(false)
     }
+  }
+
+  const addSelectedCompetitors = () => {
+    const selected = aiCompetitors.filter(c => c.selected)
+    setCompetitors([...competitors, ...selected.map(c => ({ name: c.name, website: c.website }))])
+    setAiCompetitors([])
+  }
+
+  const toggleAiCompetitor = (index: number) => {
+    setAiCompetitors(prev => prev.map((c, i) => i === index ? { ...c, selected: !c.selected } : c))
   }
 
   const addTag = (type: "keyword" | "industry" | "product") => {
@@ -534,8 +555,68 @@ export default function OnboardingPage() {
                 ) : (
                   <Sparkles className="ml-2 h-4 w-4" />
                 )}
-                מצא מתחרים אוטומטית
+                {isFindingCompetitors ? "מחפש מתחרים..." : "מצא מתחרים אוטומטית"}
               </Button>
+
+              {/* Error message */}
+              {competitorError && (
+                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                  {competitorError}
+                </div>
+              )}
+
+              {/* AI Competitor Results */}
+              {aiCompetitors.length > 0 && (
+                <div className="space-y-3">
+                  <Label>תוצאות AI - בחר מתחרים להוספה</Label>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {aiCompetitors.map((competitor, index) => (
+                      <div
+                        key={index}
+                        onClick={() => toggleAiCompetitor(index)}
+                        className={`cursor-pointer rounded-lg border p-4 transition-all ${
+                          competitor.selected
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-background opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-foreground">{competitor.name}</span>
+                              <Badge variant="outline" className="bg-primary/10 text-primary text-xs">
+                                {competitor.similarity}% דמיון
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
+                              {competitor.website}
+                            </p>
+                            <p className="mt-2 text-sm text-muted-foreground">
+                              {competitor.reason}
+                            </p>
+                          </div>
+                          <div className={`flex h-5 w-5 items-center justify-center rounded border ${
+                            competitor.selected 
+                              ? "border-primary bg-primary text-primary-foreground" 
+                              : "border-muted-foreground"
+                          }`}>
+                            {competitor.selected && <Check className="h-3 w-3" />}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={addSelectedCompetitors}
+                    disabled={!aiCompetitors.some(c => c.selected)}
+                    className="w-full"
+                  >
+                    <Plus className="ml-2 h-4 w-4" />
+                    הוסף {aiCompetitors.filter(c => c.selected).length} מתחרים נבחרים
+                  </Button>
+                </div>
+              )}
 
               {/* Add competitor form */}
               <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4 sm:flex-row">

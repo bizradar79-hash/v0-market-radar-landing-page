@@ -1,24 +1,16 @@
-import { generateText, Output } from 'ai'
-import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextResponse } from 'next/server'
 
-const competitorSchema = z.object({
-  competitors: z.array(
-    z.object({
-      name: z.string().describe('שם המתחרה'),
-      website: z.string().describe('כתובת האתר'),
-      similarity: z.number().min(1).max(100).describe('אחוז דמיון ל-1 עד 100'),
-      description: z.string().describe('תיאור קצר של המתחרה בעברית'),
-      strengths: z.array(z.string()).describe('נקודות חוזק'),
-      threatLevel: z.enum(['גבוה', 'בינוני', 'נמוך']).describe('רמת האיום'),
-    })
-  ).describe('רשימת 5 מתחרים'),
-})
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+
+function stripMarkdownFences(text: string): string {
+  return text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+}
 
 export async function POST(request: Request) {
   try {
-    const { website, industry, companyName } = await request.json()
+    const { industry, description, city, website } = await request.json()
 
     if (!industry) {
       return NextResponse.json(
@@ -27,69 +19,48 @@ export async function POST(request: Request) {
       )
     }
 
-    const { output } = await generateText({
-      model: 'anthropic/claude-sonnet-4-20250514',
-      output: Output.object({
-        schema: competitorSchema,
-      }),
-      messages: [
-        {
-          role: 'system',
-          content: `אתה מומחה לניתוח תחרותי בשוק הישראלי.
-תפקידך לזהות ולנתח מתחרים פוטנציאליים לעסקים ישראליים.
-התמקד במתחרים ישראליים ובינלאומיים הפועלים בישראל.
-כל התשובות שלך חייבות להיות בעברית מלאה.`,
-        },
-        {
-          role: 'user',
-          content: `זהה 5 מתחרים עבור:
-
-${companyName ? `שם החברה: ${companyName}` : ''}
-${website ? `אתר: ${website}` : ''}
+    const prompt = `אתה מומחה לשוק הישראלי.
+מצא 5 מתחרים ישראליים אמיתיים ופוטנציאליים לחברה:
 תעשייה: ${industry}
+תיאור: ${description || 'לא צוין'}
+עיר: ${city || 'לא צוין'}
+${website ? `אתר: ${website}` : ''}
 
-עבור כל מתחרה ספק:
-- שם החברה
-- כתובת אתר (השתמש בפורמט תקין)
-- אחוז דמיון (1-100)
-- תיאור קצר בעברית
-- נקודות חוזק
-- רמת איום (גבוה/בינוני/נמוך)
+החזר JSON בלבד:
+{
+  "competitors": [
+    {
+      "name": "שם החברה",
+      "website": "website.co.il",
+      "reason": "למה הם מתחרים",
+      "similarity": 85
+    }
+  ]
+}`
 
-התמקד במתחרים אמיתיים ורלוונטיים בשוק הישראלי.`,
-        },
-      ],
-    })
-
-    if (!output) {
+    const result = await model.generateContent(prompt)
+    const responseText = result.response.text()
+    const cleanedJson = stripMarkdownFences(responseText)
+    
+    let parsed
+    try {
+      parsed = JSON.parse(cleanedJson)
+    } catch {
       return NextResponse.json(
-        { success: false, error: 'לא התקבלה תשובה מהמודל' },
+        { success: false, error: 'שגיאה בפענוח התשובה מהמודל' },
         { status: 500 }
       )
     }
 
-    // Save competitors to Supabase
-    const supabase = await createClient()
-    for (const competitor of output.competitors) {
-      await supabase.from('competitors').insert({
-        name: competitor.name,
-        activity_type: 'זיהוי אוטומטי',
-        change_description: competitor.description,
-        impact: competitor.threatLevel,
-        threat_score: competitor.similarity,
-        services: competitor.strengths.join(', '),
-      })
-    }
-
+    // Return competitors without saving - user will select which ones to add
     return NextResponse.json({
       success: true,
-      companyName,
-      competitors: output.competitors,
+      competitors: parsed.competitors,
     })
   } catch (error) {
     console.error('Error finding competitors:', error)
     return NextResponse.json(
-      { success: false, error: 'שגיאה באיתור מתחרים' },
+      { success: false, error: 'לא הצלחנו למצוא מתחרים, נסה שנית' },
       { status: 500 }
     )
   }
