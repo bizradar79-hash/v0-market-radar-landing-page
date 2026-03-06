@@ -110,39 +110,51 @@ export default function AppDashboardPage() {
 
   async function runAutoAnalysis() {
     setAutoAnalyzing(true)
+    let totalOpportunities = 0, totalLeads = 0, totalTenders = 0
+    
     try {
-      // Run ALL APIs in parallel for comprehensive update
-      const [analyzeRes, leadsRes, tendersRes, newsRes, conferencesRes, trendsRes] = await Promise.all([
-        fetch("/api/analyze", { method: "POST" }),
-        fetch("/api/generate-leads", { method: "POST" }),
-        fetch("/api/generate-tenders", { method: "POST" }),
-        fetch("/api/generate-news", { method: "POST" }),
-        fetch("/api/generate-conferences", { method: "POST" }),
-        fetch("/api/generate-trends", { method: "POST" }),
-      ])
+      // Step 1: Analyze opportunities
+      setScanProgress("מחפש הזדמנויות עסקיות...")
+      const analyzeRes = await fetch("/api/analyze", { method: "POST" })
+      const analyzeData = await analyzeRes.json()
+      totalOpportunities = analyzeData.count || 0
       
-      const [analyzeData, leadsData, tendersData] = await Promise.all([
-        analyzeRes.json(),
-        leadsRes.json(),
-        tendersRes.json(),
+      // Step 2: Generate leads
+      setScanProgress("מאתר לידים פוטנציאליים...")
+      const leadsRes = await fetch("/api/generate-leads", { method: "POST" })
+      const leadsData = await leadsRes.json()
+      totalLeads = leadsData.count || 0
+      
+      // Step 3: Find tenders
+      setScanProgress("סורק מכרזים רלוונטיים...")
+      const tendersRes = await fetch("/api/generate-tenders", { method: "POST" })
+      const tendersData = await tendersRes.json()
+      totalTenders = tendersData.count || 0
+      
+      // Step 4: Get news, trends, conferences in parallel (less critical)
+      setScanProgress("אוסף חדשות וטרנדים...")
+      await Promise.all([
+        fetch("/api/generate-news", { method: "POST" }),
+        fetch("/api/generate-trends", { method: "POST" }),
+        fetch("/api/generate-conferences", { method: "POST" }),
       ])
-      // We don't need to await news/conferences/trends results for the toast
-      newsRes.json()
-      conferencesRes.json()
-      trendsRes.json()
       
       await fetchDashboardData()
       
-      if (analyzeData.success || leadsData.success || tendersData.success) {
-        toast({
-          title: "עדכון אוטומטי הושלם",
-          description: `נמצאו ${analyzeData.count || 0} הזדמנויות, ${leadsData.count || 0} לידים ו-${tendersData.count || 0} מכרזים`,
-        })
-      }
+      toast({
+        title: "הניתוח הושלם בהצלחה!",
+        description: `נמצאו ${totalOpportunities} הזדמנויות, ${totalLeads} לידים ו-${totalTenders} מכרזים`,
+      })
     } catch (error) {
       console.error("Error in auto analysis:", error)
+      toast({
+        title: "שגיאה בניתוח",
+        description: "חלק מהנתונים לא נטענו כראוי",
+        variant: "destructive",
+      })
     } finally {
       setAutoAnalyzing(false)
+      setScanProgress("")
     }
   }
 
@@ -241,7 +253,9 @@ export default function AppDashboardPage() {
       {autoAnalyzing && (
         <div className="flex items-center justify-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-4">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          <span className="text-sm font-medium text-primary">מנתח את השוק עבורך...</span>
+          <span className="text-sm font-medium text-primary">
+            {scanProgress || "מנתח את השוק עבורך..."}
+          </span>
         </div>
       )}
 
