@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextResponse } from 'next/server'
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
 function stripMarkdownFences(text: string): string {
   return text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
