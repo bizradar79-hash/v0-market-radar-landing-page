@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,64 +14,66 @@ import {
   Users, 
   TrendingUp,
   Clock,
-  Check
+  Check,
+  Loader2
 } from "lucide-react"
 
 interface Alert {
-  id: number
+  id: string
+  company_id: string
   title: string
-  description: string
-  type: "warning" | "info" | "success"
-  category: string
-  timeAgo: string
-  isRead: boolean
+  message: string
+  type: string
+  is_read: boolean
+  created_at: string
 }
 
-const initialAlerts: Alert[] = [
+// Mock data for when DB is empty
+const mockAlerts: Alert[] = [
   {
-    id: 1,
+    id: "1",
+    company_id: "",
     title: "מתחרה חדש בשוק",
-    description: "זוהתה חברה חדשה שנכנסת לתחום הפעילות שלך - StartupAI Ltd",
+    message: "זוהתה חברה חדשה שנכנסת לתחום הפעילות שלך - StartupAI Ltd",
     type: "warning",
-    category: "מתחרים",
-    timeAgo: "לפני 2 שעות",
-    isRead: false,
+    is_read: false,
+    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
   },
   {
-    id: 2,
+    id: "2",
+    company_id: "",
     title: "הזדמנות מכרז",
-    description: "מכרז חדש רלוונטי פורסם - משרד הבריאות, תקציב 5 מיליון ש\"ח",
+    message: "מכרז חדש רלוונטי פורסם - משרד הבריאות, תקציב 5 מיליון ש\"ח",
     type: "info",
-    category: "מכרזים",
-    timeAgo: "לפני 5 שעות",
-    isRead: false,
+    is_read: false,
+    created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
   },
   {
-    id: 3,
+    id: "3",
+    company_id: "",
     title: "ליד חם",
-    description: "ליד בעל ציון 90+ נכנס למערכת - חדשנות ישראל בע\"מ",
+    message: "ליד בעל ציון 90+ נכנס למערכת - חדשנות ישראל בע\"מ",
     type: "success",
-    category: "לידים",
-    timeAgo: "לפני 8 שעות",
-    isRead: false,
+    is_read: false,
+    created_at: new Date(Date.now() - 3600000 * 8).toISOString(),
   },
   {
-    id: 4,
+    id: "4",
+    company_id: "",
     title: "שינוי מחירים אצל מתחרה",
-    description: "DataPro Solutions הורידו מחירים ב-15% בחבילה העסקית",
+    message: "DataPro Solutions הורידו מחירים ב-15% בחבילה העסקית",
     type: "warning",
-    category: "מתחרים",
-    timeAgo: "לפני יום",
-    isRead: true,
+    is_read: true,
+    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
   },
   {
-    id: 5,
+    id: "5",
+    company_id: "",
     title: "טרנד עולה",
-    description: "עלייה משמעותית בחיפושים לבינה מלאכותית גנרטיבית בישראל",
+    message: "עלייה משמעותית בחיפושים לבינה מלאכותית גנרטיבית בישראל",
     type: "info",
-    category: "טרנדים",
-    timeAgo: "לפני יום",
-    isRead: false,
+    is_read: false,
+    created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
   },
 ]
 
@@ -85,19 +88,6 @@ function getAlertIcon(type: string) {
   }
 }
 
-function getCategoryIcon(category: string) {
-  switch (category) {
-    case "מתחרים":
-      return <Target className="h-4 w-4" />
-    case "לידים":
-      return <Users className="h-4 w-4" />
-    case "טרנדים":
-      return <TrendingUp className="h-4 w-4" />
-    default:
-      return <Bell className="h-4 w-4" />
-  }
-}
-
 function getTypeBadge(type: string) {
   switch (type) {
     case "warning":
@@ -109,20 +99,78 @@ function getTypeBadge(type: string) {
   }
 }
 
+function formatTimeAgo(dateString: string) {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60))
+  
+  if (diffHours < 1) return "לפני פחות משעה"
+  if (diffHours < 24) return `לפני ${diffHours} שעות`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays === 1) return "לפני יום"
+  return `לפני ${diffDays} ימים`
+}
+
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<Alert[]>(initialAlerts)
+  const [alerts, setAlerts] = useState<Alert[]>([])
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
 
-  const markAsRead = (id: number) => {
+  useEffect(() => {
+    fetchAlerts()
+  }, [])
+
+  async function fetchAlerts() {
+    const { data, error } = await supabase
+      .from("alerts")
+      .select("*")
+      .order("created_at", { ascending: false })
+
+    if (!error && data && data.length > 0) {
+      setAlerts(data)
+    } else {
+      // Use mock data if no data in DB
+      setAlerts(mockAlerts)
+    }
+    setLoading(false)
+  }
+
+  const markAsRead = async (id: string) => {
+    // Update local state immediately
     setAlerts(alerts.map(alert => 
-      alert.id === id ? { ...alert, isRead: true } : alert
+      alert.id === id ? { ...alert, is_read: true } : alert
     ))
+    
+    // Update in database if it's a real alert
+    await supabase
+      .from("alerts")
+      .update({ is_read: true })
+      .eq("id", id)
   }
 
-  const markAllAsRead = () => {
-    setAlerts(alerts.map(alert => ({ ...alert, isRead: true })))
+  const markAllAsRead = async () => {
+    // Update local state immediately
+    setAlerts(alerts.map(alert => ({ ...alert, is_read: true })))
+    
+    // Update all unread alerts in database
+    const unreadIds = alerts.filter(a => !a.is_read).map(a => a.id)
+    if (unreadIds.length > 0) {
+      await supabase
+        .from("alerts")
+        .update({ is_read: true })
+        .in("id", unreadIds)
+    }
   }
 
-  const unreadCount = alerts.filter(a => !a.isRead).length
+  const unreadCount = alerts.filter(a => !a.is_read).length
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -152,7 +200,7 @@ export default function AlertsPage() {
           <Card 
             key={alert.id} 
             className={`border-border bg-card transition-colors ${
-              !alert.isRead ? "border-r-4 border-r-primary" : ""
+              !alert.is_read ? "border-r-4 border-r-primary" : ""
             }`}
           >
             <CardContent className="p-5">
@@ -164,10 +212,10 @@ export default function AlertsPage() {
                 <div className="flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <Badge className={getTypeBadge(alert.type)}>
-                      {getCategoryIcon(alert.category)}
-                      <span className="mr-1">{alert.category}</span>
+                      <Bell className="mr-1 h-3 w-3" />
+                      התראה
                     </Badge>
-                    {!alert.isRead && (
+                    {!alert.is_read && (
                       <Badge className="bg-primary/10 text-primary">
                         חדש
                       </Badge>
@@ -179,16 +227,16 @@ export default function AlertsPage() {
                   </h3>
                   
                   <p className="mb-3 text-sm text-muted-foreground">
-                    {alert.description}
+                    {alert.message}
                   </p>
                   
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Clock className="h-3 w-3" />
-                      {alert.timeAgo}
+                      {formatTimeAgo(alert.created_at)}
                     </span>
                     
-                    {!alert.isRead && (
+                    {!alert.is_read && (
                       <Button 
                         variant="ghost" 
                         size="sm"
@@ -205,6 +253,15 @@ export default function AlertsPage() {
           </Card>
         ))}
       </div>
+
+      {alerts.length === 0 && (
+        <Card className="border-border bg-card">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Bell className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">אין התראות</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

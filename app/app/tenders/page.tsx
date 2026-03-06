@@ -20,15 +20,14 @@ import {
 
 interface Tender {
   id: string
+  company_id: string
   title: string
   organization: string
   deadline: string
-  estimated_value: string
-  category: string
-  status: string
+  budget: string
   description: string
+  link: string
   relevance_score: number
-  url: string
   created_at: string
 }
 
@@ -136,8 +135,8 @@ export default function TendersPage() {
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
-                  <Badge variant="outline" className={getCategoryColor(tender.category)}>
-                    {tender.category}
+                  <Badge variant="outline" className="bg-blue-500/20 text-blue-400">
+                    מכרז
                   </Badge>
                   {deadlineStatus.urgent && (
                     <Badge variant="destructive" className="bg-red-500/20 text-red-400">
@@ -167,7 +166,7 @@ export default function TendersPage() {
                   <Banknote className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">תקציב משוער</p>
-                    <p className="font-semibold text-foreground">{tender.estimated_value}</p>
+                    <p className="font-semibold text-foreground">{tender.budget}</p>
                   </div>
                 </div>
 

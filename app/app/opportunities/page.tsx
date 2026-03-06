@@ -26,15 +26,15 @@ import {
 
 interface Opportunity {
   id: string
+  company_id: string
   title: string
   description: string
-  source: string
   impact_score: number
   confidence_score: number
   priority: string
   type: string
-  recommended_actions: string[]
-  source_links: string[]
+  actions: string[]
+  sources: string[]
   created_at: string
 }
 
@@ -259,11 +259,11 @@ export default function OpportunitiesPage() {
               </div>
 
               {/* Recommended Actions */}
-              {opportunity.recommended_actions && opportunity.recommended_actions.length > 0 && (
+              {opportunity.actions && opportunity.actions.length > 0 && (
                 <div className="space-y-2">
                   <span className="text-xs font-medium text-muted-foreground">פעולות מומלצות:</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {opportunity.recommended_actions.slice(0, 3).map((action, idx) => (
+                    {opportunity.actions.slice(0, 3).map((action, idx) => (
                       <Badge 
                         key={idx} 
                         variant="secondary" 
@@ -281,7 +281,7 @@ export default function OpportunitiesPage() {
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Target className="h-3.5 w-3.5" />
-                    {opportunity.source}
+                    {opportunity.type}
                   </span>
                   <span className="flex items-center gap-1">
                     <Calendar className="h-3.5 w-3.5" />

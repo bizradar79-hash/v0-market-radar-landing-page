@@ -1,90 +1,74 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ExternalLink, Clock, TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { ExternalLink, Clock, TrendingUp, TrendingDown, Minus, Loader2, Newspaper } from "lucide-react"
 
-const newsItems = [
+interface NewsItem {
+  id: string
+  company_id: string
+  title: string
+  summary: string
+  source: string
+  url: string
+  category: string
+  sentiment: string
+  published_at: string
+  created_at: string
+}
+
+// Mock data for when DB is empty
+const mockNews: NewsItem[] = [
   {
-    id: 1,
+    id: "1",
+    company_id: "",
     title: "סטארטאפ ישראלי גייס 50 מיליון דולר בסבב B",
     summary: "חברת טכנולוגיה ישראלית בתחום ה-AI השלימה סבב גיוס משמעותי בהובלת קרן אמריקאית",
     source: "כלכליסט",
+    url: "#",
     category: "גיוסים",
     sentiment: "positive",
-    timeAgo: "לפני שעה",
-    url: "#",
+    published_at: new Date(Date.now() - 3600000).toISOString(),
+    created_at: new Date().toISOString(),
   },
   {
-    id: 2,
+    id: "2",
+    company_id: "",
     title: "רגולציה חדשה בתחום הפינטק נכנסת לתוקף",
     summary: "בנק ישראל פרסם הנחיות חדשות המחייבות חברות פינטק לעמוד בתקנים מחמירים",
     source: "גלובס",
+    url: "#",
     category: "רגולציה",
     sentiment: "neutral",
-    timeAgo: "לפני 3 שעות",
-    url: "#",
+    published_at: new Date(Date.now() - 3600000 * 3).toISOString(),
+    created_at: new Date().toISOString(),
   },
   {
-    id: 3,
+    id: "3",
+    company_id: "",
     title: "שיתוף פעולה בין חברות טכנולוגיה מובילות",
     summary: "שתי חברות ישראליות מובילות הכריזו על שותפות אסטרטגית לפיתוח פתרונות AI",
     source: "TheMarker",
+    url: "#",
     category: "שותפויות",
     sentiment: "positive",
-    timeAgo: "לפני 6 שעות",
-    url: "#",
+    published_at: new Date(Date.now() - 3600000 * 6).toISOString(),
+    created_at: new Date().toISOString(),
   },
   {
-    id: 4,
+    id: "4",
+    company_id: "",
     title: "דוח: ירידה בהשקעות הון סיכון ברבעון האחרון",
     summary: "על פי נתוני IVC, חלה ירידה של 15% בהשקעות בסטארטאפים ישראליים",
     source: "Geektime",
+    url: "#",
     category: "השקעות",
     sentiment: "negative",
-    timeAgo: "לפני 12 שעות",
-    url: "#",
-  },
-  {
-    id: 5,
-    title: "מכרז ממשלתי חדש למערכות מידע בהיקף 50 מיליון",
-    summary: "משרד האוצר פרסם מכרז לפיתוח והטמעת מערכת ניהול מידע ארגונית",
-    source: "מעריב",
-    category: "מכרזים",
-    sentiment: "positive",
-    timeAgo: "לפני יום",
-    url: "#",
-  },
-  {
-    id: 6,
-    title: "TechVision משיקה מוצר חדש בתחום ה-BI",
-    summary: "המתחרה הישיר שלכם השיק פלטפורמה חדשה למודיעין עסקי עם יכולות AI",
-    source: "מעקב מתחרים",
-    category: "מתחרים",
-    sentiment: "negative",
-    timeAgo: "לפני יום",
-    url: "#",
-  },
-  {
-    id: 7,
-    title: "כנס הייטק ישראל 2026 יתקיים בחודש הבא",
-    summary: "כנס הטכנולוגיה הגדול בישראל יתקיים בתל אביב עם למעלה מ-5,000 משתתפים צפויים",
-    source: "Tech12",
-    category: "אירועים",
-    sentiment: "neutral",
-    timeAgo: "לפני יומיים",
-    url: "#",
-  },
-  {
-    id: 8,
-    title: "מחקר: 70% מהעסקים מתכננים להשקיע ב-AI",
-    summary: "סקר חדש מראה כי רוב העסקים הקטנים והבינוניים בישראל מתכננים לאמץ טכנולוגיות AI",
-    source: "BDI",
-    category: "מחקרים",
-    sentiment: "positive",
-    timeAgo: "לפני יומיים",
-    url: "#",
+    published_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+    created_at: new Date().toISOString(),
   },
 ]
 
@@ -128,7 +112,50 @@ function getCategoryColor(category: string) {
   return colors[category] || "bg-gray-500/10 text-gray-500"
 }
 
+function formatTimeAgo(dateString: string) {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60))
+  
+  if (diffHours < 1) return "לפני פחות משעה"
+  if (diffHours < 24) return `לפני ${diffHours} שעות`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays === 1) return "לפני יום"
+  return `לפני ${diffDays} ימים`
+}
+
 export default function NewsPage() {
+  const [news, setNews] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
+
+  useEffect(() => {
+    fetchNews()
+  }, [])
+
+  async function fetchNews() {
+    const { data, error } = await supabase
+      .from("news")
+      .select("*")
+      .order("published_at", { ascending: false })
+
+    if (!error && data && data.length > 0) {
+      setNews(data)
+    } else {
+      // Use mock data if no data in DB
+      setNews(mockNews)
+    }
+    setLoading(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -139,7 +166,7 @@ export default function NewsPage() {
 
       {/* News Feed */}
       <div className="space-y-4">
-        {newsItems.map((item) => (
+        {news.map((item) => (
           <Card key={item.id} className="border-border bg-card transition-colors hover:bg-card/80">
             <CardContent className="p-5">
               <div className="flex items-start justify-between gap-4">
@@ -163,19 +190,30 @@ export default function NewsPage() {
                     <span className="font-medium">{item.source}</span>
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {item.timeAgo}
+                      {formatTimeAgo(item.published_at)}
                     </span>
                   </div>
                 </div>
                 
-                <Button variant="ghost" size="icon" className="shrink-0">
-                  <ExternalLink className="h-4 w-4" />
+                <Button variant="ghost" size="icon" className="shrink-0" asChild>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
                 </Button>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {news.length === 0 && (
+        <Card className="border-border bg-card">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Newspaper className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">לא נמצאו חדשות</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

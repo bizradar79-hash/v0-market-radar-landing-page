@@ -1,9 +1,11 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { TrendingUp, TrendingDown, Minus, ArrowUpRight } from "lucide-react"
+import { TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react"
 import {
   BarChart,
   Bar,
@@ -14,56 +16,59 @@ import {
   ResponsiveContainer,
 } from "recharts"
 
-const trends = [
+interface Trend {
+  id: string
+  company_id: string
+  name: string
+  category: string
+  score: number
+  direction: string
+  description: string
+  created_at: string
+}
+
+// Mock data for when DB is empty
+const mockTrends: Trend[] = [
   {
-    id: 1,
+    id: "1",
+    company_id: "",
     name: "בינה מלאכותית גנרטיבית",
     category: "טכנולוגיה",
     score: 95,
-    growth: 42,
     direction: "up",
     description: "עלייה חדה באימוץ כלי AI גנרטיבי בעסקים ישראליים",
-    keywords: ["ChatGPT", "Claude", "Gemini", "אוטומציה"],
+    created_at: new Date().toISOString(),
   },
   {
-    id: 2,
+    id: "2",
+    company_id: "",
     name: "אוטומציה עסקית",
     category: "תפעול",
     score: 82,
-    growth: 28,
     direction: "up",
     description: "גידול בביקוש לפתרונות אוטומציה של תהליכים",
-    keywords: ["RPA", "תהליכים", "יעילות", "חיסכון"],
+    created_at: new Date().toISOString(),
   },
   {
-    id: 3,
+    id: "3",
+    company_id: "",
     name: "סייבר סקיוריטי",
     category: "אבטחה",
     score: 78,
-    growth: 5,
     direction: "stable",
     description: "ביקוש יציב לפתרונות אבטחת מידע",
-    keywords: ["אבטחה", "פרטיות", "GDPR", "סיכונים"],
+    created_at: new Date().toISOString(),
   },
   {
-    id: 4,
+    id: "4",
+    company_id: "",
     name: "פינטק",
     category: "פיננסים",
     score: 71,
-    growth: -8,
     direction: "down",
     description: "ירידה קלה בהשקעות בסטארטאפי פינטק",
-    keywords: ["תשלומים", "בנקאות", "קריפטו", "השקעות"],
+    created_at: new Date().toISOString(),
   },
-]
-
-const chartData = [
-  { name: "AI גנרטיבי", score: 95 },
-  { name: "אוטומציה", score: 82 },
-  { name: "סייבר", score: 78 },
-  { name: "פינטק", score: 71 },
-  { name: "HealthTech", score: 65 },
-  { name: "CleanTech", score: 58 },
 ]
 
 function getTrendIcon(direction: string) {
@@ -77,13 +82,54 @@ function getTrendIcon(direction: string) {
   }
 }
 
-function getGrowthColor(growth: number) {
-  if (growth > 0) return "text-green-500"
-  if (growth < 0) return "text-red-500"
-  return "text-yellow-500"
+function getDirectionText(direction: string) {
+  switch (direction) {
+    case "up":
+      return "עולה"
+    case "down":
+      return "יורד"
+    default:
+      return "יציב"
+  }
 }
 
 export default function TrendsPage() {
+  const [trends, setTrends] = useState<Trend[]>([])
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
+
+  useEffect(() => {
+    fetchTrends()
+  }, [])
+
+  async function fetchTrends() {
+    const { data, error } = await supabase
+      .from("trends")
+      .select("*")
+      .order("score", { ascending: false })
+
+    if (!error && data && data.length > 0) {
+      setTrends(data)
+    } else {
+      // Use mock data if no data in DB
+      setTrends(mockTrends)
+    }
+    setLoading(false)
+  }
+
+  const chartData = trends.map(t => ({
+    name: t.name.length > 15 ? t.name.substring(0, 15) + "..." : t.name,
+    score: t.score,
+  }))
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -103,7 +149,7 @@ export default function TrendsPage() {
               <BarChart data={chartData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" />
                 <XAxis type="number" domain={[0, 100]} stroke="#8b9dc3" />
-                <YAxis dataKey="name" type="category" width={80} stroke="#8b9dc3" />
+                <YAxis dataKey="name" type="category" width={100} stroke="#8b9dc3" />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "#0a1628",
@@ -132,8 +178,8 @@ export default function TrendsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {getTrendIcon(trend.direction)}
-                  <span className={`text-lg font-bold ${getGrowthColor(trend.growth)}`}>
-                    {trend.growth > 0 ? "+" : ""}{trend.growth}%
+                  <span className="text-sm text-muted-foreground">
+                    {getDirectionText(trend.direction)}
                   </span>
                 </div>
               </div>
@@ -147,22 +193,19 @@ export default function TrendsPage() {
                 </div>
                 <Progress value={trend.score} className="h-2" />
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                {trend.keywords.map((keyword) => (
-                  <Badge
-                    key={keyword}
-                    variant="secondary"
-                    className="bg-primary/10 text-primary"
-                  >
-                    {keyword}
-                  </Badge>
-                ))}
-              </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {trends.length === 0 && (
+        <Card className="border-border bg-card">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <TrendingUp className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -28,16 +28,15 @@ import {
 
 interface Competitor {
   id: string
+  company_id: string
   name: string
-  activity_type: string
-  change_description: string
-  impact: string
+  website: string
   services: string
   pricing: string
-  position: string
+  positioning: string
+  last_activity: string
   threat_score: number
   trend: string
-  detected_at: string
   created_at: string
 }
 
@@ -214,14 +213,14 @@ export default function CompetitorsPage() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={getPositionBadge(competitor.position || "לא ידוע")}>
-                        {competitor.position || "לא ידוע"}
+                      <Badge variant="outline" className={getPositionBadge(competitor.positioning || "לא ידוע")}>
+                        {competitor.positioning || "לא ידוע"}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Clock className="h-3.5 w-3.5" />
-                        {formatTimeAgo(competitor.detected_at)}
+                        {formatTimeAgo(competitor.created_at)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -273,33 +272,33 @@ export default function CompetitorsPage() {
                 key={competitor.id}
                 className="flex items-start gap-4 rounded-lg border border-border bg-secondary/20 p-4 transition-colors hover:bg-secondary/40"
               >
-                <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${getActivityTypeIcon(competitor.activity_type)}`}>
-                  <Activity className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Activity className="h-5 w-5 text-primary" />
                 </div>
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-foreground">{competitor.name}</span>
                     <Badge variant="secondary" className="bg-secondary/50 text-xs">
-                      {competitor.activity_type}
+                      {competitor.services || "לא ידוע"}
                     </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {competitor.change_description}
+                    {competitor.last_activity || "אין פעילות אחרונה"}
                   </p>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />
-                      {formatTimeAgo(competitor.detected_at)}
+                      {formatTimeAgo(competitor.created_at)}
                     </span>
                     <Badge 
                       variant="outline" 
                       className={
-                        competitor.impact === "גבוה" 
+                        competitor.threat_score >= 80 
                           ? "border-red-500/30 text-red-400" 
                           : "border-yellow-500/30 text-yellow-400"
                       }
                     >
-                      השפעה: {competitor.impact}
+                      איום: {competitor.threat_score}
                     </Badge>
                   </div>
                 </div>

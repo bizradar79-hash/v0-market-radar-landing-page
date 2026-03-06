@@ -41,14 +41,14 @@ import {
 
 interface Lead {
   id: string
-  company_name: string
-  contact_name: string
-  email: string
-  phone: string
-  source: string
+  company_id: string
+  name: string
+  website: string
+  industry: string
+  location: string
+  reason: string
   score: number
-  status: string
-  discovery_reason: string
+  source: string
   created_at: string
 }
 
@@ -200,25 +200,25 @@ export default function LeadsPage() {
                         <Building2 className="h-4 w-4 text-primary" />
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{lead.company_name}</p>
-                        <p className="text-xs text-muted-foreground">{lead.contact_name}</p>
+                        <p className="font-medium text-foreground">{lead.name}</p>
+                        <p className="text-xs text-muted-foreground" dir="ltr">{lead.website}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="bg-secondary/50">
-                      טכנולוגיה
+                      {lead.industry || "טכנולוגיה"}
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
                     <div className="flex items-center gap-1 text-sm text-muted-foreground">
                       <MapPin className="h-3.5 w-3.5" />
-                      תל אביב
+                      {lead.location || "תל אביב"}
                     </div>
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <span className="text-sm text-muted-foreground">
-                      {lead.discovery_reason || "ביקור באתר"}
+                      {lead.reason || "ביקור באתר"}
                     </span>
                   </TableCell>
                   <TableCell>

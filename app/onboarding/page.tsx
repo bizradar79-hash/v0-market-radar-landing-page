@@ -168,19 +168,20 @@ export default function OnboardingPage() {
         return
       }
 
-      const { error } = await supabase.from("companies").insert({
-        user_id: user.id,
+      // Use upsert since companies.id = auth.uid
+      const { error } = await supabase.from("companies").upsert({
+        id: user.id,
         name: companyName,
         website,
         industry,
         city,
-        company_size: companySize,
+        size: companySize,
         description,
         competitors,
-        keywords,
-        industries: industriesTags,
-        products_services: productsTags,
-        modules: selectedModules,
+        keywords: [...keywords, ...industriesTags, ...productsTags],
+        modules: Object.entries(selectedModules)
+          .filter(([, enabled]) => enabled)
+          .map(([id]) => id),
         onboarding_completed: true,
       })
 
