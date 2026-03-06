@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { scrapeWebsite } from './scrape'
-import { multiSearch } from './search'
 
 export async function getFullContext() {
   const supabase = await createClient()
@@ -14,45 +13,24 @@ export async function getFullContext() {
 
   if (!company) return null
 
-  // Parallel: scrape website + 6 different searches
-  const [websiteContent, searchResults] = await Promise.all([
-    scrapeWebsite(company?.website || ''),
-    multiSearch([
-      `${company?.name} ${company?.industry} ישראל`,
-      `${company?.industry} חברות מובילות ישראל 2025 2026`,
-      `${company?.description?.slice(0, 100)} שוק ישראל`,
-      `${company?.keywords?.slice(0, 3)?.join(' ')} ישראל`,
-      `מתחרים ${company?.industry} ישראל`,
-      `${company?.industry} טרנדים ישראל 2026`,
-    ])
-  ])
+  // Only scrape website — Tavily searches are done per-route to avoid timeout
+  const websiteContent = await scrapeWebsite(company?.website || '')
 
   const context = `
-╔══════════════════════════════════╗
-  פרופיל החברה המלא
-╚══════════════════════════════════╝
+=== פרופיל החברה ===
 שם: ${company?.name}
 אתר: ${company?.website}
 תעשייה: ${company?.industry}
 עיר: ${company?.city}
 גודל: ${company?.size}
-תיאור מלא: ${company?.description}
+תיאור: ${company?.description}
 מילות מפתח: ${company?.keywords?.join(', ')}
 מודולים: ${company?.modules?.join(', ')}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}
 
-╔══════════════════════════════════╗
-  תוכן האתר (סרוק אוטומטית)
-╚══════════════════════════════════╝
-${websiteContent || 'לא זמין'}
-
-╔══════════════════════════════════╗
-  מידע אמיתי מהאינטרנט
-╚══════════════════════════════════╝
-${searchResults.map(r => `[${r.title}]
-URL: ${r.url}
-תוכן: ${r.content}`).join('\n\n')}
+=== תוכן האתר ===
+${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
 `
 
-  return { company, competitors, user, supabase, context, searchResults }
+  return { company, competitors, user, supabase, context }
 }

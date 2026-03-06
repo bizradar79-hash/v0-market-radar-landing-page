@@ -4,6 +4,8 @@ import { scrapeWebsite } from "@/lib/scrape"
 import { search } from "@/lib/search"
 import { NextResponse } from "next/server"
 
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()

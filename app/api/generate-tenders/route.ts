@@ -3,6 +3,8 @@ import { analyzeWithAI } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
 
+export const maxDuration = 60
+
 export async function POST() {
   try {
     const ctx = await getFullContext()
@@ -10,13 +12,11 @@ export async function POST() {
 
     const results = await multiSearch([
       `מכרזים ${ctx.company?.industry} ישראל 2026`,
-      `site:mr.gov.il ${ctx.company?.industry}`,
       `מכרז ממשלתי ${ctx.company?.keywords?.[0]} 2026`,
       `tender ${ctx.company?.industry} Israel 2026`,
     ])
 
-    const data = await analyzeWithAI(`
-מצא 8 מכרזים רלוונטיים מהמידע הבא:
+    const data = await analyzeWithAI(`מצא 8 מכרזים רלוונטיים מהמידע הבא:
 
 ${ctx.context}
 
@@ -41,13 +41,26 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 }`)
 
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
-    const { data: saved } = await ctx.supabase.from('tenders').insert(
-      data.tenders.map((t: any) => ({ ...t, company_id: ctx.user.id }))
+    const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
+      data.tenders.map((t: any) => ({
+        title: t.title,
+        organization: t.organization,
+        deadline: t.deadline,
+        budget: t.budget,
+        description: t.description,
+        link: t.link,
+        relevance_score: t.relevance_score,
+        company_id: ctx.user.id,
+      }))
     ).select()
+
+    if (insertError) {
+      console.error('Tenders insert error:', insertError)
+    }
 
     return NextResponse.json({ success: true, tenders: saved, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Generate tenders error:', error)
-    return NextResponse.json({ error: 'Failed' }, { status: 500 })
+    console.error('Generate tenders error:', error instanceof Error ? error.message : error)
+    return NextResponse.json({ error: 'Failed', details: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }

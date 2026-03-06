@@ -3,6 +3,8 @@ import { analyzeWithAI } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
 
+export const maxDuration = 60
+
 export async function POST() {
   try {
     const ctx = await getFullContext()
@@ -10,15 +12,11 @@ export async function POST() {
 
     const results = await multiSearch([
       `${ctx.company?.industry} לקוחות קהל יעד ישראל`,
-      `${ctx.company?.description?.slice(0, 80)} קונים ישראל`,
       `${ctx.company?.keywords?.[0]} ${ctx.company?.keywords?.[1]} חברות ישראל`,
-      `חנויות ${ctx.company?.industry} ישראל`,
       `מפיצים ${ctx.company?.industry} ישראל`,
-      `${ctx.company?.industry} B2B לקוחות עסקיים ישראל`,
     ])
 
-    const data = await analyzeWithAI(`
-מצא 20 לקוחות פוטנציאליים אמיתיים לחברה ${ctx.company?.name}.
+    const data = await analyzeWithAI(`מצא 20 לקוחות פוטנציאליים אמיתיים לחברה ${ctx.company?.name}.
 
 ${ctx.context}
 
@@ -30,7 +28,6 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 - רק חברות שמופיעות בתוצאות החיפוש
 - רק URLs אמיתיים
 - אל תכלול את ${ctx.company?.name} עצמה
-- גיוון: חנויות, מפיצים, עסקים, קליניקות - כל מי שיכול להשתמש במוצר
 
 {
   "leads": [{
@@ -38,7 +35,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "website": "URL אמיתי",
     "industry": "תעשייה",
     "location": "עיר בישראל",
-    "reason": "למה יקנו - ספציפי לפי המוצר",
+    "reason": "למה יקנו",
     "score": 88,
     "source": "מקור"
   }]
@@ -51,11 +48,23 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     )
 
     await ctx.supabase.from('leads').delete().eq('company_id', ctx.user.id)
-    const { data: saved } = await ctx.supabase.from('leads').insert(
-      filtered.map((l: any) => ({ ...l, company_id: ctx.user.id }))
+    const { data: saved, error: insertError } = await ctx.supabase.from('leads').insert(
+      filtered.map((l: any) => ({
+        name: l.name,
+        website: l.website,
+        industry: l.industry,
+        location: l.location,
+        reason: l.reason,
+        score: l.score,
+        source: l.source,
+        company_id: ctx.user.id,
+      }))
     ).select()
 
-    // Create alert
+    if (insertError) {
+      console.error('Leads insert error:', insertError)
+    }
+
     await ctx.supabase.from('alerts').insert({
       company_id: ctx.user.id,
       title: 'לידים חדשים התגלו',
@@ -67,7 +76,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
     return NextResponse.json({ success: true, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Generate leads error:', error)
-    return NextResponse.json({ error: 'Failed' }, { status: 500 })
+    console.error('Generate leads error:', error instanceof Error ? error.message : error)
+    return NextResponse.json({ error: 'Failed', details: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }

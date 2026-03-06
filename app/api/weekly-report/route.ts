@@ -2,6 +2,8 @@ import { analyzeWithAI } from '@/lib/ai'
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   try {
     const { companyId } = await request.json()
