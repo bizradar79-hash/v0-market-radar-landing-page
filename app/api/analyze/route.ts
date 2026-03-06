@@ -36,6 +36,24 @@ export async function POST() {
       )
     }
 
+    // Check throttling - only allow analysis every 5 minutes
+    const THROTTLE_MINUTES = 5
+    if (company.last_analyzed) {
+      const lastAnalyzed = new Date(company.last_analyzed)
+      const now = new Date()
+      const diffMinutes = (now.getTime() - lastAnalyzed.getTime()) / (1000 * 60)
+      
+      if (diffMinutes < THROTTLE_MINUTES) {
+        const waitMinutes = Math.ceil(THROTTLE_MINUTES - diffMinutes)
+        return NextResponse.json({
+          success: false,
+          error: `יש להמתין ${waitMinutes} דקות לפני ניתוח נוסף`,
+          throttled: true,
+          waitMinutes,
+        }, { status: 429 })
+      }
+    }
+
     // Fetch competitors
     const { data: competitors } = await supabase
       .from('competitors')
@@ -118,9 +136,16 @@ export async function POST() {
       )
     }
 
+    // Update last_analyzed timestamp
+    await supabase
+      .from('companies')
+      .update({ last_analyzed: new Date().toISOString() })
+      .eq('id', user.id)
+
     return NextResponse.json({
       success: true,
       opportunities: savedOpportunities,
+      count: savedOpportunities?.length || 0,
     })
   } catch (error) {
     console.error('Error analyzing opportunities:', error)

@@ -23,6 +23,7 @@ import {
   Loader2,
   Filter,
 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface Opportunity {
   id: string
@@ -49,6 +50,7 @@ export default function OpportunitiesPage() {
   const [minScore, setMinScore] = useState<number>(0)
   const [sortBy, setSortBy] = useState<SortOption>("score")
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchOpportunities()
@@ -71,11 +73,33 @@ export default function OpportunitiesPage() {
     try {
       const response = await fetch("/api/analyze", { method: "POST" })
       const data = await response.json()
+      
       if (data.success) {
         await fetchOpportunities()
+        toast({
+          title: "ניתוח הושלם!",
+          description: `נמצאו ${data.count || 0} הזדמנויות חדשות`,
+        })
+      } else if (data.throttled) {
+        toast({
+          title: "יש להמתין",
+          description: data.error,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "לא נמצאו הזדמנויות",
+          description: data.error || "נסה לעדכן את פרטי החברה בהגדרות",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("Error analyzing:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת הניתוח",
+        variant: "destructive",
+      })
     } finally {
       setAnalyzing(false)
     }

@@ -38,6 +38,7 @@ import {
   Building2,
   MapPin,
 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface Lead {
   id: string
@@ -59,6 +60,7 @@ export default function LeadsPage() {
   const [industryFilter, setIndustryFilter] = useState<string>("all")
   const [cityFilter, setCityFilter] = useState<string>("all")
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchLeads()
@@ -81,11 +83,27 @@ export default function LeadsPage() {
     try {
       const response = await fetch("/api/generate-leads", { method: "POST" })
       const data = await response.json()
+      
       if (data.success) {
         await fetchLeads()
+        toast({
+          title: "גילוי הושלם!",
+          description: `נמצאו ${data.count || 0} לידים חדשים`,
+        })
+      } else {
+        toast({
+          title: "לא נמצאו לידים",
+          description: data.error || "נסה לעדכן את פרטי החברה בהגדרות",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("Error discovering leads:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת הגילוי",
+        variant: "destructive",
+      })
     } finally {
       setDiscovering(false)
     }

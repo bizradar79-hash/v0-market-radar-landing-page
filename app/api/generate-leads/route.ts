@@ -106,6 +106,7 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       leads: savedLeads,
+      count: savedLeads?.length || 0,
     })
   } catch (error) {
     console.error('Error generating leads:', error)

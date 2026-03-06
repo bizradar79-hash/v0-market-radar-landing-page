@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import { 
   TrendingUp,
@@ -29,6 +30,7 @@ interface DashboardData {
   alertsCount: number
   topOpportunities: Array<{ title: string; impact_score: number; priority: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
+  lastAnalyzed: string | null
 }
 
 export default function AppDashboardPage() {
@@ -37,6 +39,7 @@ export default function AppDashboardPage() {
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState("")
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchDashboardData()
@@ -53,6 +56,7 @@ export default function AppDashboardPage() {
       { count: alertsCount },
       { data: topOpps },
       { data: upcomingTenders },
+      { data: companyData },
     ] = await Promise.all([
       supabase.from("opportunities").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("*", { count: "exact", head: true }),
@@ -62,6 +66,7 @@ export default function AppDashboardPage() {
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
       supabase.from("opportunities").select("title, impact_score, priority").order("impact_score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
+      supabase.from("companies").select("last_analyzed").single(),
     ])
 
     setData({
@@ -73,6 +78,7 @@ export default function AppDashboardPage() {
       alertsCount: alertsCount || 0,
       topOpportunities: topOpps || [],
       upcomingTenders: upcomingTenders || [],
+      lastAnalyzed: companyData?.last_analyzed || null,
     })
     setLoading(false)
   }
@@ -90,16 +96,57 @@ export default function AppDashboardPage() {
       ])
       
       setScanProgress("יוצר המלצות...")
-      await analyzeRes.json()
-      await leadsRes.json()
+      const analyzeData = await analyzeRes.json()
+      const leadsData = await leadsRes.json()
       
       await fetchDashboardData()
+      
+      // Show success or error toast
+      if (analyzeData.success || leadsData.success) {
+        const opportunitiesCount = analyzeData.count || 0
+        const leadsCount = leadsData.count || 0
+        toast({
+          title: "הסריקה הושלמה בהצלחה!",
+          description: `נמצאו ${opportunitiesCount} הזדמנויות ו-${leadsCount} לידים חדשים`,
+        })
+      } else if (analyzeData.throttled) {
+        toast({
+          title: "יש להמתין",
+          description: analyzeData.error,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "לא נמצאו תוצאות",
+          description: "נסה לעדכן את פרטי החברה בהגדרות",
+          variant: "destructive",
+        })
+      }
     } catch (error) {
       console.error("Error running scan:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת הסריקה, נסה שוב",
+        variant: "destructive",
+      })
     } finally {
       setScanning(false)
       setScanProgress("")
     }
+  }
+
+  function formatTimeAgo(dateStr: string | null): string {
+    if (!dateStr) return ""
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
+    
+    if (diffMinutes < 1) return "עכשיו"
+    if (diffMinutes < 60) return `לפני ${diffMinutes} דקות`
+    const diffHours = Math.floor(diffMinutes / 60)
+    if (diffHours < 24) return `לפני ${diffHours} שעות`
+    const diffDays = Math.floor(diffHours / 24)
+    return `לפני ${diffDays} ימים`
   }
 
   const kpiCards = [
@@ -129,9 +176,17 @@ export default function AppDashboardPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">דשבורד</h1>
-        <p className="text-muted-foreground">סקירה כללית של הפעילות העסקית שלך</p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">דשבורד</h1>
+          <p className="text-muted-foreground">סקירה כללית של הפעילות העסקית שלך</p>
+        </div>
+        {data?.lastAnalyzed && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Activity className="h-4 w-4" />
+            <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
+          </div>
+        )}
       </div>
 
       {/* KPI Grid */}
