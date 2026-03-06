@@ -1,13 +1,8 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import Groq from 'groq-sdk'
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-
-function stripMarkdownFences(text: string): string {
-  return text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-}
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
@@ -88,13 +83,18 @@ export async function POST() {
   ]
 }`
 
-    const result = await model.generateContent(prompt)
-    const responseText = result.response.text()
-    const cleanedJson = stripMarkdownFences(responseText)
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+    })
+    
+    const text = completion.choices[0].message.content!
+      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     
     let parsed
     try {
-      parsed = JSON.parse(cleanedJson)
+      parsed = JSON.parse(text)
     } catch {
       return NextResponse.json(
         { success: false, error: 'שגיאה בפענוח התשובה מהמודל' },
