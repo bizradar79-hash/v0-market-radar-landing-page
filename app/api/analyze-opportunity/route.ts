@@ -1,17 +1,6 @@
-import { generateText, Output } from 'ai'
-import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { analyzeWithAI } from '@/lib/ai'
 import { NextResponse } from 'next/server'
-
-const opportunitySchema = z.object({
-  title: z.string().describe('כותרת ההזדמנות בעברית'),
-  description: z.string().describe('תיאור מפורט של ההזדמנות בעברית'),
-  impactScore: z.number().min(1).max(100).describe('ציון השפעה מ-1 עד 100'),
-  confidenceScore: z.number().min(1).max(100).describe('ציון ודאות מ-1 עד 100'),
-  priority: z.enum(['דחופה', 'גבוהה', 'בינונית', 'נמוכה']).describe('רמת העדיפות'),
-  recommendedActions: z.array(z.string()).describe('רשימת פעולות מומלצות בעברית'),
-  type: z.string().describe('סוג ההזדמנות - טכנולוגיה, שוק, שותפות, מוצר וכדומה'),
-})
 
 export async function POST(request: Request) {
   try {
@@ -24,22 +13,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const { output } = await generateText({
-      model: 'anthropic/claude-sonnet-4-20250514',
-      output: Output.object({
-        schema: opportunitySchema,
-      }),
-      messages: [
-        {
-          role: 'system',
-          content: `אתה מנתח מודיעין עסקי מומחה לשוק הישראלי.
-תפקידך לנתח סיגנלים עסקיים ולזהות הזדמנויות לחברה.
-כל התשובות שלך חייבות להיות בעברית מלאה ומקצועית.
-התחשב בהקשר המקומי הישראלי והתרבות העסקית.`,
-        },
-        {
-          role: 'user',
-          content: `נתח את הסיגנלים הבאים וזהה הזדמנות עסקית:
+    const output = await analyzeWithAI(`נתח את הסיגנלים הבאים וזהה הזדמנות עסקית לחברה.
 
 פרופיל החברה:
 ${JSON.stringify(companyProfile, null, 2)}
@@ -47,26 +21,17 @@ ${JSON.stringify(companyProfile, null, 2)}
 סיגנלים שזוהו:
 ${JSON.stringify(signals, null, 2)}
 
-אנא ספק ניתוח מקיף של ההזדמנות כולל:
-- כותרת תמציתית וברורה
-- תיאור מפורט
-- ציון השפעה (1-100)
-- ציון ודאות (1-100)
-- עדיפות (דחופה/גבוהה/בינונית/נמוכה)
-- פעולות מומלצות ספציפיות
-- סוג ההזדמנות`,
-        },
-      ],
-    })
+החזר JSON בפורמט זה בלבד:
+{
+  "title": "כותרת ההזדמנות בעברית",
+  "description": "תיאור מפורט של ההזדמנות",
+  "impactScore": 85,
+  "confidenceScore": 80,
+  "priority": "גבוהה",
+  "recommendedActions": ["פעולה 1", "פעולה 2", "פעולה 3"],
+  "type": "סוג ההזדמנות"
+}`)
 
-    if (!output) {
-      return NextResponse.json(
-        { success: false, error: 'לא התקבלה תשובה מהמודל' },
-        { status: 500 }
-      )
-    }
-
-    // Save to Supabase
     const supabase = await createClient()
     const { data, error: dbError } = await supabase
       .from('opportunities')

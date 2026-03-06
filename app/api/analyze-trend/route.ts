@@ -1,28 +1,6 @@
-import { generateText, Output } from 'ai'
-import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { analyzeWithAI } from '@/lib/ai'
 import { NextResponse } from 'next/server'
-
-const trendAnalysisSchema = z.object({
-  summary: z.string().describe('סיכום כללי של הטרנד בעברית'),
-  direction: z.enum(['עולה', 'יורד', 'יציב']).describe('כיוון הטרנד'),
-  strength: z.number().min(1).max(100).describe('עוצמת הטרנד'),
-  timeframe: z.string().describe('מסגרת זמן צפויה'),
-  impact: z.object({
-    opportunities: z.array(z.string()).describe('הזדמנויות שנובעות מהטרנד'),
-    threats: z.array(z.string()).describe('איומים פוטנציאליים'),
-    neutrals: z.array(z.string()).describe('השפעות ניטרליות'),
-  }),
-  recommendations: z.array(
-    z.object({
-      action: z.string().describe('הפעולה המומלצת'),
-      priority: z.enum(['גבוהה', 'בינונית', 'נמוכה']).describe('עדיפות'),
-      timeline: z.string().describe('לוח זמנים מומלץ'),
-    })
-  ).describe('המלצות אסטרטגיות'),
-  relatedTrends: z.array(z.string()).describe('טרנדים קשורים'),
-  confidence: z.number().min(1).max(100).describe('רמת הביטחון בניתוח'),
-})
 
 export async function POST(request: Request) {
   try {
@@ -35,52 +13,32 @@ export async function POST(request: Request) {
       )
     }
 
-    const { output } = await generateText({
-      model: 'anthropic/claude-sonnet-4-20250514',
-      output: Output.object({
-        schema: trendAnalysisSchema,
-      }),
-      messages: [
-        {
-          role: 'system',
-          content: `אתה אנליסט טרנדים ומגמות שוק מומחה לשוק הישראלי.
-תפקידך לנתח מגמות עסקיות וטכנולוגיות ולספק תובנות אסטרטגיות.
-התמקד בהשלכות מעשיות על עסקים קטנים ובינוניים בישראל.
-כל התשובות שלך חייבות להיות בעברית מלאה ומקצועית.`,
-        },
-        {
-          role: 'user',
-          content: `נתח את הטרנדים הבאים וספק תובנות אסטרטגיות:
+    const output = await analyzeWithAI(`נתח את הטרנדים הבאים וספק תובנות אסטרטגיות לשוק הישראלי.
 
 נתוני טרנדים:
 ${JSON.stringify(trendData, null, 2)}
 
 ${companyContext ? `הקשר עסקי:\n${JSON.stringify(companyContext, null, 2)}` : ''}
 
-אנא ספק:
-1. סיכום כללי של המגמה
-2. כיוון הטרנד (עולה/יורד/יציב)
-3. עוצמת הטרנד (1-100)
-4. מסגרת זמן צפויה
-5. השפעות - הזדמנויות, איומים, ניטרליות
-6. המלצות אסטרטגיות עם עדיפות ולוח זמנים
-7. טרנדים קשורים
-8. רמת ביטחון בניתוח`,
-        },
-      ],
-    })
+החזר JSON בפורמט זה בלבד:
+{
+  "summary": "סיכום כללי של הטרנד",
+  "direction": "עולה",
+  "strength": 75,
+  "timeframe": "6-12 חודשים",
+  "impact": {
+    "opportunities": ["הזדמנות 1", "הזדמנות 2"],
+    "threats": ["איום 1", "איום 2"],
+    "neutrals": ["השפעה ניטרלית 1"]
+  },
+  "recommendations": [
+    { "action": "פעולה מומלצת", "priority": "גבוהה", "timeline": "תוך חודש" }
+  ],
+  "relatedTrends": ["טרנד קשור 1", "טרנד קשור 2"],
+  "confidence": 80
+}`)
 
-    if (!output) {
-      return NextResponse.json(
-        { success: false, error: 'לא התקבלה תשובה מהמודל' },
-        { status: 500 }
-      )
-    }
-
-    // Save trend analysis to Supabase
     const supabase = await createClient()
-    
-    // Update existing trends or insert analysis results
     for (const trend of trendData) {
       if (trend.id) {
         await supabase

@@ -1,9 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
+import { analyzeWithAI } from "@/lib/ai"
+import { scrapeWebsite } from "@/lib/scrape"
+import { search } from "@/lib/search"
 import { NextResponse } from "next/server"
-import { createGroq } from "@ai-sdk/groq"
-import { generateText } from "ai"
-
-const groq = createGroq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST(request: Request) {
   try {
@@ -20,91 +19,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "חסרים פרטי מתחרה" }, { status: 400 })
     }
 
-    // Fetch company profile for context
     const { data: company } = await supabase
       .from("companies")
       .select("name, industry, description")
       .eq("id", user.id)
       .single()
 
-    // Try to fetch website content using Firecrawl if available
-    let websiteContent = ""
-    if (competitorWebsite && process.env.FIRECRAWL_API_KEY) {
-      try {
-        const firecrawlResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.FIRECRAWL_API_KEY}`,
-          },
-          body: JSON.stringify({
-            url: competitorWebsite,
-            formats: ["markdown"],
-          }),
-        })
+    const [websiteContent, searchResults] = await Promise.all([
+      competitorWebsite ? scrapeWebsite(competitorWebsite) : Promise.resolve(''),
+      search(`${competitorName} ישראל מוצרים שירותים`, 6),
+    ])
 
-        if (firecrawlResponse.ok) {
-          const firecrawlData = await firecrawlResponse.json()
-          if (firecrawlData.success && firecrawlData.data?.markdown) {
-            // Limit content to avoid token limits
-            websiteContent = firecrawlData.data.markdown.slice(0, 8000)
-          }
-        }
-      } catch (e) {
-        console.error("Firecrawl error:", e)
-      }
-    }
-
-    const prompt = `אתה אנליסט עסקי מומחה. נתח את המתחרה הבא עבור החברה שלנו.
+    const analysis = await analyzeWithAI(`נתח את המתחרה הבא עבור החברה שלנו.
 
 החברה שלנו:
 - שם: ${company?.name || "לא ידוע"}
 - תעשייה: ${company?.industry || "לא ידוע"}
 - תיאור: ${company?.description || "לא ידוע"}
 
-המתחרה לניתוח:
+המתחרה:
 - שם: ${competitorName}
 - אתר: ${competitorWebsite || "לא ידוע"}
-${websiteContent ? `\nתוכן מהאתר:\n${websiteContent}` : ""}
+${websiteContent ? `\nתוכן מהאתר:\n${websiteContent.slice(0, 3000)}` : ""}
 
-צור ניתוח תחרותי מקיף בעברית. החזר JSON בפורמט הבא בלבד:
+תוצאות חיפוש:
+${searchResults.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
+
+החזר JSON בפורמט זה בלבד:
 {
-  "overview": "תיאור כללי של המתחרה ב-2-3 משפטים",
-  "products": ["מוצר/שירות 1", "מוצר/שירות 2", "מוצר/שירות 3"],
-  "pricing": "מידע על תמחור אם זמין, אחרת הערכה",
+  "overview": "תיאור כללי של המתחרה",
+  "products": ["מוצר 1", "מוצר 2", "מוצר 3"],
+  "pricing": "מידע על תמחור",
   "strengths": ["חוזקה 1", "חוזקה 2", "חוזקה 3"],
   "weaknesses": ["חולשה 1", "חולשה 2", "חולשה 3"],
-  "positioning": "איך הם ממוצבים בשוק",
-  "threatLevel": "גבוה" | "בינוני" | "נמוך",
-  "opportunities": ["הזדמנות 1 להתחרות בהם", "הזדמנות 2"],
+  "positioning": "מיצוב בשוק",
+  "threatLevel": "בינוני",
+  "opportunities": ["הזדמנות 1", "הזדמנות 2"],
   "recommendations": ["המלצה 1", "המלצה 2"]
-}
+}`)
 
-החזר רק JSON תקין, ללא טקסט נוסף.`
-
-    const { text } = await generateText({
-      model: groq("llama-3.3-70b-versatile"),
-      prompt,
-      maxTokens: 2000,
-    })
-
-    // Parse JSON from response
-    let analysis
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0])
-      } else {
-        throw new Error("No JSON found")
-      }
-    } catch {
-      return NextResponse.json({ 
-        success: false, 
-        error: "שגיאה בניתוח התוצאות" 
-      }, { status: 500 })
-    }
-
-    // Save analysis to database
     await supabase.from("competitive_analysis").insert({
       company_id: user.id,
       data: {
@@ -116,7 +69,6 @@ ${websiteContent ? `\nתוכן מהאתר:\n${websiteContent}` : ""}
       },
     })
 
-    // Update competitor threat score based on analysis
     const threatScoreMap: Record<string, number> = {
       "גבוה": 85,
       "בינוני": 60,
@@ -126,16 +78,10 @@ ${websiteContent ? `\nתוכן מהאתר:\n${websiteContent}` : ""}
 
     await supabase
       .from("competitors")
-      .update({ 
-        threat_score: threatScore,
-        positioning: analysis.positioning,
-      })
+      .update({ threat_score: threatScore, positioning: analysis.positioning })
       .eq("id", competitorId)
 
-    return NextResponse.json({
-      success: true,
-      analysis,
-    })
+    return NextResponse.json({ success: true, analysis })
   } catch (error) {
     console.error("Error analyzing competitor:", error)
     return NextResponse.json(

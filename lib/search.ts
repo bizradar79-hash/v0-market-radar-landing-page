@@ -1,10 +1,12 @@
 import { tavily } from '@tavily/core'
 
-const client = tavily({ apiKey: process.env.TAVILY_API_KEY! })
+function getClient() {
+  return tavily({ apiKey: process.env.TAVILY_API_KEY! })
+}
 
 export async function search(query: string, maxResults = 8) {
   try {
-    const res = await client.search(query, { maxResults, includeAnswer: true })
+    const res = await getClient().search(query, { maxResults, includeAnswer: true })
     return res.results.map(r => ({
       title: r.title,
       url: r.url,
