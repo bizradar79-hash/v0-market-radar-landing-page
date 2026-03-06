@@ -14,6 +14,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { 
   Target, 
   TrendingUp,
@@ -21,10 +33,15 @@ import {
   Minus,
   Clock,
   AlertTriangle,
-  Eye,
   Loader2,
   Activity,
+  Sparkles,
+  MoreHorizontal,
+  Eye,
+  Trash2,
+  ExternalLink,
 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface Competitor {
   id: string
@@ -43,8 +60,10 @@ interface Competitor {
 export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedCompetitor, setSelectedCompetitor] = useState<string | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null)
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchCompetitors()
@@ -62,14 +81,58 @@ export default function CompetitorsPage() {
     setLoading(false)
   }
 
+  async function discoverCompetitors() {
+    setDiscovering(true)
+    try {
+      const response = await fetch("/api/find-competitors", { method: "POST" })
+      const data = await response.json()
+      
+      if (data.success) {
+        await fetchCompetitors()
+        toast({
+          title: "גילוי הושלם!",
+          description: `נמצאו ${data.count || 0} מתחרים חדשים`,
+        })
+      } else {
+        toast({
+          title: "שגיאה",
+          description: data.error || "לא הצלחנו לגלות מתחרים",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error discovering competitors:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת הגילוי",
+        variant: "destructive",
+      })
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  async function deleteCompetitor(id: string) {
+    const { error } = await supabase
+      .from("competitors")
+      .delete()
+      .eq("id", id)
+    
+    if (!error) {
+      setCompetitors(competitors.filter(c => c.id !== id))
+      setSelectedCompetitor(null)
+      toast({ title: "המתחרה נמחק" })
+    }
+  }
+
   const getTrendIcon = (trend: string) => {
     switch (trend) {
       case "up":
-        return <TrendingUp className="h-4 w-4 text-red-400" />
+        return <TrendingUp className="h-4 w-4 text-red-600" />
       case "down":
-        return <TrendingDown className="h-4 w-4 text-green-400" />
+        return <TrendingDown className="h-4 w-4 text-green-600" />
       default:
-        return <Minus className="h-4 w-4 text-yellow-400" />
+        return <Minus className="h-4 w-4 text-yellow-600" />
     }
   }
 
@@ -85,27 +148,21 @@ export default function CompetitorsPage() {
   }
 
   const getThreatColor = (score: number) => {
-    if (score >= 80) return "text-red-400"
-    if (score >= 60) return "text-yellow-400"
-    return "text-green-400"
-  }
-
-  const getThreatProgressColor = (score: number) => {
-    if (score >= 80) return "[&>div]:bg-red-500"
-    if (score >= 60) return "[&>div]:bg-yellow-500"
-    return "[&>div]:bg-green-500"
+    if (score >= 80) return "text-red-600"
+    if (score >= 60) return "text-yellow-600"
+    return "text-green-600"
   }
 
   const getPositionBadge = (position: string) => {
     switch (position) {
       case "מוביל שוק":
-        return "bg-red-500/20 text-red-400 border-red-500/30"
+        return "bg-red-100 text-red-700 border-red-200"
       case "מתחרה ישיר":
-        return "bg-orange-500/20 text-orange-400 border-orange-500/30"
+        return "bg-orange-100 text-orange-700 border-orange-200"
       case "שחקן חדש":
-        return "bg-blue-500/20 text-blue-400 border-blue-500/30"
+        return "bg-blue-100 text-blue-700 border-blue-200"
       default:
-        return "bg-gray-500/20 text-gray-400 border-gray-500/30"
+        return "bg-gray-100 text-gray-700 border-gray-200"
     }
   }
 
@@ -119,19 +176,6 @@ export default function CompetitorsPage() {
     const diffDays = Math.floor(diffHours / 24)
     if (diffDays === 1) return "לפני יום"
     return `לפני ${diffDays} ימים`
-  }
-
-  const getActivityTypeIcon = (type: string) => {
-    switch (type) {
-      case "השקת מוצר":
-        return "bg-purple-500/20 text-purple-400"
-      case "שינוי מחירים":
-        return "bg-yellow-500/20 text-yellow-400"
-      case "גיוס הון":
-        return "bg-green-500/20 text-green-400"
-      default:
-        return "bg-gray-500/20 text-gray-400"
-    }
   }
 
   if (loading) {
@@ -152,16 +196,31 @@ export default function CompetitorsPage() {
             {competitors.length} מתחרים במעקב
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <AlertTriangle className="h-4 w-4 text-red-400" />
-          <span className="text-muted-foreground">
-            {competitors.filter(c => c.threat_score >= 80).length} מתחרים ברמת איום גבוהה
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <span className="text-muted-foreground">
+              {competitors.filter(c => c.threat_score >= 80).length} ברמת איום גבוהה
+            </span>
+          </div>
+          <Button onClick={discoverCompetitors} disabled={discovering}>
+            {discovering ? (
+              <>
+                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                מגלה מתחרים...
+              </>
+            ) : (
+              <>
+                <Sparkles className="ml-2 h-4 w-4" />
+                גלה מתחרים עם AI
+              </>
+            )}
+          </Button>
         </div>
       </div>
 
       {/* Comparison Table */}
-      <Card className="border-border bg-card">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Target className="h-5 w-5 text-primary" />
@@ -172,12 +231,11 @@ export default function CompetitorsPage() {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
+                <TableRow>
                   <TableHead className="text-right">שם</TableHead>
                   <TableHead className="text-right hidden md:table-cell">שירותים</TableHead>
                   <TableHead className="text-right hidden lg:table-cell">מחירון</TableHead>
                   <TableHead className="text-right">פוזיציה</TableHead>
-                  <TableHead className="text-right hidden sm:table-cell">פעילות אחרונה</TableHead>
                   <TableHead className="text-right">ציון איום</TableHead>
                   <TableHead className="text-right">מגמה</TableHead>
                   <TableHead className="text-right">פעולות</TableHead>
@@ -185,21 +243,13 @@ export default function CompetitorsPage() {
               </TableHeader>
               <TableBody>
                 {competitors.map((competitor) => (
-                  <TableRow 
-                    key={competitor.id} 
-                    className={`border-border cursor-pointer transition-colors ${
-                      selectedCompetitor === competitor.id ? "bg-primary/5" : ""
-                    }`}
-                    onClick={() => setSelectedCompetitor(
-                      selectedCompetitor === competitor.id ? null : competitor.id
-                    )}
-                  >
+                  <TableRow key={competitor.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                           <Target className="h-4 w-4 text-primary" />
                         </div>
-                        <span className="font-medium text-foreground">{competitor.name}</span>
+                        <span className="font-medium">{competitor.name}</span>
                       </div>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
@@ -217,23 +267,12 @@ export default function CompetitorsPage() {
                         {competitor.positioning || "לא ידוע"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" />
-                        {formatTimeAgo(competitor.created_at)}
-                      </div>
-                    </TableCell>
                     <TableCell>
                       <div className="w-24 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className={`text-sm font-semibold ${getThreatColor(competitor.threat_score)}`}>
-                            {competitor.threat_score}
-                          </span>
-                        </div>
-                        <Progress 
-                          value={competitor.threat_score} 
-                          className={`h-1.5 ${getThreatProgressColor(competitor.threat_score)}`} 
-                        />
+                        <span className={`text-sm font-semibold ${getThreatColor(competitor.threat_score)}`}>
+                          {competitor.threat_score}
+                        </span>
+                        <Progress value={competitor.threat_score} className="h-1.5" />
                       </div>
                     </TableCell>
                     <TableCell>
@@ -245,9 +284,34 @@ export default function CompetitorsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setSelectedCompetitor(competitor)}>
+                            <Eye className="ml-2 h-4 w-4" />
+                            צפה בפרטים
+                          </DropdownMenuItem>
+                          {competitor.website && (
+                            <DropdownMenuItem asChild>
+                              <a href={competitor.website.startsWith('http') ? competitor.website : `https://${competitor.website}`} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="ml-2 h-4 w-4" />
+                                פתח אתר
+                              </a>
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem 
+                            onClick={() => deleteCompetitor(competitor.id)}
+                            className="text-red-600"
+                          >
+                            <Trash2 className="ml-2 h-4 w-4" />
+                            מחק
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -258,67 +322,139 @@ export default function CompetitorsPage() {
       </Card>
 
       {/* Activity Feed */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Activity className="h-5 w-5 text-primary" />
-            פעילות אחרונה של מתחרים
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {competitors.map((competitor) => (
-              <div 
-                key={competitor.id}
-                className="flex items-start gap-4 rounded-lg border border-border bg-secondary/20 p-4 transition-colors hover:bg-secondary/40"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Activity className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-foreground">{competitor.name}</span>
-                    <Badge variant="secondary" className="bg-secondary/50 text-xs">
-                      {competitor.services || "לא ידוע"}
-                    </Badge>
+      {competitors.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Activity className="h-5 w-5 text-primary" />
+              פעילות אחרונה של מתחרים
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {competitors.slice(0, 5).map((competitor) => (
+                <div 
+                  key={competitor.id}
+                  className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                    <Activity className="h-5 w-5 text-primary" />
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {competitor.last_activity || "אין פעילות אחרונה"}
-                  </p>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatTimeAgo(competitor.created_at)}
-                    </span>
-                    <Badge 
-                      variant="outline" 
-                      className={
-                        competitor.threat_score >= 80 
-                          ? "border-red-500/30 text-red-400" 
-                          : "border-yellow-500/30 text-yellow-400"
-                      }
-                    >
-                      איום: {competitor.threat_score}
-                    </Badge>
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{competitor.name}</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {competitor.services || "לא ידוע"}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {competitor.last_activity || "אין פעילות אחרונה"}
+                    </p>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatTimeAgo(competitor.created_at)}
+                      </span>
+                      <Badge 
+                        variant="outline" 
+                        className={
+                          competitor.threat_score >= 80 
+                            ? "border-red-200 text-red-600" 
+                            : "border-yellow-200 text-yellow-600"
+                        }
+                      >
+                        איום: {competitor.threat_score}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {getTrendIcon(competitor.trend)}
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  {getTrendIcon(competitor.trend)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {competitors.length === 0 && (
-        <Card className="border-border bg-card">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Target className="h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">לא נמצאו מתחרים במעקב</p>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
+
+      {competitors.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Target className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">לא נמצאו מתחרים במעקב</p>
+            <Button className="mt-4" onClick={discoverCompetitors} disabled={discovering}>
+              <Sparkles className="ml-2 h-4 w-4" />
+              גלה מתחרים עם AI
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Competitor Details Modal */}
+      <Dialog open={!!selectedCompetitor} onOpenChange={() => setSelectedCompetitor(null)}>
+        <DialogContent className="max-w-lg">
+          {selectedCompetitor && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                    <Target className="h-5 w-5 text-primary" />
+                  </div>
+                  {selectedCompetitor.name}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">שירותים</p>
+                    <p className="font-medium">{selectedCompetitor.services || "לא ידוע"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">תמחור</p>
+                    <p className="font-medium">{selectedCompetitor.pricing || "לא ידוע"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">פוזיציה</p>
+                    <Badge variant="outline" className={getPositionBadge(selectedCompetitor.positioning || "לא ידוע")}>
+                      {selectedCompetitor.positioning || "לא ידוע"}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">ציון איום</p>
+                    <p className={`font-bold text-lg ${getThreatColor(selectedCompetitor.threat_score)}`}>
+                      {selectedCompetitor.threat_score}
+                    </p>
+                  </div>
+                </div>
+                {selectedCompetitor.last_activity && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">פעילות אחרונה</p>
+                    <p>{selectedCompetitor.last_activity}</p>
+                  </div>
+                )}
+                <div className="flex gap-2 pt-4 border-t">
+                  {selectedCompetitor.website && (
+                    <Button variant="outline" asChild>
+                      <a href={selectedCompetitor.website.startsWith('http') ? selectedCompetitor.website : `https://${selectedCompetitor.website}`} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="ml-2 h-4 w-4" />
+                        פתח אתר
+                      </a>
+                    </Button>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    className="text-red-600"
+                    onClick={() => deleteCompetitor(selectedCompetitor.id)}
+                  >
+                    <Trash2 className="ml-2 h-4 w-4" />
+                    מחק
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

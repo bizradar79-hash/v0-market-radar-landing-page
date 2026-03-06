@@ -6,6 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { 
   FileText, 
   Building2,
@@ -16,7 +22,10 @@ import {
   ExternalLink,
   Loader2,
   AlertTriangle,
+  Sparkles,
+  Trash2,
 } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface Tender {
   id: string
@@ -34,7 +43,10 @@ interface Tender {
 export default function TendersPage() {
   const [tenders, setTenders] = useState<Tender[]>([])
   const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [selectedTender, setSelectedTender] = useState<Tender | null>(null)
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchTenders()
@@ -50,6 +62,50 @@ export default function TendersPage() {
       setTenders(data)
     }
     setLoading(false)
+  }
+
+  async function generateTenders() {
+    setGenerating(true)
+    try {
+      const response = await fetch("/api/generate-tenders", { method: "POST" })
+      const data = await response.json()
+      
+      if (data.success) {
+        await fetchTenders()
+        toast({
+          title: "מכרזים נוספו!",
+          description: `נמצאו ${data.count || 0} מכרזים חדשים`,
+        })
+      } else {
+        toast({
+          title: "שגיאה",
+          description: data.error || "לא הצלחנו לאתר מכרזים",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error generating tenders:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת איתור המכרזים",
+        variant: "destructive",
+      })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function deleteTender(id: string) {
+    const { error } = await supabase
+      .from("tenders")
+      .delete()
+      .eq("id", id)
+    
+    if (!error) {
+      setTenders(tenders.filter(t => t.id !== id))
+      setSelectedTender(null)
+      toast({ title: "המכרז נמחק" })
+    }
   }
 
   const getDaysUntilDeadline = (deadline: string) => {
@@ -71,28 +127,9 @@ export default function TendersPage() {
   const getDeadlineStatus = (deadline: string) => {
     const days = getDaysUntilDeadline(deadline)
     if (days < 0) return { text: "פג תוקף", color: "text-gray-500", urgent: false }
-    if (days <= 7) return { text: `${days} ימים`, color: "text-red-400", urgent: true }
-    if (days <= 14) return { text: `${days} ימים`, color: "text-yellow-400", urgent: false }
-    return { text: `${days} ימים`, color: "text-green-400", urgent: false }
-  }
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case "טכנולוגיה":
-        return "bg-blue-500/20 text-blue-400"
-      case "AI":
-        return "bg-purple-500/20 text-purple-400"
-      case "סייבר":
-        return "bg-red-500/20 text-red-400"
-      default:
-        return "bg-gray-500/20 text-gray-400"
-    }
-  }
-
-  const getRelevanceColor = (score: number) => {
-    if (score >= 90) return "[&>div]:bg-green-500"
-    if (score >= 70) return "[&>div]:bg-yellow-500"
-    return "[&>div]:bg-gray-500"
+    if (days <= 7) return { text: `${days} ימים`, color: "text-red-600", urgent: true }
+    if (days <= 14) return { text: `${days} ימים`, color: "text-yellow-600", urgent: false }
+    return { text: `${days} ימים`, color: "text-green-600", urgent: false }
   }
 
   if (loading) {
@@ -113,11 +150,26 @@ export default function TendersPage() {
             {tenders.length} מכרזים פעילים
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <AlertTriangle className="h-4 w-4 text-red-400" />
-          <span className="text-muted-foreground">
-            {tenders.filter(t => getDaysUntilDeadline(t.deadline) <= 7 && getDaysUntilDeadline(t.deadline) >= 0).length} מכרזים עם דדליין קרוב
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <span className="text-muted-foreground">
+              {tenders.filter(t => getDaysUntilDeadline(t.deadline) <= 7 && getDaysUntilDeadline(t.deadline) >= 0).length} עם דדליין קרוב
+            </span>
+          </div>
+          <Button onClick={generateTenders} disabled={generating}>
+            {generating ? (
+              <>
+                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                מחפש מכרזים...
+              </>
+            ) : (
+              <>
+                <Sparkles className="ml-2 h-4 w-4" />
+                חפש מכרזים עם AI
+              </>
+            )}
+          </Button>
         </div>
       </div>
 
@@ -129,17 +181,16 @@ export default function TendersPage() {
           return (
             <Card 
               key={tender.id} 
-              className={`border-border bg-card transition-all hover:border-primary/50 ${
-                deadlineStatus.urgent ? "border-red-500/50" : ""
+              className={`cursor-pointer transition-all hover:shadow-md ${
+                deadlineStatus.urgent ? "border-red-200" : ""
               }`}
+              onClick={() => setSelectedTender(tender)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
-                  <Badge variant="outline" className="bg-blue-500/20 text-blue-400">
-                    מכרז
-                  </Badge>
+                  <Badge variant="secondary">מכרז</Badge>
                   {deadlineStatus.urgent && (
-                    <Badge variant="destructive" className="bg-red-500/20 text-red-400">
+                    <Badge variant="destructive" className="bg-red-100 text-red-700">
                       <AlertTriangle className="ml-1 h-3 w-3" />
                       דחוף
                     </Badge>
@@ -153,7 +204,7 @@ export default function TendersPage() {
                 {/* Organization */}
                 <div className="flex items-center gap-2 text-sm">
                   <Building2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-foreground">{tender.organization}</span>
+                  <span>{tender.organization}</span>
                 </div>
 
                 {/* Description */}
@@ -162,11 +213,11 @@ export default function TendersPage() {
                 </p>
 
                 {/* Budget */}
-                <div className="flex items-center gap-2 rounded-lg bg-secondary/30 p-3">
+                <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3">
                   <Banknote className="h-5 w-5 text-primary" />
                   <div>
                     <p className="text-xs text-muted-foreground">תקציב משוער</p>
-                    <p className="font-semibold text-foreground">{tender.budget}</p>
+                    <p className="font-semibold">{tender.budget}</p>
                   </div>
                 </div>
 
@@ -179,21 +230,18 @@ export default function TendersPage() {
                     </span>
                     <span className="font-semibold text-primary">{tender.relevance_score}%</span>
                   </div>
-                  <Progress 
-                    value={tender.relevance_score} 
-                    className={`h-2 ${getRelevanceColor(tender.relevance_score)}`} 
-                  />
+                  <Progress value={tender.relevance_score} className="h-2" />
                 </div>
 
                 {/* Deadline */}
                 <div className={`flex items-center justify-between rounded-lg p-3 ${
-                  deadlineStatus.urgent ? "bg-red-500/10" : "bg-secondary/30"
+                  deadlineStatus.urgent ? "bg-red-50" : "bg-muted/50"
                 }`}>
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <p className="text-xs text-muted-foreground">תאריך אחרון להגשה</p>
-                      <p className="text-sm font-medium text-foreground">
+                      <p className="text-xs text-muted-foreground">תאריך אחרון</p>
+                      <p className="text-sm font-medium">
                         {formatDeadline(tender.deadline)}
                       </p>
                     </div>
@@ -207,7 +255,7 @@ export default function TendersPage() {
                 </div>
 
                 {/* Action Button */}
-                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                <Button className="w-full" onClick={(e) => { e.stopPropagation(); }}>
                   <ExternalLink className="ml-2 h-4 w-4" />
                   הגש הצעה
                 </Button>
@@ -218,13 +266,74 @@ export default function TendersPage() {
       </div>
 
       {tenders.length === 0 && (
-        <Card className="border-border bg-card">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FileText className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-muted-foreground">לא נמצאו מכרזים פעילים</p>
+            <Button className="mt-4" onClick={generateTenders} disabled={generating}>
+              <Sparkles className="ml-2 h-4 w-4" />
+              חפש מכרזים עם AI
+            </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Tender Details Modal */}
+      <Dialog open={!!selectedTender} onOpenChange={() => setSelectedTender(null)}>
+        <DialogContent className="max-w-lg">
+          {selectedTender && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedTender.title}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">{selectedTender.organization}</span>
+                </div>
+                
+                <p className="text-muted-foreground">{selectedTender.description}</p>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">תקציב משוער</p>
+                    <p className="font-semibold text-lg">{selectedTender.budget}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">ציון רלוונטיות</p>
+                    <p className="font-semibold text-lg text-primary">{selectedTender.relevance_score}%</p>
+                  </div>
+                </div>
+
+                <div className={`rounded-lg p-3 ${
+                  getDeadlineStatus(selectedTender.deadline).urgent ? "bg-red-50" : "bg-muted/50"
+                }`}>
+                  <p className="text-xs text-muted-foreground">תאריך אחרון להגשה</p>
+                  <p className="font-semibold">{formatDeadline(selectedTender.deadline)}</p>
+                  <p className={`text-sm ${getDeadlineStatus(selectedTender.deadline).color}`}>
+                    {getDeadlineStatus(selectedTender.deadline).text}
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t">
+                  <Button className="flex-1">
+                    <ExternalLink className="ml-2 h-4 w-4" />
+                    הגש הצעה
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="text-red-600"
+                    onClick={() => deleteTender(selectedTender.id)}
+                  >
+                    <Trash2 className="ml-2 h-4 w-4" />
+                    מחק
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -14,6 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { 
   Lightbulb, 
   ArrowUpDown, 
@@ -22,6 +28,11 @@ import {
   ExternalLink,
   Loader2,
   Filter,
+  CheckCircle2,
+  TrendingUp,
+  Users,
+  Globe,
+  X,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -49,6 +60,7 @@ export default function OpportunitiesPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [minScore, setMinScore] = useState<number>(0)
   const [sortBy, setSortBy] = useState<SortOption>("score")
+  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null)
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -78,7 +90,7 @@ export default function OpportunitiesPage() {
         await fetchOpportunities()
         toast({
           title: "ניתוח הושלם!",
-          description: `נמצאו ${data.count || 0} הזדמנויות חדשות`,
+          description: `נמצאו ${data.count || 0} הזदמנויות חדשות`,
         })
       } else if (data.throttled) {
         toast({
@@ -102,6 +114,19 @@ export default function OpportunitiesPage() {
       })
     } finally {
       setAnalyzing(false)
+    }
+  }
+
+  async function deleteOpportunity(id: string) {
+    const { error } = await supabase
+      .from("opportunities")
+      .delete()
+      .eq("id", id)
+    
+    if (!error) {
+      setOpportunities(opportunities.filter(o => o.id !== id))
+      setSelectedOpportunity(null)
+      toast({ title: "ההזדמנות נמחקה" })
     }
   }
 
@@ -130,28 +155,26 @@ export default function OpportunitiesPage() {
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "דחופה":
-        return "bg-red-500/20 text-red-400 border-red-500/30"
+        return "bg-red-100 text-red-700 border-red-200"
       case "גבוהה":
-        return "bg-orange-500/20 text-orange-400 border-orange-500/30"
+        return "bg-orange-100 text-orange-700 border-orange-200"
       case "בינונית":
-        return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+        return "bg-yellow-100 text-yellow-700 border-yellow-200"
       default:
-        return "bg-gray-500/20 text-gray-400 border-gray-500/30"
+        return "bg-gray-100 text-gray-700 border-gray-200"
     }
   }
 
-  const getTypeColor = (type: string) => {
+  const getTypeIcon = (type: string) => {
     switch (type) {
-      case "טכנולוגיה":
-        return "bg-blue-500/20 text-blue-400"
-      case "שותפות":
-        return "bg-purple-500/20 text-purple-400"
-      case "בריאות":
-        return "bg-green-500/20 text-green-400"
-      case "שוק":
-        return "bg-cyan-500/20 text-cyan-400"
+      case "שוק לא מנוצל":
+        return <Globe className="h-4 w-4" />
+      case "שיתוף פעולה":
+        return <Users className="h-4 w-4" />
+      case "צמיחה":
+        return <TrendingUp className="h-4 w-4" />
       default:
-        return "bg-gray-500/20 text-gray-400"
+        return <Target className="h-4 w-4" />
     }
   }
 
@@ -187,12 +210,11 @@ export default function OpportunitiesPage() {
         <Button 
           onClick={analyzeWithAI} 
           disabled={analyzing}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {analyzing ? (
             <>
               <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-              מנתח את השוק הישראלי...
+              מנתח את השוק...
             </>
           ) : (
             <>
@@ -204,7 +226,7 @@ export default function OpportunitiesPage() {
       </div>
 
       {/* Filters */}
-      <Card className="border-border bg-card">
+      <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
@@ -213,7 +235,7 @@ export default function OpportunitiesPage() {
             </div>
             
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-40 bg-secondary/50">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="סוג הזדמנות" />
               </SelectTrigger>
               <SelectContent>
@@ -227,7 +249,7 @@ export default function OpportunitiesPage() {
             </Select>
 
             <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-40 bg-secondary/50">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="עדיפות" />
               </SelectTrigger>
               <SelectContent>
@@ -254,7 +276,7 @@ export default function OpportunitiesPage() {
             <div className="mr-auto flex items-center gap-2">
               <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                <SelectTrigger className="w-32 bg-secondary/50">
+                <SelectTrigger className="w-32">
                   <SelectValue placeholder="מיון" />
                 </SelectTrigger>
                 <SelectContent>
@@ -271,7 +293,11 @@ export default function OpportunitiesPage() {
       {/* Opportunities Grid */}
       <div className="grid gap-4 md:grid-cols-2">
         {filteredOpportunities.map((opportunity) => (
-          <Card key={opportunity.id} className="border-border bg-card transition-all hover:border-primary/50">
+          <Card 
+            key={opportunity.id} 
+            className="cursor-pointer transition-all hover:shadow-md hover:border-primary/50"
+            onClick={() => setSelectedOpportunity(opportunity)}
+          >
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -281,7 +307,7 @@ export default function OpportunitiesPage() {
                   <div>
                     <CardTitle className="text-base leading-tight">{opportunity.title}</CardTitle>
                     <div className="mt-1 flex items-center gap-2">
-                      <Badge variant="outline" className={getTypeColor(opportunity.type)}>
+                      <Badge variant="secondary" className="text-xs">
                         {opportunity.type}
                       </Badge>
                       <Badge variant="outline" className={getPriorityColor(opportunity.priority)}>
@@ -293,7 +319,7 @@ export default function OpportunitiesPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground leading-relaxed">
+              <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
                 {opportunity.description}
               </p>
 
@@ -302,50 +328,26 @@ export default function OpportunitiesPage() {
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">ציון השפעה</span>
-                    <span className="font-semibold text-primary">{opportunity.impact_score}/100</span>
+                    <span className="font-semibold text-primary">{opportunity.impact_score}</span>
                   </div>
                   <Progress value={opportunity.impact_score} className="h-2" />
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">רמת ביטחון</span>
-                    <span className="font-semibold text-foreground">{opportunity.confidence_score}%</span>
+                    <span className="font-semibold">{opportunity.confidence_score}%</span>
                   </div>
-                  <Progress value={opportunity.confidence_score} className="h-2 [&>div]:bg-blue-500" />
+                  <Progress value={opportunity.confidence_score} className="h-2" />
                 </div>
               </div>
 
-              {/* Recommended Actions */}
-              {opportunity.actions && opportunity.actions.length > 0 && (
-                <div className="space-y-2">
-                  <span className="text-xs font-medium text-muted-foreground">פעולות מומלצות:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {opportunity.actions.slice(0, 3).map((action, idx) => (
-                      <Badge 
-                        key={idx} 
-                        variant="secondary" 
-                        className="bg-secondary/50 text-xs font-normal"
-                      >
-                        {action}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Footer */}
-              <div className="flex items-center justify-between border-t border-border pt-3">
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Target className="h-3.5 w-3.5" />
-                    {opportunity.type}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-3.5 w-3.5" />
-                    {formatDate(opportunity.created_at)}
-                  </span>
+              <div className="flex items-center justify-between border-t pt-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {formatDate(opportunity.created_at)}
                 </div>
-                <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary">
+                <Button variant="ghost" size="sm" className="h-8 text-primary">
                   <ExternalLink className="ml-1 h-3.5 w-3.5" />
                   פרטים
                 </Button>
@@ -356,7 +358,7 @@ export default function OpportunitiesPage() {
       </div>
 
       {filteredOpportunities.length === 0 && (
-        <Card className="border-border bg-card">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Lightbulb className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-muted-foreground">לא נמצאו הזדמנויות מתאימות</p>
@@ -374,6 +376,110 @@ export default function OpportunitiesPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Opportunity Details Modal */}
+      <Dialog open={!!selectedOpportunity} onOpenChange={() => setSelectedOpportunity(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {selectedOpportunity && (
+            <>
+              <DialogHeader>
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                    {getTypeIcon(selectedOpportunity.type)}
+                  </div>
+                  <div className="flex-1">
+                    <DialogTitle className="text-xl">{selectedOpportunity.title}</DialogTitle>
+                    <div className="mt-2 flex items-center gap-2">
+                      <Badge variant="secondary">{selectedOpportunity.type}</Badge>
+                      <Badge variant="outline" className={getPriorityColor(selectedOpportunity.priority)}>
+                        {selectedOpportunity.priority}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-6 mt-4">
+                {/* Description */}
+                <div>
+                  <h4 className="text-sm font-medium text-foreground mb-2">תיאור ההזדמנות</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {selectedOpportunity.description}
+                  </p>
+                </div>
+
+                {/* Scores */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">ציון השפעה</span>
+                      <span className="text-2xl font-bold text-primary">{selectedOpportunity.impact_score}</span>
+                    </div>
+                    <Progress value={selectedOpportunity.impact_score} className="h-3" />
+                    <p className="text-xs text-muted-foreground">
+                      פוטנציאל ההשפעה על העסק שלך
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">רמת ביטחון</span>
+                      <span className="text-2xl font-bold">{selectedOpportunity.confidence_score}%</span>
+                    </div>
+                    <Progress value={selectedOpportunity.confidence_score} className="h-3" />
+                    <p className="text-xs text-muted-foreground">
+                      רמת הביטחון בניתוח
+                    </p>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                {selectedOpportunity.actions && selectedOpportunity.actions.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground mb-3">פעולות מומלצות</h4>
+                    <div className="space-y-2">
+                      {selectedOpportunity.actions.map((action, idx) => (
+                        <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                          <CheckCircle2 className="h-5 w-5 text-primary mt-0.5" />
+                          <span className="text-sm">{action}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sources */}
+                {selectedOpportunity.sources && selectedOpportunity.sources.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground mb-2">מקורות</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedOpportunity.sources.map((source, idx) => (
+                        <Badge key={idx} variant="outline">{source}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Footer */}
+                <div className="flex items-center justify-between pt-4 border-t">
+                  <span className="text-sm text-muted-foreground">
+                    נוצר ב-{formatDate(selectedOpportunity.created_at)}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => deleteOpportunity(selectedOpportunity.id)}
+                    >
+                      <X className="ml-1 h-4 w-4" />
+                      מחק
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

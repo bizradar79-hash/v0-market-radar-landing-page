@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -27,6 +27,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { 
   Users, 
   MoreHorizontal,
@@ -37,6 +43,9 @@ import {
   Filter,
   Building2,
   MapPin,
+  Sparkles,
+  Trash2,
+  ExternalLink,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -58,7 +67,7 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true)
   const [discovering, setDiscovering] = useState(false)
   const [industryFilter, setIndustryFilter] = useState<string>("all")
-  const [cityFilter, setCityFilter] = useState<string>("all")
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -109,40 +118,29 @@ export default function LeadsPage() {
     }
   }
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "bg-green-500/20 text-green-400 border-green-500/30"
-    if (score >= 60) return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
-    return "bg-red-500/20 text-red-400 border-red-500/30"
-  }
-
-  const getScoreProgressColor = (score: number) => {
-    if (score >= 80) return "[&>div]:bg-green-500"
-    if (score >= 60) return "[&>div]:bg-yellow-500"
-    return "[&>div]:bg-red-500"
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "חדש":
-        return "bg-blue-500/20 text-blue-400"
-      case "בטיפול":
-        return "bg-purple-500/20 text-purple-400"
-      case "מעוניין":
-        return "bg-green-500/20 text-green-400"
-      case "לא רלוונטי":
-        return "bg-gray-500/20 text-gray-400"
-      default:
-        return "bg-gray-500/20 text-gray-400"
+  async function deleteLead(id: string) {
+    const { error } = await supabase
+      .from("leads")
+      .delete()
+      .eq("id", id)
+    
+    if (!error) {
+      setLeads(leads.filter(l => l.id !== id))
+      setSelectedLead(null)
+      toast({ title: "הליד נמחק" })
     }
   }
 
-  // For demo, we'll use source as a proxy for industry
-  const industries = [...new Set(leads.map(l => l.source))]
-  const cities = ["תל אביב", "ירושלים", "חיפה", "באר שבע", "רמת גן"]
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return "bg-green-100 text-green-700 border-green-200"
+    if (score >= 60) return "bg-yellow-100 text-yellow-700 border-yellow-200"
+    return "bg-red-100 text-red-700 border-red-200"
+  }
+
+  const industries = [...new Set(leads.map(l => l.industry || l.source))]
 
   const filteredLeads = leads.filter((lead) => {
-    if (industryFilter !== "all" && lead.source !== industryFilter) return false
-    // City filter would work if we had city data
+    if (industryFilter !== "all" && (lead.industry || lead.source) !== industryFilter) return false
     return true
   })
 
@@ -164,29 +162,23 @@ export default function LeadsPage() {
             {filteredLeads.length} לידים פוטנציאליים
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button 
-            onClick={discoverWithAI} 
-            disabled={discovering}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            {discovering ? (
-              <>
-                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                מחפש לידים פוטנציאליים...
-              </>
-            ) : (
-              <>
-                <Users className="ml-2 h-4 w-4" />
-                גלה לידים חדשים עם AI
-              </>
-            )}
-          </Button>
-        </div>
+        <Button onClick={discoverWithAI} disabled={discovering}>
+          {discovering ? (
+            <>
+              <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+              מחפש לידים...
+            </>
+          ) : (
+            <>
+              <Sparkles className="ml-2 h-4 w-4" />
+              גלה לידים חדשים עם AI
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Filters */}
-      <Card className="border-border bg-card">
+      <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
@@ -195,7 +187,7 @@ export default function LeadsPage() {
             </div>
             
             <Select value={industryFilter} onValueChange={setIndustryFilter}>
-              <SelectTrigger className="w-40 bg-secondary/50">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="תעשייה" />
               </SelectTrigger>
               <SelectContent>
@@ -207,55 +199,40 @@ export default function LeadsPage() {
                 ))}
               </SelectContent>
             </Select>
-
-            <Select value={cityFilter} onValueChange={setCityFilter}>
-              <SelectTrigger className="w-40 bg-secondary/50">
-                <SelectValue placeholder="עיר" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">כל הערים</SelectItem>
-                {cities.map((city) => (
-                  <SelectItem key={city} value={city}>
-                    {city}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </CardContent>
       </Card>
 
       {/* Leads Table */}
-      <Card className="border-border bg-card">
+      <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
+              <TableRow>
                 <TableHead className="text-right">חברה</TableHead>
                 <TableHead className="text-right">תעשייה</TableHead>
                 <TableHead className="text-right hidden md:table-cell">עיר</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">סיבת גילוי</TableHead>
                 <TableHead className="text-right">ציון ליד</TableHead>
-                <TableHead className="text-right hidden sm:table-cell">מקור</TableHead>
                 <TableHead className="text-right">פעולות</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredLeads.map((lead) => (
-                <TableRow key={lead.id} className="border-border">
+                <TableRow key={lead.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                         <Building2 className="h-4 w-4 text-primary" />
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{lead.name}</p>
+                        <p className="font-medium">{lead.name}</p>
                         <p className="text-xs text-muted-foreground" dir="ltr">{lead.website}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="bg-secondary/50">
+                    <Badge variant="secondary">
                       {lead.industry || "טכנולוגיה"}
                     </Badge>
                   </TableCell>
@@ -273,23 +250,12 @@ export default function LeadsPage() {
                   <TableCell>
                     <div className="w-32 space-y-1">
                       <div className="flex items-center justify-between">
-                        <Badge 
-                          variant="outline" 
-                          className={`text-xs ${getScoreColor(lead.score)}`}
-                        >
+                        <Badge variant="outline" className={`text-xs ${getScoreColor(lead.score)}`}>
                           {lead.score}
                         </Badge>
                       </div>
-                      <Progress 
-                        value={lead.score} 
-                        className={`h-1.5 ${getScoreProgressColor(lead.score)}`} 
-                      />
+                      <Progress value={lead.score} className="h-1.5" />
                     </div>
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell">
-                    <Badge variant="outline" className={getStatusBadge(lead.status)}>
-                      {lead.source}
-                    </Badge>
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -299,10 +265,18 @@ export default function LeadsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setSelectedLead(lead)}>
                           <Eye className="ml-2 h-4 w-4" />
                           צפה בפרטים
                         </DropdownMenuItem>
+                        {lead.website && (
+                          <DropdownMenuItem asChild>
+                            <a href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="ml-2 h-4 w-4" />
+                              פתח אתר
+                            </a>
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem>
                           <Mail className="ml-2 h-4 w-4" />
                           שלח מייל
@@ -310,6 +284,13 @@ export default function LeadsPage() {
                         <DropdownMenuItem>
                           <Phone className="ml-2 h-4 w-4" />
                           התקשר
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => deleteLead(lead.id)}
+                          className="text-red-600"
+                        >
+                          <Trash2 className="ml-2 h-4 w-4" />
+                          מחק
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -322,13 +303,85 @@ export default function LeadsPage() {
       </Card>
 
       {filteredLeads.length === 0 && (
-        <Card className="border-border bg-card">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Users className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-muted-foreground">לא נמצאו לידים מתאימים</p>
+            <Button className="mt-4" onClick={discoverWithAI} disabled={discovering}>
+              <Sparkles className="ml-2 h-4 w-4" />
+              גלה לידים עם AI
+            </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Lead Details Modal */}
+      <Dialog open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
+        <DialogContent className="max-w-lg">
+          {selectedLead && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                    <Building2 className="h-5 w-5 text-primary" />
+                  </div>
+                  {selectedLead.name}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">תעשייה</p>
+                    <p className="font-medium">{selectedLead.industry || "טכנולוגיה"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">מיקום</p>
+                    <p className="font-medium">{selectedLead.location || "תל אביב"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">ציון ליד</p>
+                    <Badge variant="outline" className={getScoreColor(selectedLead.score)}>
+                      {selectedLead.score}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">מקור</p>
+                    <p className="font-medium">{selectedLead.source}</p>
+                  </div>
+                </div>
+                {selectedLead.reason && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">סיבת גילוי</p>
+                    <p>{selectedLead.reason}</p>
+                  </div>
+                )}
+                <div className="flex gap-2 pt-4 border-t">
+                  {selectedLead.website && (
+                    <Button variant="outline" asChild>
+                      <a href={selectedLead.website.startsWith('http') ? selectedLead.website : `https://${selectedLead.website}`} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="ml-2 h-4 w-4" />
+                        פתח אתר
+                      </a>
+                    </Button>
+                  )}
+                  <Button variant="outline">
+                    <Mail className="ml-2 h-4 w-4" />
+                    שלח מייל
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="text-red-600"
+                    onClick={() => deleteLead(selectedLead.id)}
+                  >
+                    <Trash2 className="ml-2 h-4 w-4" />
+                    מחק
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

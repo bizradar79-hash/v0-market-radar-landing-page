@@ -1,11 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import { 
@@ -19,6 +18,7 @@ import {
   Bell,
   ArrowLeft,
   Loader2,
+  RefreshCw,
 } from "lucide-react"
 
 interface DashboardData {
@@ -39,6 +39,7 @@ export default function AppDashboardPage() {
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState("")
   const [autoAnalyzing, setAutoAnalyzing] = useState(false)
+  const hasAutoAnalyzed = useRef(false)
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -46,13 +47,13 @@ export default function AppDashboardPage() {
     fetchDashboardData()
   }, [])
 
-  // Auto-run analysis if never analyzed or >24h ago
+  // Auto-run analysis once when dashboard loads if data exists but hasn't been analyzed recently
   useEffect(() => {
-    if (!data || loading || scanning || autoAnalyzing) return
+    if (!data || loading || scanning || autoAnalyzing || hasAutoAnalyzed.current) return
     
     const shouldAutoAnalyze = () => {
-      // If no data at all, don't auto-analyze (user should click button)
-      if (data.opportunitiesCount === 0 && data.leadsCount === 0) return false
+      // Only auto-analyze if we have some data
+      if (data.opportunitiesCount === 0 && data.leadsCount === 0 && data.competitorsCount === 0) return false
       
       // If never analyzed, run analysis
       if (!data.lastAnalyzed) return true
@@ -65,12 +66,12 @@ export default function AppDashboardPage() {
     }
 
     if (shouldAutoAnalyze()) {
+      hasAutoAnalyzed.current = true
       runAutoAnalysis()
     }
   }, [data, loading])
 
   async function fetchDashboardData() {
-    // Fetch counts from all tables - RLS will filter to current user
     const [
       { count: opportunitiesCount },
       { count: leadsCount },
@@ -140,24 +141,23 @@ export default function AppDashboardPage() {
       await new Promise(r => setTimeout(r, 500))
       
       setScanProgress("מנתח נתונים...")
-      const [analyzeRes, leadsRes] = await Promise.all([
+      const [analyzeRes, leadsRes, competitorsRes] = await Promise.all([
         fetch("/api/analyze", { method: "POST" }),
         fetch("/api/generate-leads", { method: "POST" }),
+        fetch("/api/find-competitors", { method: "POST" }),
       ])
       
       setScanProgress("יוצר המלצות...")
       const analyzeData = await analyzeRes.json()
       const leadsData = await leadsRes.json()
+      const competitorsData = await competitorsRes.json()
       
       await fetchDashboardData()
       
-      // Show success or error toast
-      if (analyzeData.success || leadsData.success) {
-        const opportunitiesCount = analyzeData.count || 0
-        const leadsCount = leadsData.count || 0
+      if (analyzeData.success || leadsData.success || competitorsData.success) {
         toast({
           title: "הסריקה הושלמה בהצלחה!",
-          description: `נמצאו ${opportunitiesCount} הזדמנויות ו-${leadsCount} לידים חדשים`,
+          description: `נמצאו ${analyzeData.count || 0} הזדמנויות, ${leadsData.count || 0} לידים ו-${competitorsData.count || 0} מתחרים`,
         })
       } else if (analyzeData.throttled) {
         toast({
@@ -239,12 +239,28 @@ export default function AppDashboardPage() {
           <h1 className="text-2xl font-bold text-foreground">דשבורד</h1>
           <p className="text-muted-foreground">סקירה כללית של הפעילות העסקית שלך</p>
         </div>
-        {data?.lastAnalyzed && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Activity className="h-4 w-4" />
-            <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {data?.lastAnalyzed && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Activity className="h-4 w-4" />
+              <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
+            </div>
+          )}
+          {(data?.opportunitiesCount || 0) > 0 && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={runFirstScan} 
+              disabled={scanning || autoAnalyzing}
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* KPI Grid */}
@@ -253,14 +269,14 @@ export default function AppDashboardPage() {
           const Icon = stat.icon
           return (
             <Link key={stat.key} href={stat.href}>
-              <Card className="border-border bg-card transition-all hover:border-primary/50 hover:bg-card/80">
+              <Card className="transition-all hover:shadow-md hover:border-primary/50">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                       <Icon className="h-5 w-5 text-primary" />
                     </div>
                     {stat.value > 0 && (
-                      <div className="flex items-center gap-1 text-sm text-green-400">
+                      <div className="flex items-center gap-1 text-sm text-green-600">
                         <TrendingUp className="h-4 w-4" />
                         <span>חדש</span>
                       </div>
@@ -269,7 +285,7 @@ export default function AppDashboardPage() {
                   <div className="mt-3">
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
                     <div className="mt-1 flex items-baseline gap-1">
-                      <span className="text-2xl font-bold text-foreground">{stat.value}</span>
+                      <span className="text-2xl font-bold">{stat.value}</span>
                     </div>
                   </div>
                   <div className="mt-3 flex items-center text-xs text-muted-foreground">
@@ -285,12 +301,12 @@ export default function AppDashboardPage() {
 
       {/* Empty State or Data Sections */}
       {data && (data.opportunitiesCount === 0 && data.leadsCount === 0) ? (
-        <Card className="border-border bg-card">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
               <BarChart3 className="h-8 w-8 text-primary" />
             </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">ברוכים הבאים ל-Market Radar!</h3>
+            <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-Market Radar!</h3>
             <p className="text-muted-foreground max-w-md mb-4">
               המערכת שלך מוכנה לפעולה. הפעל סריקה ראשונה כדי להתחיל לקבל מודיעין עסקי.
             </p>
@@ -300,11 +316,7 @@ export default function AppDashboardPage() {
                 <p className="text-sm text-muted-foreground">{scanProgress}</p>
               </div>
             ) : (
-              <Button
-                onClick={runFirstScan}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-                size="lg"
-              >
+              <Button onClick={runFirstScan} size="lg">
                 <BarChart3 className="ml-2 h-5 w-5" />
                 הפעל סריקה ראשונה
               </Button>
@@ -313,7 +325,7 @@ export default function AppDashboardPage() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          <Card className="border-border bg-card">
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Lightbulb className="h-5 w-5 text-primary" />
@@ -324,17 +336,17 @@ export default function AppDashboardPage() {
               {data?.topOpportunities && data.topOpportunities.length > 0 ? (
                 <div className="space-y-3">
                   {data.topOpportunities.map((opp, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg bg-secondary/30 p-3">
+                    <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-sm font-bold text-primary">
                           {opp.impact_score || 0}
                         </div>
-                        <span className="text-sm font-medium text-foreground">{opp.title}</span>
+                        <span className="text-sm font-medium">{opp.title}</span>
                       </div>
                       <Badge variant="outline" className={
                         opp.priority === "גבוהה" || opp.priority === "דחופה"
-                          ? "border-orange-500/30 text-orange-400" 
-                          : "border-yellow-500/30 text-yellow-400"
+                          ? "border-orange-200 text-orange-600" 
+                          : "border-yellow-200 text-yellow-600"
                       }>
                         {opp.priority || "בינונית"}
                       </Badge>
@@ -351,7 +363,7 @@ export default function AppDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card">
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <FileText className="h-5 w-5 text-primary" />
@@ -364,15 +376,15 @@ export default function AppDashboardPage() {
                   {data.upcomingTenders.map((tender, idx) => {
                     const days = getDaysUntil(tender.deadline)
                     return (
-                      <div key={idx} className="flex items-center justify-between rounded-lg bg-secondary/30 p-3">
+                      <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                         <div>
-                          <p className="text-sm font-medium text-foreground">{tender.title}</p>
+                          <p className="text-sm font-medium">{tender.title}</p>
                           <p className="text-xs text-muted-foreground">{tender.organization}</p>
                         </div>
                         <Badge variant="outline" className={
                           days <= 14 
-                            ? "border-red-500/30 text-red-400" 
-                            : "border-green-500/30 text-green-400"
+                            ? "border-red-200 text-red-600" 
+                            : "border-green-200 text-green-600"
                         }>
                           {days > 0 ? `${days} ימים` : "היום"}
                         </Badge>
