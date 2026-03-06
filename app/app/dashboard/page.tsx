@@ -111,20 +111,32 @@ export default function AppDashboardPage() {
   async function runAutoAnalysis() {
     setAutoAnalyzing(true)
     try {
-      const [analyzeRes, leadsRes] = await Promise.all([
+      // Run ALL APIs in parallel for comprehensive update
+      const [analyzeRes, leadsRes, tendersRes, newsRes, conferencesRes, trendsRes] = await Promise.all([
         fetch("/api/analyze", { method: "POST" }),
         fetch("/api/generate-leads", { method: "POST" }),
+        fetch("/api/generate-tenders", { method: "POST" }),
+        fetch("/api/generate-news", { method: "POST" }),
+        fetch("/api/generate-conferences", { method: "POST" }),
+        fetch("/api/generate-trends", { method: "POST" }),
       ])
       
-      const analyzeData = await analyzeRes.json()
-      const leadsData = await leadsRes.json()
+      const [analyzeData, leadsData, tendersData] = await Promise.all([
+        analyzeRes.json(),
+        leadsRes.json(),
+        tendersRes.json(),
+      ])
+      // We don't need to await news/conferences/trends results for the toast
+      newsRes.json()
+      conferencesRes.json()
+      trendsRes.json()
       
       await fetchDashboardData()
       
-      if (analyzeData.success || leadsData.success) {
+      if (analyzeData.success || leadsData.success || tendersData.success) {
         toast({
           title: "עדכון אוטומטי הושלם",
-          description: `נמצאו ${analyzeData.count || 0} הזדמנויות ו-${leadsData.count || 0} לידים חדשים`,
+          description: `נמצאו ${analyzeData.count || 0} הזדמנויות, ${leadsData.count || 0} לידים ו-${tendersData.count || 0} מכרזים`,
         })
       }
     } catch (error) {

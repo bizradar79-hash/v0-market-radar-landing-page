@@ -1,65 +1,50 @@
+import { getCompanyContext } from '@/lib/getCompanyContext'
 import Groq from 'groq-sdk'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-    
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
+    const ctx = await getCompanyContext()
+    if (!ctx) {
       return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
     }
 
-    const { data: company } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', user.id)
-      .single()
+    const { company, supabase, user, context } = ctx
 
-    if (!company) {
-      return NextResponse.json({ success: false, error: 'לא נמצא פרופיל חברה' }, { status: 404 })
-    }
-
-    const keywords = Array.isArray(company.keywords) ? company.keywords.join(', ') : ''
-
-    const prompt = `אתה עורך חדשות עסקיות בישראל.
-
-פרופיל החברה:
-- תעשייה: ${company.industry || 'טכנולוגיה'}
-- תיאור: ${company.description || 'לא צוין'}
-- מילות מפתח: ${keywords || 'לא צוינו'}
-
-צור בדיוק 5 כתבות חדשות עסקיות רלוונטיות לתעשייה הזו.
-עבור כל כתבה תן:
-- כותרת (קצרה וקליטה)
-- תקציר (2-3 משפטים)
-- מקור: "כלכליסט", "גלובס", "TheMarker", "Geektime", או "Ynet"
-- קטגוריה: "גיוסים", "רגולציה", "שותפויות", "השקעות", או "מוצרים"
-- סנטימנט: "positive", "negative", או "neutral"
-
-החזר JSON תקין בלבד:
-{
-  "news": [
-    {
-      "title": "כותרת הכתבה",
-      "summary": "תקציר הכתבה",
-      "source": "כלכליסט",
-      "category": "גיוסים",
-      "sentiment": "positive"
-    }
-  ]
-}`
-
-    const completion = await groq.chat.completions.create({
+    const result = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: `
+אתה עורך חדשות עסקיות ישראלי.
+${context}
+
+צור 8 פריטי חדשות עסקיות רלוונטיות לתחום ${company?.industry || 'הפעילות'} בישראל.
+
+כללים:
+1. שתמש רק בלינקים אמיתיים לאתרי חדשות: 
+   - https://www.calcalist.co.il
+   - https://www.themarker.com  
+   - https://www.globes.co.il
+   - https://www.ctech.calcalist.co.il
+2. הכותרות חייבות להיות רלוונטיות לתחום ולשוק הישראלי
+3. אל תמציא כתובות URL ספציפיות - השתמש בדף הבית של האתר
+
+החזר JSON בלבד:
+{
+  "news": [{
+    "title": "כותרת חדשות רלוונטית",
+    "source": "Calcalist",
+    "url": "https://www.calcalist.co.il",
+    "category": "קטגוריה",
+    "sentiment": "positive",
+    "summary": "תקציר קצר 2-3 משפטים"
+  }]
+}` }],
       temperature: 0.7,
     })
-    
-    const text = completion.choices[0].message.content!
+
+    const text = result.choices[0].message.content!
       .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     
     let parsed
@@ -69,26 +54,19 @@ export async function POST() {
       return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה' }, { status: 500 })
     }
 
-    const newsToInsert = parsed.news.map((item: {
-      title: string
-      summary: string
-      source: string
-      category: string
-      sentiment: string
-    }) => ({
-      company_id: user.id,
-      title: item.title,
-      summary: item.summary,
-      source: item.source,
-      url: '#',
-      category: item.category,
-      sentiment: item.sentiment,
-      published_at: new Date().toISOString(),
-    }))
-
+    // Delete old news and insert new ones
+    await supabase.from('news').delete().eq('company_id', user.id)
+    
     const { data: savedNews, error: insertError } = await supabase
       .from('news')
-      .insert(newsToInsert)
+      .insert(parsed.news.map((n: {
+        title: string
+        source: string
+        url: string
+        category: string
+        sentiment: string
+        summary: string
+      }) => ({ ...n, company_id: user.id, published_at: new Date().toISOString() })))
       .select()
 
     if (insertError) {

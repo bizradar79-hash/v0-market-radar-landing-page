@@ -1,106 +1,83 @@
+import { getCompanyContext } from '@/lib/getCompanyContext'
 import Groq from 'groq-sdk'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-    
-    // Get authenticated user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
-      return NextResponse.json(
-        { success: false, error: 'משתמש לא מחובר' },
-        { status: 401 }
-      )
+    const ctx = await getCompanyContext()
+    if (!ctx) {
+      return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
     }
 
-    // Fetch company profile
-    const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', user.id)
-      .single()
+    const { company, supabase, user, context } = ctx
 
-    if (companyError || !company) {
-      return NextResponse.json(
-        { success: false, error: 'לא נמצא פרופיל חברה' },
-        { status: 404 }
-      )
-    }
+    const result = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: `
+אתה מומחה לגילוי לידים בשוק הישראלי.
+${context}
 
-    const prompt = `אתה מומחה לגילוי לידים בשוק הישראלי.
-צור 5 לידים עסקיים פוטנציאליים אמיתיים:
-תעשייה: ${company.industry || 'לא צוין'}
-עיר: ${company.city || 'לא צוין'}
-תיאור: ${company.description || 'לא צוין'}
+מצא 5 לידים עסקיים פוטנציאליים לחברה ${company?.name || ''}.
+
+כללים קריטיים:
+1. אל תכלול את החברה ${company?.name || ''} עצמה ברשימה
+2. רק חברות ישראליות קיימות ואמיתיות
+3. האתר חייב להיות קיים ואמיתי - רק דומיינים ישראליים (.co.il, .com, .org.il)
+4. הסיבה לגילוי חייבת להיות ספציפית ומבוססת על צרכים אמיתיים
+5. ציון הליד חייב לשקף את הרלוונטיות האמיתית
 
 החזר JSON בלבד:
 {
-  "leads": [
-    {
-      "name": "שם החברה",
-      "website": "website.co.il",
-      "industry": "תעשייה",
-      "location": "עיר בישראל",
-      "reason": "למה הם ליד טוב",
-      "score": 85,
-      "source": "LinkedIn"
-    }
-  ]
-}`
-
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
+  "leads": [{
+    "name": "שם חברה ישראלית אמיתית",
+    "website": "https://example.co.il",
+    "industry": "תעשייה",
+    "location": "עיר בישראל",
+    "reason": "סיבה ספציפית ומפורטת",
+    "score": 85,
+    "source": "מקור המידע"
+  }]
+}` }],
       temperature: 0.7,
     })
-    
-    const text = completion.choices[0].message.content!
+
+    const text = result.choices[0].message.content!
       .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     
     let parsed
     try {
       parsed = JSON.parse(text)
     } catch {
-      return NextResponse.json(
-        { success: false, error: 'שגיאה בפענוח התשובה מהמודל' },
-        { status: 500 }
-      )
+      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה מהמודל' }, { status: 500 })
     }
 
-    // Save leads to Supabase
-    const leadsToInsert = parsed.leads.map((lead: {
-      name: string
-      website: string
-      industry: string
-      location: string
-      reason: string
-      score: number
-      source: string
-    }) => ({
-      company_id: user.id,
-      name: lead.name,
-      website: lead.website,
-      industry: lead.industry,
-      location: lead.location,
-      reason: lead.reason,
-      score: lead.score,
-      source: lead.source,
-    }))
+    // Filter out own company
+    const companyDomain = company?.website?.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0] || ''
+    const filtered = parsed.leads.filter((l: { name: string; website: string }) => 
+      !l.name.toLowerCase().includes((company?.name || '').toLowerCase()) && 
+      !l.website.toLowerCase().includes(companyDomain.toLowerCase())
+    )
 
+    // Delete old leads and insert new ones
+    await supabase.from('leads').delete().eq('company_id', user.id)
+    
     const { data: savedLeads, error: insertError } = await supabase
       .from('leads')
-      .insert(leadsToInsert)
+      .insert(filtered.map((l: {
+        name: string
+        website: string
+        industry: string
+        location: string
+        reason: string
+        score: number
+        source: string
+      }) => ({ ...l, company_id: user.id })))
       .select()
 
     if (insertError) {
-      return NextResponse.json(
-        { success: false, error: 'שגיאה בשמירת הלידים' },
-        { status: 500 }
-      )
+      return NextResponse.json({ success: false, error: 'שגיאה בשמירת הלידים' }, { status: 500 })
     }
 
     return NextResponse.json({
@@ -110,9 +87,6 @@ export async function POST() {
     })
   } catch (error) {
     console.error('Error generating leads:', error)
-    return NextResponse.json(
-      { success: false, error: 'שגיאה ביצירת הלידים' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: false, error: 'שגיאה ביצירת הלידים' }, { status: 500 })
   }
 }

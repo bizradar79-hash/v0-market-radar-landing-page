@@ -1,72 +1,44 @@
+import { getCompanyContext } from '@/lib/getCompanyContext'
 import Groq from 'groq-sdk'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-    
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
+    const ctx = await getCompanyContext()
+    if (!ctx) {
       return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
     }
 
-    const { data: company } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', user.id)
-      .single()
+    const { company, supabase, user, context } = ctx
 
-    if (!company) {
-      return NextResponse.json({ success: false, error: 'לא נמצא פרופיל חברה' }, { status: 404 })
-    }
-
-    const keywords = Array.isArray(company.keywords) ? company.keywords.join(', ') : ''
-    
-    // Generate dates in the next 6 months
-    const now = new Date()
-    const getRandomFutureDate = () => {
-      const daysToAdd = Math.floor(Math.random() * 180) + 30
-      const date = new Date(now)
-      date.setDate(date.getDate() + daysToAdd)
-      return date.toISOString().split('T')[0]
-    }
-
-    const prompt = `אתה מומחה לכנסים ואירועים עסקיים בישראל.
-
-פרופיל החברה:
-- תעשייה: ${company.industry || 'טכנולוגיה'}
-- עיר: ${company.city || 'תל אביב'}
-- מילות מפתח: ${keywords || 'לא צוינו'}
-
-צור בדיוק 5 כנסים ואירועים עסקיים רלוונטיים לתעשייה הזו בישראל.
-עבור כל כנס תן:
-- שם הכנס (בעברית)
-- מיקום: עיר בישראל
-- תיאור קצר (משפט אחד)
-- קטגוריה: "טכנולוגיה", "עסקים", "סטארטאפים", "פיננסים", או "חדשנות"
-
-החזר JSON תקין בלבד:
-{
-  "conferences": [
-    {
-      "name": "שם הכנס",
-      "location": "תל אביב",
-      "description": "תיאור קצר של הכנס",
-      "category": "טכנולוגיה"
-    }
-  ]
-}`
-
-    const completion = await groq.chat.completions.create({
+    const result = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: `
+מצא 6 כנסים עסקיים קרובים בישראל ב-2026 הרלוונטיים לתחום ${company?.industry || 'הפעילות'}.
+
+${context}
+
+השתמש בכנסים אמיתיים כמו: DLD Tel Aviv, Mind the Tech, ועידת ישראל לעסקים, Cybertech, וכנסים אחרים.
+לינקים - השתמש רק באתרי כנסים אמיתיים.
+
+החזר JSON בלבד:
+{
+  "conferences": [{
+    "name": "שם הכנס",
+    "date": "15 אפריל 2026",
+    "location": "תל אביב",
+    "description": "תיאור קצר של הכנס",
+    "url": "https://example.com",
+    "category": "טכנולוגיה",
+    "price": "₪500"
+  }]
+}` }],
       temperature: 0.7,
     })
-    
-    const text = completion.choices[0].message.content!
+
+    const text = result.choices[0].message.content!
       .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     
     let parsed
@@ -76,24 +48,20 @@ export async function POST() {
       return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה' }, { status: 500 })
     }
 
-    const conferencesToInsert = parsed.conferences.map((conf: {
-      name: string
-      location: string
-      description: string
-      category: string
-    }) => ({
-      company_id: user.id,
-      name: conf.name,
-      date: getRandomFutureDate(),
-      location: conf.location,
-      description: conf.description,
-      url: '#',
-      category: conf.category,
-    }))
-
+    // Delete old conferences and insert new ones
+    await supabase.from('conferences').delete().eq('company_id', user.id)
+    
     const { data: savedConferences, error: insertError } = await supabase
       .from('conferences')
-      .insert(conferencesToInsert)
+      .insert(parsed.conferences.map((c: {
+        name: string
+        date: string
+        location: string
+        description: string
+        url: string
+        category: string
+        price?: string
+      }) => ({ ...c, company_id: user.id })))
       .select()
 
     if (insertError) {
