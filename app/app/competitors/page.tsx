@@ -40,6 +40,11 @@ import {
   Eye,
   Trash2,
   ExternalLink,
+  Brain,
+  CheckCircle2,
+  XCircle,
+  Lightbulb,
+  ShieldAlert,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -57,11 +62,26 @@ interface Competitor {
   created_at: string
 }
 
+interface CompetitorAnalysis {
+  overview: string
+  products: string[]
+  pricing: string
+  strengths: string[]
+  weaknesses: string[]
+  positioning: string
+  threatLevel: string
+  opportunities: string[]
+  recommendations: string[]
+}
+
 export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [loading, setLoading] = useState(true)
   const [discovering, setDiscovering] = useState(false)
   const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null)
+  const [analyzing, setAnalyzing] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<CompetitorAnalysis | null>(null)
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -112,6 +132,54 @@ export default function CompetitorsPage() {
     }
   }
 
+  async function analyzeCompetitor(competitor: Competitor) {
+    setAnalyzing(competitor.id)
+    setAnalysis(null)
+    setSelectedCompetitor(competitor)
+    setShowAnalysisModal(true)
+    
+    try {
+      const response = await fetch("/api/analyze-competitor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          competitorWebsite: competitor.website,
+        }),
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setAnalysis(data.analysis)
+        // Refresh competitors to get updated threat score
+        await fetchCompetitors()
+        toast({
+          title: "ניתוח הושלם!",
+          description: `הניתוח של ${competitor.name} מוכן`,
+        })
+      } else {
+        toast({
+          title: "שגיאה בניתוח",
+          description: data.error || "לא הצלחנו לנתח את המתחרה",
+          variant: "destructive",
+        })
+        setShowAnalysisModal(false)
+      }
+    } catch (error) {
+      console.error("Error analyzing competitor:", error)
+      toast({
+        title: "שגיאה",
+        description: "אירעה שגיאה בעת הניתוח",
+        variant: "destructive",
+      })
+      setShowAnalysisModal(false)
+    } finally {
+      setAnalyzing(null)
+    }
+  }
+
   async function deleteCompetitor(id: string) {
     const { error } = await supabase
       .from("competitors")
@@ -121,6 +189,7 @@ export default function CompetitorsPage() {
     if (!error) {
       setCompetitors(competitors.filter(c => c.id !== id))
       setSelectedCompetitor(null)
+      setShowAnalysisModal(false)
       toast({ title: "המתחרה נמחק" })
     }
   }
@@ -291,7 +360,15 @@ export default function CompetitorsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setSelectedCompetitor(competitor)}>
+                          <DropdownMenuItem onClick={() => analyzeCompetitor(competitor)}>
+                            <Brain className="ml-2 h-4 w-4" />
+                            נתח עם AI
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setSelectedCompetitor(competitor)
+                            setAnalysis(null)
+                            setShowAnalysisModal(true)
+                          }}>
                             <Eye className="ml-2 h-4 w-4" />
                             צפה בפרטים
                           </DropdownMenuItem>
@@ -335,7 +412,8 @@ export default function CompetitorsPage() {
               {competitors.slice(0, 5).map((competitor) => (
                 <div 
                   key={competitor.id}
-                  className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+                  className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50 cursor-pointer"
+                  onClick={() => analyzeCompetitor(competitor)}
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Activity className="h-5 w-5 text-primary" />
@@ -348,7 +426,7 @@ export default function CompetitorsPage() {
                       </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      {competitor.last_activity || "אין פעילות אחרונה"}
+                      {competitor.last_activity || "לחץ לניתוח עם AI"}
                     </p>
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
@@ -367,8 +445,15 @@ export default function CompetitorsPage() {
                       </Badge>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {getTrendIcon(competitor.trend)}
+                  <div className="flex items-center gap-2">
+                    {analyzing === competitor.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    ) : (
+                      <>
+                        {getTrendIcon(competitor.trend)}
+                        <Brain className="h-4 w-4 text-muted-foreground" />
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -390,9 +475,15 @@ export default function CompetitorsPage() {
         </Card>
       )}
 
-      {/* Competitor Details Modal */}
-      <Dialog open={!!selectedCompetitor} onOpenChange={() => setSelectedCompetitor(null)}>
-        <DialogContent className="max-w-lg">
+      {/* Competitor Analysis Modal */}
+      <Dialog open={showAnalysisModal} onOpenChange={(open) => {
+        if (!open) {
+          setShowAnalysisModal(false)
+          setSelectedCompetitor(null)
+          setAnalysis(null)
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {selectedCompetitor && (
             <>
               <DialogHeader>
@@ -400,57 +491,196 @@ export default function CompetitorsPage() {
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Target className="h-5 w-5 text-primary" />
                   </div>
-                  {selectedCompetitor.name}
+                  <div>
+                    {selectedCompetitor.name}
+                    {analysis && (
+                      <Badge className="mr-2" variant={
+                        analysis.threatLevel === "גבוה" ? "destructive" : 
+                        analysis.threatLevel === "בינוני" ? "secondary" : "outline"
+                      }>
+                        רמת איום: {analysis.threatLevel}
+                      </Badge>
+                    )}
+                  </div>
                 </DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 mt-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">שירותים</p>
-                    <p className="font-medium">{selectedCompetitor.services || "לא ידוע"}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">תמחור</p>
-                    <p className="font-medium">{selectedCompetitor.pricing || "לא ידוע"}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">פוזיציה</p>
-                    <Badge variant="outline" className={getPositionBadge(selectedCompetitor.positioning || "לא ידוע")}>
-                      {selectedCompetitor.positioning || "לא ידוע"}
-                    </Badge>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">ציון איום</p>
-                    <p className={`font-bold text-lg ${getThreatColor(selectedCompetitor.threat_score)}`}>
-                      {selectedCompetitor.threat_score}
-                    </p>
-                  </div>
+              
+              {analyzing === selectedCompetitor.id ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                  <p className="text-muted-foreground">מנתח את {selectedCompetitor.name}...</p>
+                  <p className="text-sm text-muted-foreground">זה עשוי לקחת מספר שניות</p>
                 </div>
-                {selectedCompetitor.last_activity && (
-                  <div>
-                    <p className="text-sm text-muted-foreground">פעילות אחרונה</p>
-                    <p>{selectedCompetitor.last_activity}</p>
+              ) : analysis ? (
+                <div className="space-y-6 mt-4">
+                  {/* Overview */}
+                  <div className="rounded-lg bg-muted/50 p-4">
+                    <h4 className="font-semibold mb-2 flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-primary" />
+                      סקירה כללית
+                    </h4>
+                    <p className="text-sm text-muted-foreground">{analysis.overview}</p>
                   </div>
-                )}
-                <div className="flex gap-2 pt-4 border-t">
-                  {selectedCompetitor.website && (
-                    <Button variant="outline" asChild>
-                      <a href={selectedCompetitor.website.startsWith('http') ? selectedCompetitor.website : `https://${selectedCompetitor.website}`} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="ml-2 h-4 w-4" />
-                        פתח אתר
-                      </a>
+
+                  {/* Products & Pricing */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded-lg border p-4">
+                      <h4 className="font-semibold mb-2">מוצרים ושירותים</h4>
+                      <ul className="space-y-1">
+                        {analysis.products.map((product, i) => (
+                          <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
+                            <span className="text-primary mt-1">•</span>
+                            {product}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <h4 className="font-semibold mb-2">תמחור</h4>
+                      <p className="text-sm text-muted-foreground">{analysis.pricing}</p>
+                      <div className="mt-3">
+                        <h5 className="text-sm font-medium mb-1">מיצוב בשוק</h5>
+                        <p className="text-sm text-muted-foreground">{analysis.positioning}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Strengths & Weaknesses */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
+                      <h4 className="font-semibold mb-2 flex items-center gap-2 text-green-700">
+                        <CheckCircle2 className="h-4 w-4" />
+                        חוזקות
+                      </h4>
+                      <ul className="space-y-1">
+                        {analysis.strengths.map((strength, i) => (
+                          <li key={i} className="text-sm text-green-700 flex items-start gap-2">
+                            <span className="mt-1">•</span>
+                            {strength}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
+                      <h4 className="font-semibold mb-2 flex items-center gap-2 text-red-700">
+                        <XCircle className="h-4 w-4" />
+                        חולשות
+                      </h4>
+                      <ul className="space-y-1">
+                        {analysis.weaknesses.map((weakness, i) => (
+                          <li key={i} className="text-sm text-red-700 flex items-start gap-2">
+                            <span className="mt-1">•</span>
+                            {weakness}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Opportunities */}
+                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                    <h4 className="font-semibold mb-2 flex items-center gap-2 text-blue-700">
+                      <Lightbulb className="h-4 w-4" />
+                      הזדמנויות מולם
+                    </h4>
+                    <ul className="space-y-1">
+                      {analysis.opportunities.map((opp, i) => (
+                        <li key={i} className="text-sm text-blue-700 flex items-start gap-2">
+                          <span className="mt-1">•</span>
+                          {opp}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Recommendations */}
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                    <h4 className="font-semibold mb-2 flex items-center gap-2 text-primary">
+                      <ShieldAlert className="h-4 w-4" />
+                      המלצות אסטרטגיות
+                    </h4>
+                    <ul className="space-y-2">
+                      {analysis.recommendations.map((rec, i) => (
+                        <li key={i} className="text-sm flex items-start gap-2">
+                          <span className="font-bold text-primary">{i + 1}.</span>
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-4 border-t">
+                    {selectedCompetitor.website && (
+                      <Button variant="outline" asChild>
+                        <a href={selectedCompetitor.website.startsWith('http') ? selectedCompetitor.website : `https://${selectedCompetitor.website}`} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="ml-2 h-4 w-4" />
+                          פתח אתר
+                        </a>
+                      </Button>
+                    )}
+                    <Button variant="outline" onClick={() => analyzeCompetitor(selectedCompetitor)}>
+                      <Brain className="ml-2 h-4 w-4" />
+                      נתח מחדש
                     </Button>
-                  )}
-                  <Button 
-                    variant="outline" 
-                    className="text-red-600"
-                    onClick={() => deleteCompetitor(selectedCompetitor.id)}
-                  >
-                    <Trash2 className="ml-2 h-4 w-4" />
-                    מחק
-                  </Button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Basic Details View */
+                <div className="space-y-4 mt-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">שירותים</p>
+                      <p className="font-medium">{selectedCompetitor.services || "לא ידוע"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">תמחור</p>
+                      <p className="font-medium">{selectedCompetitor.pricing || "לא ידוע"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">פוזיציה</p>
+                      <Badge variant="outline" className={getPositionBadge(selectedCompetitor.positioning || "לא ידוע")}>
+                        {selectedCompetitor.positioning || "לא ידוע"}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">ציון איום</p>
+                      <p className={`font-bold text-lg ${getThreatColor(selectedCompetitor.threat_score)}`}>
+                        {selectedCompetitor.threat_score}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedCompetitor.last_activity && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">פעילות אחרונה</p>
+                      <p>{selectedCompetitor.last_activity}</p>
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-2 pt-4 border-t">
+                    <Button onClick={() => analyzeCompetitor(selectedCompetitor)}>
+                      <Brain className="ml-2 h-4 w-4" />
+                      נתח עם AI
+                    </Button>
+                    {selectedCompetitor.website && (
+                      <Button variant="outline" asChild>
+                        <a href={selectedCompetitor.website.startsWith('http') ? selectedCompetitor.website : `https://${selectedCompetitor.website}`} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="ml-2 h-4 w-4" />
+                          פתח אתר
+                        </a>
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      className="text-red-600"
+                      onClick={() => deleteCompetitor(selectedCompetitor.id)}
+                    >
+                      <Trash2 className="ml-2 h-4 w-4" />
+                      מחק
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </DialogContent>
