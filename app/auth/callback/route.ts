@@ -12,10 +12,11 @@ export async function GET(request: Request) {
     
     if (!error && data.user) {
       // Check if user has completed onboarding by looking for a company record
+      // In the new schema, companies.id = auth.uid
       const { data: company } = await supabase
         .from('companies')
         .select('onboarding_completed')
-        .eq('user_id', data.user.id)
+        .eq('id', data.user.id)
         .single()
       
       // If no company or onboarding not completed, go to onboarding
