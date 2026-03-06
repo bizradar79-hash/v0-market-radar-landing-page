@@ -35,7 +35,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [companyName, setCompanyName] = useState('')
-  const [otpCode, setOtpCode] = useState(['', '', '', '', '', ''])
+  const [otpCode, setOtpCode] = useState(['', '', '', '', '', '', '', ''])
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isResending, setIsResending] = useState(false)
@@ -78,7 +78,7 @@ export default function SignupPage() {
     setOtpCode(newOtp)
     
     // Auto-focus next input
-    if (value && index < 5) {
+    if (value && index < 7) {
       otpRefs.current[index + 1]?.focus()
     }
   }
@@ -92,10 +92,10 @@ export default function SignupPage() {
 
   const handleOtpPaste = (e: React.ClipboardEvent) => {
     e.preventDefault()
-    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
-    if (pastedData.length === 6) {
+    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 8)
+    if (pastedData.length === 8) {
       setOtpCode(pastedData.split(''))
-      otpRefs.current[5]?.focus()
+      otpRefs.current[7]?.focus()
     }
   }
 
@@ -106,8 +106,8 @@ export default function SignupPage() {
     setError(null)
 
     const code = otpCode.join('')
-    if (code.length !== 6) {
-      setError('יש להזין קוד בן 6 ספרות')
+    if (code.length !== 8) {
+      setError('יש להזין קוד בן 8 ספרות')
       setIsLoading(false)
       return
     }
@@ -124,7 +124,7 @@ export default function SignupPage() {
     } catch (error: unknown) {
       setError('קוד שגוי, נסה שנית')
       // Clear OTP inputs on error
-      setOtpCode(['', '', '', '', '', ''])
+      setOtpCode(['', '', '', '', '', '', '', ''])
       otpRefs.current[0]?.focus()
     } finally {
       setIsLoading(false)
@@ -143,7 +143,7 @@ export default function SignupPage() {
       })
       if (error) throw error
       // Clear OTP and show success message briefly
-      setOtpCode(['', '', '', '', '', ''])
+      setOtpCode(['', '', '', '', '', '', '', ''])
       otpRefs.current[0]?.focus()
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'שגיאה בשליחת קוד חדש')
@@ -178,7 +178,7 @@ export default function SignupPage() {
               </div>
               <CardTitle className="text-2xl font-bold text-foreground">אימות המייל שלך</CardTitle>
               <CardDescription className="text-muted-foreground">
-                שלחנו קוד בן 6 ספרות לכתובת
+                שלחנו קוד בן 8 ספרות לכתובת
                 <br />
                 <span className="font-medium text-foreground" dir="ltr">{email}</span>
               </CardDescription>
@@ -199,7 +199,7 @@ export default function SignupPage() {
                         onChange={(e) => handleOtpChange(index, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(index, e)}
                         onPaste={index === 0 ? handleOtpPaste : undefined}
-                        className="h-14 w-12 text-center text-2xl font-bold border-border bg-input text-foreground focus:border-primary focus:ring-primary"
+                        className="h-12 w-10 text-center text-xl font-bold border-border bg-input text-foreground focus:border-primary focus:ring-primary"
                         autoFocus={index === 0}
                       />
                     ))}
@@ -214,7 +214,7 @@ export default function SignupPage() {
                   <Button 
                     type="submit" 
                     className="w-full bg-primary text-primary-foreground hover:bg-primary/90" 
-                    disabled={isLoading || otpCode.join('').length !== 6}
+                    disabled={isLoading || otpCode.join('').length !== 8}
                   >
                     {isLoading ? (
                       <>
@@ -240,7 +240,7 @@ export default function SignupPage() {
                     onClick={() => {
                       setStep('signup')
                       setError(null)
-                      setOtpCode(['', '', '', '', '', ''])
+                      setOtpCode(['', '', '', '', '', '', '', ''])
                     }}
                     className="text-sm text-muted-foreground hover:text-foreground"
                   >
