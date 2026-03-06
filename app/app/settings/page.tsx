@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,24 +10,44 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { X, Plus, Save, Building2, KeyRound, Bell, User } from "lucide-react"
+import { X, Plus, Save, Building2, KeyRound, Bell, User, Loader2 } from "lucide-react"
+
+interface CompanyData {
+  name: string
+  website: string
+  industry: string
+  city: string
+  size: string
+  description: string
+}
+
+interface UserData {
+  fullName: string
+  email: string
+  phone: string
+  role: string
+}
 
 export default function SettingsPage() {
-  const [companyData, setCompanyData] = useState({
-    name: "חברת הדגמה בע\"מ",
-    website: "https://demo-company.co.il",
-    industry: "טכנולוגיה",
-    city: "תל אביב",
-    size: "11-50 עובדים",
-    description: "חברת טכנולוגיה המתמחה בפתרונות AI לעסקים קטנים ובינוניים",
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [companyData, setCompanyData] = useState<CompanyData>({
+    name: "",
+    website: "",
+    industry: "",
+    city: "",
+    size: "",
+    description: "",
   })
 
-  const [keywords, setKeywords] = useState([
-    "בינה מלאכותית",
-    "אוטומציה",
-    "SaaS",
-    "מודיעין עסקי",
-  ])
+  const [userData, setUserData] = useState<UserData>({
+    fullName: "",
+    email: "",
+    phone: "",
+    role: "",
+  })
+
+  const [keywords, setKeywords] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState("")
 
   const [notifications, setNotifications] = useState({
@@ -40,6 +61,85 @@ export default function SettingsPage() {
     emailAlerts: true,
   })
 
+  useEffect(() => {
+    const fetchData = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (user) {
+        // Fetch company data
+        const { data: company } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+        
+        if (company) {
+          setCompanyData({
+            name: company.name || "",
+            website: company.website || "",
+            industry: company.industry || "",
+            city: company.city || "",
+            size: company.size || "",
+            description: company.description || "",
+          })
+          
+          // Extract keywords from company data
+          if (company.keywords && Array.isArray(company.keywords)) {
+            setKeywords(company.keywords)
+          }
+        }
+
+        // Set user data from auth
+        setUserData({
+          fullName: user.user_metadata?.full_name || "",
+          email: user.email || "",
+          phone: user.user_metadata?.phone || "",
+          role: user.user_metadata?.role || "מנהל חשבון",
+        })
+      }
+      
+      setIsLoading(false)
+    }
+
+    fetchData()
+  }, [])
+
+  const saveCompanyData = async () => {
+    setIsSaving(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (user) {
+      await supabase
+        .from('companies')
+        .update({
+          name: companyData.name,
+          website: companyData.website,
+          industry: companyData.industry,
+          city: companyData.city,
+          size: companyData.size,
+          description: companyData.description,
+        })
+        .eq('id', user.id)
+    }
+    setIsSaving(false)
+  }
+
+  const saveKeywords = async () => {
+    setIsSaving(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (user) {
+      await supabase
+        .from('companies')
+        .update({ keywords })
+        .eq('id', user.id)
+    }
+    setIsSaving(false)
+  }
+
   const addKeyword = () => {
     if (newKeyword.trim() && !keywords.includes(newKeyword.trim())) {
       setKeywords([...keywords, newKeyword.trim()])
@@ -49,6 +149,14 @@ export default function SettingsPage() {
 
   const removeKeyword = (keyword: string) => {
     setKeywords(keywords.filter((k) => k !== keyword))
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
   }
 
   return (
@@ -96,6 +204,7 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, name: e.target.value })
                     }
                     className="border-border bg-input"
+                    placeholder="הזן שם חברה"
                   />
                 </div>
                 <div className="space-y-2">
@@ -108,6 +217,7 @@ export default function SettingsPage() {
                     }
                     className="border-border bg-input"
                     dir="ltr"
+                    placeholder="https://example.co.il"
                   />
                 </div>
                 <div className="space-y-2">
@@ -119,6 +229,7 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, industry: e.target.value })
                     }
                     className="border-border bg-input"
+                    placeholder="בחר תעשייה"
                   />
                 </div>
                 <div className="space-y-2">
@@ -130,6 +241,7 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, city: e.target.value })
                     }
                     className="border-border bg-input"
+                    placeholder="הזן עיר"
                   />
                 </div>
                 <div className="space-y-2">
@@ -141,6 +253,7 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, size: e.target.value })
                     }
                     className="border-border bg-input"
+                    placeholder="לדוגמה: 11-50 עובדים"
                   />
                 </div>
               </div>
@@ -153,10 +266,19 @@ export default function SettingsPage() {
                     setCompanyData({ ...companyData, description: e.target.value })
                   }
                   className="min-h-[100px] border-border bg-input"
+                  placeholder="תאר את פעילות החברה..."
                 />
               </div>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                <Save className="ml-2 h-4 w-4" />
+              <Button 
+                onClick={saveCompanyData}
+                disabled={isSaving}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {isSaving ? (
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="ml-2 h-4 w-4" />
+                )}
                 שמור שינויים
               </Button>
             </CardContent>
@@ -183,24 +305,36 @@ export default function SettingsPage() {
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {keywords.map((keyword) => (
-                  <Badge
-                    key={keyword}
-                    variant="secondary"
-                    className="flex items-center gap-1 bg-primary/10 px-3 py-1.5 text-primary"
-                  >
-                    {keyword}
-                    <button
-                      onClick={() => removeKeyword(keyword)}
-                      className="mr-1 rounded-full hover:bg-primary/20"
+                {keywords.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">לא הוגדרו מילות מפתח עדיין</p>
+                ) : (
+                  keywords.map((keyword) => (
+                    <Badge
+                      key={keyword}
+                      variant="secondary"
+                      className="flex items-center gap-1 bg-primary/10 px-3 py-1.5 text-primary"
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
+                      {keyword}
+                      <button
+                        onClick={() => removeKeyword(keyword)}
+                        className="mr-1 rounded-full hover:bg-primary/20"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))
+                )}
               </div>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                <Save className="ml-2 h-4 w-4" />
+              <Button 
+                onClick={saveKeywords}
+                disabled={isSaving}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {isSaving ? (
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="ml-2 h-4 w-4" />
+                )}
                 שמור שינויים
               </Button>
             </CardContent>
@@ -288,8 +422,10 @@ export default function SettingsPage() {
                   <Label htmlFor="fullName">שם מלא</Label>
                   <Input
                     id="fullName"
-                    defaultValue="משתמש ראשי"
+                    value={userData.fullName}
+                    onChange={(e) => setUserData({ ...userData, fullName: e.target.value })}
                     className="border-border bg-input"
+                    placeholder="הזן שם מלא"
                   />
                 </div>
                 <div className="space-y-2">
@@ -297,8 +433,9 @@ export default function SettingsPage() {
                   <Input
                     id="email"
                     type="email"
-                    defaultValue="user@demo-company.co.il"
-                    className="border-border bg-input"
+                    value={userData.email}
+                    disabled
+                    className="border-border bg-input opacity-60"
                     dir="ltr"
                   />
                 </div>
@@ -306,17 +443,21 @@ export default function SettingsPage() {
                   <Label htmlFor="phone">טלפון</Label>
                   <Input
                     id="phone"
-                    defaultValue="050-1234567"
+                    value={userData.phone}
+                    onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
                     className="border-border bg-input"
                     dir="ltr"
+                    placeholder="050-0000000"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role">תפקיד</Label>
                   <Input
                     id="role"
-                    defaultValue="מנהל חשבון"
+                    value={userData.role}
+                    onChange={(e) => setUserData({ ...userData, role: e.target.value })}
                     className="border-border bg-input"
+                    placeholder="הזן תפקיד"
                   />
                 </div>
               </div>
