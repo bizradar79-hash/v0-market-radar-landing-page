@@ -186,7 +186,7 @@ export default function OnboardingPage() {
 
       if (error) throw error
 
-      router.push("/dashboard")
+      router.push("/app/dashboard")
     } catch (error) {
       console.error("Error saving onboarding data:", error)
     } finally {

@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -16,12 +17,20 @@ import {
   Settings,
   Radar,
   X,
+  LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { createClient } from "@/lib/supabase/client"
 
 interface AppSidebarProps {
   isOpen: boolean
   onClose: () => void
+}
+
+interface UserData {
+  name: string
+  email: string
+  initials: string
 }
 
 const navItems = [
@@ -39,6 +48,45 @@ const navItems = [
 
 export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const pathname = usePathname()
+  const [user, setUser] = useState<UserData | null>(null)
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const supabase = createClient()
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      
+      if (authUser) {
+        // Get name from user metadata or email
+        const fullName = authUser.user_metadata?.full_name || 
+                         authUser.user_metadata?.name ||
+                         authUser.email?.split('@')[0] || 
+                         'משתמש'
+        
+        // Create initials from name or email
+        const nameParts = fullName.split(' ')
+        let initials = ''
+        if (nameParts.length >= 2) {
+          initials = nameParts[0].charAt(0) + nameParts[1].charAt(0)
+        } else {
+          initials = fullName.substring(0, 2)
+        }
+        
+        setUser({
+          name: fullName,
+          email: authUser.email || '',
+          initials: initials.toUpperCase()
+        })
+      }
+    }
+
+    fetchUser()
+  }, [])
+
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    window.location.href = '/login'
+  }
 
   return (
     <aside
@@ -103,12 +151,25 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         <div className="border-t border-border p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
-              מר
+              {user?.initials || '...'}
             </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-foreground">משתמש ראשי</p>
-              <p className="text-xs text-muted-foreground">חבילה עסקית</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">
+                {user?.name || 'טוען...'}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {user?.email || ''}
+              </p>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleSignOut}
+              className="text-muted-foreground hover:text-foreground"
+              title="התנתק"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
