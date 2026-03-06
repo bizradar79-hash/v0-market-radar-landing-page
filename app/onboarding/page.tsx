@@ -168,8 +168,8 @@ export default function OnboardingPage() {
         return
       }
 
-      // Use upsert since companies.id = auth.uid
-      const { error } = await supabase.from("companies").upsert({
+      // Step 1: Save company profile
+      const { error: companyError } = await supabase.from("companies").upsert({
         id: user.id,
         name: companyName,
         website,
@@ -185,7 +185,136 @@ export default function OnboardingPage() {
         onboarding_completed: true,
       })
 
-      if (error) throw error
+      if (companyError) throw companyError
+
+      // Step 2: Insert competitors into competitors table
+      if (competitors.length > 0) {
+        const competitorRecords = competitors.map(c => ({
+          company_id: user.id,
+          name: c.name,
+          website: c.website,
+          services: industry,
+          positioning: "מתחרה ישיר",
+          threat_score: Math.floor(Math.random() * 30) + 50,
+          trend: "stable"
+        }))
+        await supabase.from("competitors").insert(competitorRecords)
+      }
+
+      // Step 3: Insert sample opportunities for the user
+      const sampleOpportunities = [
+        {
+          company_id: user.id,
+          title: `הזדמנות חדשה בשוק ה${industry}`,
+          description: `זוהתה עלייה משמעותית בביקוש לפתרונות ${industry} בקרב עסקים קטנים ובינוניים בישראל`,
+          impact_score: 85,
+          confidence_score: 92,
+          priority: "גבוהה",
+          type: industry,
+          actions: ["לפנות ללקוחות פוטנציאליים", "להכין הצעת מחיר", "לתאם פגישת הדגמה"],
+          sources: ["ניתוח שוק"]
+        },
+        {
+          company_id: user.id,
+          title: "שותפות אסטרטגית פוטנציאלית",
+          description: "חברת טכנולוגיה מובילה מחפשת שותפים בתחום שלך",
+          impact_score: 78,
+          confidence_score: 85,
+          priority: "גבוהה",
+          type: "שותפות",
+          actions: ["ליצור קשר עם מחלקת הפיתוח העסקי", "להכין מצגת שותפות"],
+          sources: ["לינקדאין"]
+        },
+        {
+          company_id: user.id,
+          title: "התרחבות לשוק חדש",
+          description: "רגולציה חדשה פותחת הזדמנויות לחברות ישראליות",
+          impact_score: 65,
+          confidence_score: 70,
+          priority: "בינונית",
+          type: "שוק",
+          actions: ["לבדוק דרישות רגולטוריות", "למפות מתחרים"],
+          sources: ["חדשות"]
+        }
+      ]
+      await supabase.from("opportunities").insert(sampleOpportunities)
+
+      // Step 4: Insert sample leads
+      const sampleLeads = [
+        {
+          company_id: user.id,
+          name: "סטארטאפ טק בע\"מ",
+          website: "https://startup-tech.co.il",
+          industry: industry,
+          location: "תל אביב",
+          reason: "ביקור באתר והורדת מדריך",
+          score: 85,
+          source: "אתר"
+        },
+        {
+          company_id: user.id,
+          name: "פתרונות דיגיטל",
+          website: "https://digital-solutions.co.il",
+          industry: industry,
+          location: "רמת גן",
+          reason: "אינטראקציה עם תוכן בלינקדאין",
+          score: 72,
+          source: "לינקדאין"
+        },
+        {
+          company_id: user.id,
+          name: "חדשנות ישראל",
+          website: "https://innovation-il.co.il",
+          industry: industry,
+          location: "הרצליה",
+          reason: "הופנה מלקוח קיים",
+          score: 90,
+          source: "המלצה"
+        }
+      ]
+      await supabase.from("leads").insert(sampleLeads)
+
+      // Step 5: Insert sample tenders
+      const sampleTenders = [
+        {
+          company_id: user.id,
+          title: `מכרז למערכת ${industry}`,
+          organization: "משרד החדשנות",
+          deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          budget: "2-5 מיליון ש\"ח",
+          description: `מכרז לפיתוח והטמעת מערכת ${industry} ארגונית`,
+          relevance_score: 95
+        },
+        {
+          company_id: user.id,
+          title: "פיתוח פלטפורמת AI",
+          organization: "רשות החדשנות",
+          deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          budget: "1-3 מיליון ש\"ח",
+          description: "פיתוח פלטפורמת AI לאוטומציה של תהליכים עסקיים",
+          relevance_score: 82
+        }
+      ]
+      await supabase.from("tenders").insert(sampleTenders)
+
+      // Step 6: Insert sample alerts
+      const sampleAlerts = [
+        {
+          company_id: user.id,
+          title: "ברוך הבא ל-Market Radar!",
+          message: "החשבון שלך מוכן. התחל לגלות הזדמנויות עסקיות חדשות.",
+          type: "success",
+          is_read: false
+        },
+        {
+          company_id: user.id,
+          title: "הזדמנות חדשה זוהתה",
+          message: `זוהתה הזדמנות חדשה בשוק ה${industry}`,
+          type: "info",
+          is_read: false
+        }
+      ]
+      await supabase.from("alerts").insert(sampleAlerts)
 
       router.push("/app/dashboard")
     } catch (error) {

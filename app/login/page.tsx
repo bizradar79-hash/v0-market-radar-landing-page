@@ -30,11 +30,27 @@ export default function LoginPage() {
     setError(null)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
       if (error) throw error
+      
+      // Check if user has completed onboarding
+      if (authData.user) {
+        const { data: company } = await supabase
+          .from('companies')
+          .select('onboarding_completed')
+          .eq('id', authData.user.id)
+          .single()
+        
+        // If no company or onboarding not completed, redirect to onboarding
+        if (!company || !company.onboarding_completed) {
+          router.push('/onboarding')
+          return
+        }
+      }
+      
       router.push('/app/dashboard')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'אימייל או סיסמה שגויים')
