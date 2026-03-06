@@ -1,85 +1,51 @@
-import { getCompanyContext } from '@/lib/getCompanyContext'
-import Groq from 'groq-sdk'
+import { getFullContext } from '@/lib/context'
+import { analyzeWithAI } from '@/lib/ai'
+import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const ctx = await getCompanyContext()
-    if (!ctx) {
-      return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
-    }
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { company, supabase, user, context } = ctx
+    const results = await multiSearch([
+      `${ctx.company?.industry} חדשות ישראל 2026`,
+      `${ctx.company?.name} חדשות`,
+      `${ctx.company?.keywords?.[0]} ישראל חדשות`,
+      `site:calcalist.co.il ${ctx.company?.industry}`,
+      `site:themarker.com ${ctx.company?.industry}`,
+      `site:globes.co.il ${ctx.company?.industry}`,
+    ])
 
-    const result = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: `
-אתה עורך חדשות עסקיות ישראלי.
-${context}
+    const data = await analyzeWithAI(`
+בחר 15 חדשות רלוונטיות מהמידע הבא:
 
-צור 8 פריטי חדשות עסקיות רלוונטיות לתחום ${company?.industry || 'הפעילות'} בישראל.
+${ctx.context}
 
-כללים:
-1. שתמש רק בלינקים אמיתיים לאתרי חדשות: 
-   - https://www.calcalist.co.il
-   - https://www.themarker.com  
-   - https://www.globes.co.il
-   - https://www.ctech.calcalist.co.il
-2. הכותרות חייבות להיות רלוונטיות לתחום ולשוק הישראלי
-3. אל תמציא כתובות URL ספציפיות - השתמש בדף הבית של האתר
+תוצאות חיפוש חדשות:
+${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-החזר JSON בלבד:
+כללים: רק URLs אמיתיים מהחיפוש
+
 {
   "news": [{
-    "title": "כותרת חדשות רלוונטית",
-    "source": "Calcalist",
-    "url": "https://www.calcalist.co.il",
+    "title": "כותרת",
+    "source": "שם מקור",
+    "url": "URL אמיתי מהחיפוש",
     "category": "קטגוריה",
     "sentiment": "positive",
-    "summary": "תקציר קצר 2-3 משפטים"
+    "summary": "תקציר קצר"
   }]
-}` }],
-      temperature: 0.7,
-    })
+}`)
 
-    const text = result.choices[0].message.content!
-      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה' }, { status: 500 })
-    }
+    await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+    const { data: saved } = await ctx.supabase.from('news').insert(
+      data.news.map((n: any) => ({ ...n, company_id: ctx.user.id, published_at: new Date().toISOString() }))
+    ).select()
 
-    // Delete old news and insert new ones
-    await supabase.from('news').delete().eq('company_id', user.id)
-    
-    const { data: savedNews, error: insertError } = await supabase
-      .from('news')
-      .insert(parsed.news.map((n: {
-        title: string
-        source: string
-        url: string
-        category: string
-        sentiment: string
-        summary: string
-      }) => ({ ...n, company_id: user.id, published_at: new Date().toISOString() })))
-      .select()
-
-    if (insertError) {
-      return NextResponse.json({ success: false, error: 'שגיאה בשמירת החדשות' }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      news: savedNews,
-      count: savedNews?.length || 0,
-    })
+    return NextResponse.json({ success: true, news: saved, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Error generating news:', error)
-    return NextResponse.json({ success: false, error: 'שגיאה ביצירת החדשות' }, { status: 500 })
+    console.error('Generate news error:', error)
+    return NextResponse.json({ error: 'Failed' }, { status: 500 })
   }
 }

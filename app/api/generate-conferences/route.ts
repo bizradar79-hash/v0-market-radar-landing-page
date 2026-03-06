@@ -1,80 +1,50 @@
-import { getCompanyContext } from '@/lib/getCompanyContext'
-import Groq from 'groq-sdk'
+import { getFullContext } from '@/lib/context'
+import { analyzeWithAI } from '@/lib/ai'
+import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const ctx = await getCompanyContext()
-    if (!ctx) {
-      return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
-    }
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { company, supabase, user, context } = ctx
+    const results = await multiSearch([
+      `כנסים ${ctx.company?.industry} ישראל 2026`,
+      `אירועים ${ctx.company?.keywords?.[0]} ישראל 2026`,
+      `conferences ${ctx.company?.industry} Israel 2026`,
+      `ועידה ${ctx.company?.industry} ישראל 2026`,
+    ])
 
-    const result = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: `
-מצא 6 כנסים עסקיים קרובים בישראל ב-2026 הרלוונטיים לתחום ${company?.industry || 'הפעילות'}.
+    const data = await analyzeWithAI(`
+מצא 10 כנסים ואירועים מהמידע הבא:
 
-${context}
+${ctx.context}
 
-השתמש בכנסים אמיתיים כמו: DLD Tel Aviv, Mind the Tech, ועידת ישראל לעסקים, Cybertech, וכנסים אחרים.
-לינקים - השתמש רק באתרי כנסים אמיתיים.
+תוצאות חיפוש:
+${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-החזר JSON בלבד:
+כללים: רק כנסים שמופיעים בחיפוש עם URLs אמיתיים
+
 {
   "conferences": [{
-    "name": "שם הכנס",
-    "date": "15 אפריל 2026",
-    "location": "תל אביב",
-    "description": "תיאור קצר של הכנס",
-    "url": "https://example.com",
-    "category": "טכנולוגיה",
-    "price": "₪500"
+    "name": "שם כנס אמיתי",
+    "date": "תאריך",
+    "location": "מיקום",
+    "description": "תיאור",
+    "url": "URL אמיתי",
+    "category": "קטגוריה",
+    "price": "מחיר"
   }]
-}` }],
-      temperature: 0.7,
-    })
+}`)
 
-    const text = result.choices[0].message.content!
-      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה' }, { status: 500 })
-    }
+    await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
+    const { data: saved } = await ctx.supabase.from('conferences').insert(
+      data.conferences.map((c: any) => ({ ...c, company_id: ctx.user.id }))
+    ).select()
 
-    // Delete old conferences and insert new ones
-    await supabase.from('conferences').delete().eq('company_id', user.id)
-    
-    const { data: savedConferences, error: insertError } = await supabase
-      .from('conferences')
-      .insert(parsed.conferences.map((c: {
-        name: string
-        date: string
-        location: string
-        description: string
-        url: string
-        category: string
-        price?: string
-      }) => ({ ...c, company_id: user.id })))
-      .select()
-
-    if (insertError) {
-      return NextResponse.json({ success: false, error: 'שגיאה בשמירת הכנסים' }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      conferences: savedConferences,
-      count: savedConferences?.length || 0,
-    })
+    return NextResponse.json({ success: true, conferences: saved, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Error generating conferences:', error)
-    return NextResponse.json({ success: false, error: 'שגיאה ביצירת הכנסים' }, { status: 500 })
+    console.error('Generate conferences error:', error)
+    return NextResponse.json({ error: 'Failed' }, { status: 500 })
   }
 }

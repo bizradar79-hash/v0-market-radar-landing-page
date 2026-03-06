@@ -1,64 +1,52 @@
-import { getCompanyContext } from '@/lib/getCompanyContext'
-import Groq from 'groq-sdk'
+import { getFullContext } from '@/lib/context'
+import { analyzeWithAI } from '@/lib/ai'
+import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    const body = await req.json()
-    const ctx = await getCompanyContext()
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const industry = body.industry || ctx?.company?.industry
-    const description = body.description || ctx?.company?.description
-    const city = body.city || ctx?.company?.city
+    const results = await multiSearch([
+      `${ctx.company?.industry} חברות ישראל`,
+      `מתחרים ${ctx.company?.name} ישראל`,
+      `${ctx.company?.description?.slice(0, 80)} חברות ישראל`,
+      `${ctx.company?.industry} suppliers ישראל`,
+    ])
 
-    if (!industry) {
-      return NextResponse.json({ success: false, error: 'נדרש לציין תעשייה' }, { status: 400 })
-    }
+    const data = await analyzeWithAI(`
+זהה 10 מתחרים ישראליים אמיתיים מהמידע הבא בלבד:
 
-    const result = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: `
-מצא 5 מתחרים ישראליים אמיתיים לחברה בתחום ${industry}.
-תיאור החברה: ${description || 'לא צוין'}
-עיר: ${city || 'לא צוין'}
+${ctx.context}
 
-כללים:
-1. רק חברות ישראליות קיימות ואמיתיות
-2. כתובת אתר אמיתית וקיימת - חובה (דומיין .co.il, .com, או .org.il)
-3. הסבר למה הם מתחרים
-4. ציון דמיון ריאלי (60-95)
+תוצאות חיפוש נוספות:
+${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-החזר JSON בלבד:
+כללים: 
+- רק חברות שמופיעות בתוצאות החיפוש
+- רק URLs אמיתיים שמופיעים במידע
+- אל תמציא אף חברה
+
 {
   "competitors": [{
     "name": "שם אמיתי",
-    "website": "https://example.co.il",
-    "reason": "למה הם מתחרים - תיאור ספציפי",
-    "services": "השירותים/מוצרים שלהם",
-    "similarity": 85
+    "website": "URL אמיתי מהחיפוש",
+    "services": "שירותים לפי המידע",
+    "reason": "למה מתחרים",
+    "pricing": "מחירון אם ידוע",
+    "threat_score": 75
   }]
-}` }],
-      temperature: 0.7,
-    })
+}`)
 
-    const text = result.choices[0].message.content!
-      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה מהמודל' }, { status: 500 })
-    }
+    await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
+    const { data: saved } = await ctx.supabase.from('competitors').insert(
+      data.competitors.map((c: any) => ({ ...c, company_id: ctx.user.id }))
+    ).select()
 
-    return NextResponse.json({
-      success: true,
-      competitors: parsed.competitors,
-    })
+    return NextResponse.json({ success: true, competitors: saved, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Error finding competitors:', error)
-    return NextResponse.json({ success: false, error: 'לא הצלחנו למצוא מתחרים, נסה שנית' }, { status: 500 })
+    console.error('Find competitors error:', error)
+    return NextResponse.json({ error: 'Failed' }, { status: 500 })
   }
 }

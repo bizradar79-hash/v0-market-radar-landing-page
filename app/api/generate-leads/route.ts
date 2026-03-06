@@ -1,92 +1,73 @@
-import { getCompanyContext } from '@/lib/getCompanyContext'
-import Groq from 'groq-sdk'
+import { getFullContext } from '@/lib/context'
+import { analyzeWithAI } from '@/lib/ai'
+import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const ctx = await getCompanyContext()
-    if (!ctx) {
-      return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
-    }
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { company, supabase, user, context } = ctx
+    const results = await multiSearch([
+      `${ctx.company?.industry} לקוחות קהל יעד ישראל`,
+      `${ctx.company?.description?.slice(0, 80)} קונים ישראל`,
+      `${ctx.company?.keywords?.[0]} ${ctx.company?.keywords?.[1]} חברות ישראל`,
+      `חנויות ${ctx.company?.industry} ישראל`,
+      `מפיצים ${ctx.company?.industry} ישראל`,
+      `${ctx.company?.industry} B2B לקוחות עסקיים ישראל`,
+    ])
 
-    const result = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: `
-אתה מומחה לגילוי לידים בשוק הישראלי.
-${context}
+    const data = await analyzeWithAI(`
+מצא 20 לקוחות פוטנציאליים אמיתיים לחברה ${ctx.company?.name}.
 
-מצא 5 לידים עסקיים פוטנציאליים לחברה ${company?.name || ''}.
+${ctx.context}
 
-כללים קריטיים:
-1. אל תכלול את החברה ${company?.name || ''} עצמה ברשימה
-2. רק חברות ישראליות קיימות ואמיתיות
-3. האתר חייב להיות קיים ואמיתי - רק דומיינים ישראליים (.co.il, .com, .org.il)
-4. הסיבה לגילוי חייבת להיות ספציפית ומבוססת על צרכים אמיתיים
-5. ציון הליד חייב לשקף את הרלוונטיות האמיתית
+תוצאות חיפוש:
+${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-החזר JSON בלבד:
+כללים:
+- לקוחות = עסקים שיקנו מ-${ctx.company?.name} (לא מתחרים!)
+- רק חברות שמופיעות בתוצאות החיפוש
+- רק URLs אמיתיים
+- אל תכלול את ${ctx.company?.name} עצמה
+- גיוון: חנויות, מפיצים, עסקים, קליניקות - כל מי שיכול להשתמש במוצר
+
 {
   "leads": [{
-    "name": "שם חברה ישראלית אמיתית",
-    "website": "https://example.co.il",
+    "name": "שם חברה אמיתי",
+    "website": "URL אמיתי",
     "industry": "תעשייה",
     "location": "עיר בישראל",
-    "reason": "סיבה ספציפית ומפורטת",
-    "score": 85,
-    "source": "מקור המידע"
+    "reason": "למה יקנו - ספציפי לפי המוצר",
+    "score": 88,
+    "source": "מקור"
   }]
-}` }],
-      temperature: 0.7,
-    })
+}`)
 
-    const text = result.choices[0].message.content!
-      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה מהמודל' }, { status: 500 })
-    }
-
-    // Filter out own company
-    const companyDomain = company?.website?.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0] || ''
-    const filtered = parsed.leads.filter((l: { name: string; website: string }) => 
-      !l.name.toLowerCase().includes((company?.name || '').toLowerCase()) && 
-      !l.website.toLowerCase().includes(companyDomain.toLowerCase())
+    const filtered = data.leads.filter((l: any) =>
+      l.name && l.website &&
+      !l.name.includes(ctx.company?.name || '') &&
+      l.website.startsWith('http')
     )
 
-    // Delete old leads and insert new ones
-    await supabase.from('leads').delete().eq('company_id', user.id)
-    
-    const { data: savedLeads, error: insertError } = await supabase
-      .from('leads')
-      .insert(filtered.map((l: {
-        name: string
-        website: string
-        industry: string
-        location: string
-        reason: string
-        score: number
-        source: string
-      }) => ({ ...l, company_id: user.id })))
-      .select()
+    await ctx.supabase.from('leads').delete().eq('company_id', ctx.user.id)
+    const { data: saved } = await ctx.supabase.from('leads').insert(
+      filtered.map((l: any) => ({ ...l, company_id: ctx.user.id }))
+    ).select()
 
-    if (insertError) {
-      return NextResponse.json({ success: false, error: 'שגיאה בשמירת הלידים' }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      leads: savedLeads,
-      count: savedLeads?.length || 0,
+    // Create alert
+    await ctx.supabase.from('alerts').insert({
+      company_id: ctx.user.id,
+      title: 'לידים חדשים התגלו',
+      message: `${saved?.length || 0} לידים פוטנציאליים`,
+      type: 'success',
+      link: '/app/leads',
+      is_read: false
     })
+
+    return NextResponse.json({ success: true, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Error generating leads:', error)
-    return NextResponse.json({ success: false, error: 'שגיאה ביצירת הלידים' }, { status: 500 })
+    console.error('Generate leads error:', error)
+    return NextResponse.json({ error: 'Failed' }, { status: 500 })
   }
 }

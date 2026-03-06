@@ -1,105 +1,47 @@
-import Groq from 'groq-sdk'
-import { createClient } from '@/lib/supabase/server'
+import { getFullContext } from '@/lib/context'
+import { analyzeWithAI } from '@/lib/ai'
+import { multiSearch } from '@/lib/search'
 import { NextResponse } from 'next/server'
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-    
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
-      return NextResponse.json({ success: false, error: 'משתמש לא מחובר' }, { status: 401 })
-    }
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: company } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', user.id)
-      .single()
+    const results = await multiSearch([
+      `טרנדים ${ctx.company?.industry} ישראל 2026`,
+      `${ctx.company?.industry} מגמות שוק ישראל`,
+      `${ctx.company?.keywords?.[0]} טרנד ישראל`,
+      `${ctx.company?.industry} growth trends Israel 2026`,
+    ])
 
-    if (!company) {
-      return NextResponse.json({ success: false, error: 'לא נמצא פרופיל חברה' }, { status: 404 })
-    }
+    const data = await analyzeWithAI(`
+זהה 12 טרנדים עסקיים מהמידע:
 
-    const keywords = Array.isArray(company.keywords) ? company.keywords.join(', ') : ''
+${ctx.context}
 
-    const prompt = `אתה מומחה לניתוח מגמות שוק בישראל.
+תוצאות חיפוש:
+${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-פרופיל החברה:
-- תעשייה: ${company.industry || 'טכנולוגיה'}
-- תיאור: ${company.description || 'לא צוין'}
-- מילות מפתח: ${keywords || 'לא צוינו'}
-
-צור בדיוק 6 מגמות שוק רלוונטיות לתעשייה הזו בישראל.
-עבור כל מגמה תן:
-- שם המגמה (קצר וברור)
-- קטגוריה: "טכנולוגיה", "תפעול", "שיווק", "פיננסים", "רגולציה", או "צרכנות"
-- ציון (50-100) - עוצמת המגמה
-- כיוון: "up" (עולה), "down" (יורדת), או "stable" (יציבה)
-- תיאור קצר (משפט אחד)
-
-החזר JSON תקין בלבד:
 {
-  "trends": [
-    {
-      "name": "שם המגמה",
-      "category": "טכנולוגיה",
-      "score": 85,
-      "direction": "up",
-      "description": "תיאור קצר של המגמה"
-    }
-  ]
-}`
+  "trends": [{
+    "name": "שם טרנד",
+    "description": "תיאור 2-3 משפטים",
+    "score": 78,
+    "direction": "up",
+    "category": "קטגוריה",
+    "sources": ["URL אמיתי"]
+  }]
+}`)
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-    })
-    
-    const text = completion.choices[0].message.content!
-      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    
-    let parsed
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return NextResponse.json({ success: false, error: 'שגיאה בפענוח התשובה' }, { status: 500 })
-    }
+    await ctx.supabase.from('trends').delete().eq('company_id', ctx.user.id)
+    const { data: saved } = await ctx.supabase.from('trends').insert(
+      data.trends.map((t: any) => ({ ...t, company_id: ctx.user.id }))
+    ).select()
 
-    const trendsToInsert = parsed.trends.map((trend: {
-      name: string
-      category: string
-      score: number
-      direction: string
-      description: string
-    }) => ({
-      company_id: user.id,
-      name: trend.name,
-      category: trend.category,
-      score: trend.score,
-      direction: trend.direction,
-      description: trend.description,
-    }))
-
-    const { data: savedTrends, error: insertError } = await supabase
-      .from('trends')
-      .insert(trendsToInsert)
-      .select()
-
-    if (insertError) {
-      return NextResponse.json({ success: false, error: 'שגיאה בשמירת המגמות' }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      trends: savedTrends,
-      count: savedTrends?.length || 0,
-    })
+    return NextResponse.json({ success: true, trends: saved, count: saved?.length || 0 })
   } catch (error) {
-    console.error('Error generating trends:', error)
-    return NextResponse.json({ success: false, error: 'שגיאה ביצירת המגמות' }, { status: 500 })
+    console.error('Generate trends error:', error)
+    return NextResponse.json({ error: 'Failed' }, { status: 500 })
   }
 }
