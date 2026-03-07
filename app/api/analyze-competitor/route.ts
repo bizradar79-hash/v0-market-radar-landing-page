@@ -8,7 +8,7 @@ export const maxDuration = 60
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {

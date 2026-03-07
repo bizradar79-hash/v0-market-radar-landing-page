@@ -38,7 +38,7 @@ ${companyContext ? `הקשר עסקי:\n${JSON.stringify(companyContext, null, 2
   "confidence": 80
 }`)
 
-    const supabase = await createClient()
+    const supabase = createClient()
     for (const trend of trendData) {
       if (trend.id) {
         await supabase

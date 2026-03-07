@@ -31,7 +31,7 @@ export async function GET() {
 
   // 2. Supabase connection
   try {
-    const supabase = await createClient()
+    const supabase = createClient()
     const { data, error } = await supabase.from('companies').select('count').limit(1)
     checks.supabase = error
       ? { ok: false, error: error.message, code: error.code }
@@ -42,7 +42,7 @@ export async function GET() {
 
   // 3. Current user
   try {
-    const supabase = await createClient()
+    const supabase = createClient()
     const { data: { user }, error } = await supabase.auth.getUser()
     checks.auth = error
       ? { ok: false, error: error.message }

@@ -32,7 +32,7 @@ ${JSON.stringify(signals || [], null, 2)}
 }`)
 
     if (company.id) {
-      const supabase = await createClient()
+      const supabase = createClient()
       await supabase
         .from('leads')
         .update({
