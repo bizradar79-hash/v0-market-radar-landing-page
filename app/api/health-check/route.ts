@@ -2,27 +2,36 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   const base = 'https://v0-market-radar-landing-page.vercel.app'
-  const routes = [
-    '/api/analyze',
-    '/api/find-competitors',
-    '/api/generate-leads',
-    '/api/generate-tenders',
-    '/api/generate-trends',
-    '/api/generate-news',
-    '/api/generate-conferences',
+
+  // analyze has a GET diagnostic; all others are POST-only
+  const checks = [
+    { route: '/api/analyze', method: 'GET' },
+    { route: '/api/find-competitors', method: 'POST' },
+    { route: '/api/generate-leads', method: 'POST' },
+    { route: '/api/generate-tenders', method: 'POST' },
+    { route: '/api/generate-trends', method: 'POST' },
+    { route: '/api/generate-news', method: 'POST' },
+    { route: '/api/generate-conferences', method: 'POST' },
   ]
 
   const results = await Promise.all(
-    routes.map(async (route) => {
+    checks.map(async ({ route, method }) => {
+      let status = 0
       try {
-        const res = await fetch(`${base}${route}`, { method: 'GET' })
-        const data = await res.json()
-        return { route, status: res.status, ok: res.ok, error: data.error || null }
+        const res = await fetch(`${base}${route}`, { method })
+        status = res.status
+        const text = await res.text()
+        let data: any = {}
+        try { data = JSON.parse(text) } catch { data = { raw: text.slice(0, 200) } }
+        // 401 = route reached but needs auth — that's OK for health check
+        const ok = res.status === 200 || res.status === 401
+        return { route, method, status, ok, error: data.error || null, steps: data.steps || null }
       } catch (e: any) {
-        return { route, status: 0, ok: false, error: e.message }
+        return { route, method, status, ok: false, error: e.message, steps: null }
       }
     })
   )
 
-  return NextResponse.json({ results })
+  const allOk = results.every(r => r.ok)
+  return NextResponse.json({ allOk, results })
 }
