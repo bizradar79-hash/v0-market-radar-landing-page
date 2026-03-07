@@ -41,12 +41,17 @@ export default function AppDashboardPage() {
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState("")
   const [autoAnalyzing, setAutoAnalyzing] = useState(false)
+  const [bothExhausted, setBothExhausted] = useState(false)
   const hasAutoAnalyzed = useRef(false)
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     fetchDashboardData()
+    fetch('/api/usage-stats')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.bothExhausted) setBothExhausted(true) })
+      .catch(() => {})
   }, [])
 
   // Auto-run analysis once when dashboard loads if data exists but hasn't been analyzed recently
@@ -249,6 +254,18 @@ export default function AppDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* AI exhaustion banner */}
+      {bothExhausted && (
+        <div className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 p-4">
+          <span className="text-sm font-medium text-red-700">
+            מכסת AI יומית מוצתה (Groq + Gemini) — ניתוחים חדשים יתאפשרו לאחר איפוס המכסה (24 שעות)
+          </span>
+          <Link href="/admin/usage" className="text-xs text-red-600 underline whitespace-nowrap mr-3">
+            צפה בפרטים
+          </Link>
+        </div>
+      )}
+
       {/* Auto-analyzing banner */}
       {autoAnalyzing && (
         <div className="flex items-center justify-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-4">
