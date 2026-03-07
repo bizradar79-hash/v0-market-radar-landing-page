@@ -6,16 +6,22 @@ import { NextResponse } from 'next/server'
 export const maxDuration = 60
 
 export async function POST() {
+  const steps: Record<string, any> = {}
   try {
+    steps.context = 'starting'
     const ctx = await getFullContext()
-    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
+    steps.context = { ok: true, company: ctx.company?.name }
 
+    steps.search = 'starting'
     const results = await multiSearch([
       `${ctx.company?.industry} לקוחות קהל יעד ישראל`,
       `${ctx.company?.keywords?.[0]} ${ctx.company?.keywords?.[1]} חברות ישראל`,
       `מפיצים ${ctx.company?.industry} ישראל`,
     ])
+    steps.search = { ok: true, count: results.length }
 
+    steps.ai = 'starting'
     const data = await analyzeWithAI(`מצא 20 לקוחות פוטנציאליים אמיתיים לחברה ${ctx.company?.name}.
 
 ${ctx.context}
@@ -40,13 +46,16 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "source": "מקור"
   }]
 }`)
+    const list = Array.isArray(data?.leads) ? data.leads : []
+    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
 
-    const filtered = data.leads.filter((l: any) =>
+    const filtered = list.filter((l: any) =>
       l.name && l.website &&
       !l.name.includes(ctx.company?.name || '') &&
       l.website.startsWith('http')
     )
 
+    steps.db = 'starting'
     await ctx.supabase.from('leads').delete().eq('company_id', ctx.user.id)
     const { data: saved, error: insertError } = await ctx.supabase.from('leads').insert(
       filtered.map((l: any) => ({
@@ -60,10 +69,11 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
         company_id: ctx.user.id,
       }))
     ).select()
-
     if (insertError) {
-      console.error('Leads insert error:', insertError)
+      steps.db = { ok: false, error: insertError.message, code: insertError.code }
+      return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
+    steps.db = { ok: true, saved: saved?.length }
 
     await ctx.supabase.from('alerts').insert({
       company_id: ctx.user.id,
@@ -71,12 +81,12 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
       message: `${saved?.length || 0} לידים פוטנציאליים`,
       type: 'success',
       link: '/app/leads',
-      is_read: false
+      is_read: false,
     })
 
-    return NextResponse.json({ success: true, count: saved?.length || 0 })
-  } catch (error) {
-    console.error('Generate leads error:', error instanceof Error ? error.message : error)
-    return NextResponse.json({ error: 'Failed', details: error instanceof Error ? error.message : String(error) }, { status: 500 })
+    return NextResponse.json({ success: true, count: saved?.length || 0, steps })
+  } catch (e: any) {
+    console.error('generate-leads error:', e?.message)
+    return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })
   }
 }
