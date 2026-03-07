@@ -90,40 +90,19 @@ export async function GET() {
   }
   log.push(`Signed in: ${session.user.email}`)
 
-  // ── Step 4: Build session cookie (@supabase/ssr v0.9: base64url encoded) ───
-  // Storage key = 'supabase.auth.token' (default from @supabase/auth-js)
-  // Encoding = 'base64-' + base64url(JSON.stringify(session)) per createServerClient default
-  const sessionJson = JSON.stringify(session)
-  const base64Value = 'base64-' + Buffer.from(sessionJson).toString('base64url')
-  const MAX = 3180
-  let cookieHeader: string
-  if (encodeURIComponent(base64Value).length <= MAX) {
-    cookieHeader = `supabase.auth.token=${base64Value}`
-  } else {
-    // Chunk the session across multiple cookies
-    const parts: string[] = []
-    let remaining = base64Value
-    let i = 0
-    while (remaining.length > 0) {
-      let chunk = remaining
-      while (encodeURIComponent(chunk).length > MAX) {
-        chunk = chunk.slice(0, Math.floor(chunk.length * 0.95))
-      }
-      parts.push(`supabase.auth.token.${i}=${chunk}`)
-      remaining = remaining.slice(chunk.length)
-      i++
-    }
-    cookieHeader = parts.join('; ')
-    log.push(`Session chunked into ${i} cookies`)
-  }
+  const bearerToken = session.access_token
+  log.push(`Token: ${bearerToken.slice(0, 20)}...`)
 
-  // ── Step 5: Test all routes ─────────────────────────────────────────────────
+  // ── Step 4: Test all routes with Bearer token ───────────────────────────────
   const results = await Promise.all(
     ROUTES.map(async (route) => {
       try {
         const res = await fetch(`${BASE_URL}${route}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${bearerToken}`,
+          },
         })
         const text = await res.text()
         let data: any = {}

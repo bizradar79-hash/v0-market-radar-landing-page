@@ -1,9 +1,34 @@
+import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
+import { headers } from 'next/headers'
 import { scrapeWebsite } from './scrape'
 
 export async function getFullContext() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Support Bearer token auth for server-to-server calls (e.g. /api/run-tests)
+  const reqHeaders = await headers()
+  const authHeader = reqHeaders.get('authorization')
+
+  let supabase: any
+  let user: any
+
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7)
+    supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: { getAll: () => [], setAll: () => {} },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      }
+    )
+    const { data } = await supabase.auth.getUser(token)
+    user = data?.user
+  } else {
+    supabase = await createClient()
+    const { data } = await supabase.auth.getUser()
+    user = data?.user
+  }
+
   if (!user) return null
 
   const [{ data: company }, { data: competitors }] = await Promise.all([
