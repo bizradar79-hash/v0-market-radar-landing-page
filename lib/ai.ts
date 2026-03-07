@@ -19,11 +19,15 @@ function is429(e: any): boolean {
 
 async function callGroq(prompt: string, model: string): Promise<{ text: string; tokens: number }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
+  // Smaller model needs stronger English JSON instruction prepended to the user message
+  const userContent = model === 'llama-3.1-8b-instant'
+    ? `CRITICAL: Output ONLY a valid JSON object. Start your response with { and end with }. No introduction, no explanation, no numbered list, no markdown. Just raw JSON.\n\n${prompt}`
+    : prompt
   const result = await groq.chat.completions.create({
     model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
+      { role: 'user', content: userContent },
     ],
     temperature: 0.2,
     max_tokens: 4000,
