@@ -39,7 +39,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "description": "תיאור",
     "url": "URL אמיתי",
     "category": "קטגוריה",
-    "price": "מחיר"
+    "category": "קטגוריה"
   }]
 }`)
     const list = Array.isArray(data?.conferences) ? data.conferences : []
@@ -55,7 +55,6 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
         description: c.description,
         url: c.url,
         category: c.category,
-        price: c.price,
         company_id: ctx.user.id,
       }))
     ).select()
