@@ -6,16 +6,22 @@ import { NextResponse } from 'next/server'
 export const maxDuration = 60
 
 export async function POST() {
+  const steps: Record<string, any> = {}
   try {
+    steps.context = 'starting'
     const ctx = await getFullContext()
-    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
+    steps.context = { ok: true, company: ctx.company?.name }
 
+    steps.search = 'starting'
     const results = await multiSearch([
       `${ctx.company?.industry} חדשות ישראל 2026`,
       `${ctx.company?.name} חדשות`,
       `site:calcalist.co.il ${ctx.company?.industry}`,
     ])
+    steps.search = { ok: true, count: results.length }
 
+    steps.ai = 'starting'
     const data = await analyzeWithAI(`בחר 15 חדשות רלוונטיות מהמידע הבא:
 
 ${ctx.context}
@@ -35,10 +41,13 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "summary": "תקציר קצר"
   }]
 }`)
+    const list = Array.isArray(data?.news) ? data.news : []
+    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
 
+    steps.db = 'starting'
     await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
     const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
-      data.news.map((n: any) => ({
+      list.map((n: any) => ({
         title: n.title,
         source: n.source,
         url: n.url,
@@ -49,14 +58,15 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
         published_at: new Date().toISOString(),
       }))
     ).select()
-
     if (insertError) {
-      console.error('News insert error:', insertError)
+      steps.db = { ok: false, error: insertError.message, code: insertError.code }
+      return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
+    steps.db = { ok: true, saved: saved?.length }
 
-    return NextResponse.json({ success: true, news: saved, count: saved?.length || 0 })
-  } catch (error) {
-    console.error('Generate news error:', error instanceof Error ? error.message : error)
-    return NextResponse.json({ error: 'Failed', details: error instanceof Error ? error.message : String(error) }, { status: 500 })
+    return NextResponse.json({ success: true, news: saved, count: saved?.length || 0, steps })
+  } catch (e: any) {
+    console.error('generate-news error:', e?.message)
+    return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })
   }
 }
