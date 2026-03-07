@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -17,6 +17,13 @@ const ROUTES = [
   '/api/generate-conferences',
 ]
 
+// Create a Supabase client with no-op cookies (for server-to-server calls)
+function makeClient(url: string, key: string) {
+  return createServerClient(url, key, {
+    cookies: { getAll: () => [], setAll: () => {} },
+  })
+}
+
 export async function GET() {
   const log: string[] = []
 
@@ -29,9 +36,7 @@ export async function GET() {
   }
 
   // ── Step 1: Ensure test user exists ────────────────────────────────────────
-  const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  const admin = makeClient(SUPABASE_URL, SERVICE_KEY)
 
   let userId: string
   try {
@@ -44,7 +49,6 @@ export async function GET() {
       if (!error.message.toLowerCase().includes('already')) {
         return NextResponse.json({ error: `createUser: ${error.message}`, log }, { status: 500 })
       }
-      // User already exists — find their ID
       const { data: list } = await admin.auth.admin.listUsers()
       const existing = list?.users?.find((u) => u.email === TEST_EMAIL)
       if (!existing) return NextResponse.json({ error: 'Cannot find test user', log }, { status: 500 })
@@ -69,16 +73,14 @@ export async function GET() {
       website: 'https://example.com',
       keywords: ['טכנולוגיה', 'תוכנה', 'בינה מלאכותית'],
     })
-    if (ce) log.push(`Company insert warning: ${ce.message}`)
+    if (ce) log.push(`Company warning: ${ce.message}`)
     else log.push('Created test company')
   } else {
     log.push('Company exists')
   }
 
   // ── Step 3: Sign in to get access token ────────────────────────────────────
-  const anonClient = createClient(SUPABASE_URL, ANON_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  const anonClient = makeClient(SUPABASE_URL, ANON_KEY)
   const { data: { session }, error: signInError } = await anonClient.auth.signInWithPassword({
     email: TEST_EMAIL,
     password: TEST_PASSWORD,
@@ -88,62 +90,50 @@ export async function GET() {
   }
   log.push(`Signed in: ${session.user.email}`)
 
-  // ── Step 4: Build session cookie (@supabase/ssr v0.9 base64url format) ─────
+  // ── Step 4: Build session cookie (@supabase/ssr v0.9: base64url encoded) ───
+  // Storage key = 'supabase.auth.token' (default from @supabase/auth-js)
+  // Encoding = 'base64-' + base64url(JSON.stringify(session)) per createServerClient default
   const sessionJson = JSON.stringify(session)
   const base64Value = 'base64-' + Buffer.from(sessionJson).toString('base64url')
-  // Chunking: MAX_CHUNK_SIZE = 3180 (encoded). Split if needed.
   const MAX = 3180
-  const encoded = encodeURIComponent(base64Value)
   let cookieHeader: string
-  if (encoded.length <= MAX) {
+  if (encodeURIComponent(base64Value).length <= MAX) {
     cookieHeader = `supabase.auth.token=${base64Value}`
   } else {
-    // Build chunks
-    const chunks: string[] = []
+    // Chunk the session across multiple cookies
+    const parts: string[] = []
     let remaining = base64Value
     let i = 0
     while (remaining.length > 0) {
-      // Find safe split point
       let chunk = remaining
       while (encodeURIComponent(chunk).length > MAX) {
         chunk = chunk.slice(0, Math.floor(chunk.length * 0.95))
       }
-      chunks.push(`supabase.auth.token.${i}=${chunk}`)
+      parts.push(`supabase.auth.token.${i}=${chunk}`)
       remaining = remaining.slice(chunk.length)
       i++
     }
-    cookieHeader = chunks.join('; ')
+    cookieHeader = parts.join('; ')
     log.push(`Session chunked into ${i} cookies`)
   }
 
-  // ── Step 5: Call every route with the session cookie ───────────────────────
+  // ── Step 5: Test all routes ─────────────────────────────────────────────────
   const results = await Promise.all(
     ROUTES.map(async (route) => {
       try {
         const res = await fetch(`${BASE_URL}${route}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Cookie: cookieHeader,
-          },
+          headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
         })
         const text = await res.text()
         let data: any = {}
         try { data = JSON.parse(text) } catch { data = { raw: text.slice(0, 300) } }
-        return {
-          route,
-          status: res.status,
-          ok: res.ok,
-          count: data.count ?? null,
-          steps: data.steps ?? null,
-          error: data.error ?? null,
-        }
+        return { route, status: res.status, ok: res.ok, count: data.count ?? null, steps: data.steps ?? null, error: data.error ?? null }
       } catch (e: any) {
         return { route, status: 0, ok: false, count: null, steps: null, error: e.message }
       }
     })
   )
 
-  const allOk = results.every((r) => r.ok)
-  return NextResponse.json({ allOk, log, results })
+  return NextResponse.json({ allOk: results.every((r) => r.ok), log, results })
 }
