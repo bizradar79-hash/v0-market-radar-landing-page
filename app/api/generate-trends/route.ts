@@ -35,8 +35,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "description": "תיאור 2-3 משפטים",
     "score": 78,
     "direction": "up",
-    "category": "קטגוריה",
-    "sources": ["URL אמיתי"]
+    "category": "קטגוריה"
   }]
 }`)
     const list = Array.isArray(data?.trends) ? data.trends : []
@@ -51,7 +50,6 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
         score: t.score,
         direction: t.direction,
         category: t.category,
-        sources: t.sources,
         company_id: ctx.user.id,
       }))
     ).select()
