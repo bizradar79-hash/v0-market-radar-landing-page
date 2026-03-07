@@ -10,26 +10,23 @@ const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בש
 4. התחל את התשובה ישירות עם { ו-סיים עם }
 5. דבר בעברית`
 
+// Ordered fallback chain — each has a separate Groq quota
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
+
 function is429(e: any): boolean {
-  return (
-    e?.status === 429 ||
-    e?.message?.includes('429') ||
-    e?.message?.includes('RESOURCE_EXHAUSTED') ||
-    e?.message?.toLowerCase().includes('rate limit') ||
-    e?.message?.toLowerCase().includes('quota')
-  )
+  return e?.status === 429 || String(e?.message ?? '').includes('[429')
 }
 
-async function callGroq(prompt: string): Promise<{ text: string; tokens: number }> {
+async function callGroq(prompt: string, model: string): Promise<{ text: string; tokens: number }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
   const result = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,
-    max_tokens: 4000,
+    max_tokens: 2000,
   })
   return {
     text: result.choices[0].message.content ?? '',
@@ -38,7 +35,8 @@ async function callGroq(prompt: string): Promise<{ text: string; tokens: number 
 }
 
 async function callGemini(prompt: string): Promise<{ text: string; tokens: number }> {
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error('GEMINI_KEY_NOT_SET')
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY)
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
     systemInstruction: SYSTEM_PROMPT,
@@ -51,35 +49,35 @@ async function callGemini(prompt: string): Promise<{ text: string; tokens: numbe
 }
 
 export async function analyzeWithAI(prompt: string): Promise<any> {
-  let raw: string
-
-  try {
-    const { text, tokens } = await callGroq(prompt)
-    raw = text
-    trackUsage('groq', tokens).catch(() => {})
-  } catch (groqErr: any) {
-    if (!is429(groqErr)) throw groqErr
-
-    console.warn('Groq 429 — falling back to Gemini')
+  // Try each Groq model in order
+  for (const model of GROQ_MODELS) {
     try {
-      const { text, tokens } = await callGemini(prompt)
-      raw = text
-      trackUsage('gemini', tokens).catch(() => {})
-    } catch (geminiErr: any) {
-      if (is429(geminiErr)) {
-        throw new Error('BOTH_PROVIDERS_EXHAUSTED')
+      const { text, tokens } = await callGroq(prompt, model)
+      trackUsage('groq', tokens).catch(() => {})
+      const extracted = extractJSON(text)
+      if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
+      return extracted
+    } catch (e: any) {
+      if (is429(e)) {
+        console.warn(`Groq ${model} → 429, trying next provider`)
+        continue
       }
-      throw geminiErr
+      throw e
     }
   }
 
-  const extracted = extractJSON(raw)
-  if (!extracted) {
-    console.error('analyzeWithAI: could not extract JSON from:', raw.slice(0, 500))
-    throw new Error(`Model did not return valid JSON. Raw: ${raw.slice(0, 200)}`)
+  // All Groq models exhausted — try Gemini
+  console.warn('All Groq models exhausted, falling back to Gemini')
+  try {
+    const { text, tokens } = await callGemini(prompt)
+    trackUsage('gemini', tokens).catch(() => {})
+    const extracted = extractJSON(text)
+    if (!extracted) throw new Error(`Gemini did not return valid JSON. Raw: ${text.slice(0, 200)}`)
+    return extracted
+  } catch (e: any) {
+    if (is429(e)) throw new Error('BOTH_PROVIDERS_EXHAUSTED')
+    throw e
   }
-
-  return extracted
 }
 
 function extractJSON(text: string): any {
