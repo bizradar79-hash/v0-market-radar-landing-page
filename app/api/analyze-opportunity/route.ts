@@ -32,7 +32,7 @@ ${JSON.stringify(signals, null, 2)}
   "type": "סוג ההזדמנות"
 }`)
 
-    const supabase = createClient()
+    const supabase = await createClient()
     const { data, error: dbError } = await supabase
       .from('opportunities')
       .insert({

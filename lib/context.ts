@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { scrapeWebsite } from './scrape'
 
 export async function getFullContext() {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
