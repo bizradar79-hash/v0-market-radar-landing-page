@@ -62,7 +62,7 @@ async function callGroq(prompt: string): Promise<{ text: string; tokens: number 
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,
-    max_tokens: 1000,
+    max_tokens: 2000,
   })
   return {
     text: result.choices[0].message.content ?? '',
