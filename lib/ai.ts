@@ -36,7 +36,10 @@ const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בש
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 function is429(e: any): boolean {
-  return e?.status === 429 || String(e?.message ?? '').includes('[429')
+  const status = e?.status
+  const msg = String(e?.message ?? '')
+  // 429 = rate limit; Groq also sends 413 for TPM-exceeded (treat same as rate limit)
+  return status === 429 || status === 413 || msg.includes('[429') || msg.includes('[413')
 }
 
 async function callGroq(prompt: string): Promise<{ text: string; tokens: number }> {
