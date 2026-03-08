@@ -28,7 +28,7 @@ async function searchWithSerper(query: string): Promise<SearchResult[]> {
     return (data.organic || []).map((r: any) => ({
       title: r.title || '',
       url: r.link || '',
-      content: (r.snippet || '').slice(0, 150),
+      content: (r.snippet || '').slice(0, 80),
       score: r.position ? 1 / r.position : 0.5,
     }))
   } catch {
@@ -46,7 +46,7 @@ export async function search(query: string, maxResults = 10): Promise<SearchResu
       return result.results.map(r => ({
         title: r.title,
         url: r.url,
-        content: r.content?.slice(0, 150) || '',
+        content: r.content?.slice(0, 80) || '',
         score: r.score,
       }))
     }
@@ -62,7 +62,7 @@ export async function search(query: string, maxResults = 10): Promise<SearchResu
   }
 }
 
-export async function multiSearch(queries: string[], maxTotal = 15): Promise<SearchResult[]> {
+export async function multiSearch(queries: string[], maxTotal = 8): Promise<SearchResult[]> {
   const results = await Promise.all(queries.map(q => search(q)))
   const flat = results.flat()
   const seen = new Set<string>()

@@ -24,13 +24,7 @@ export async function validateUrl(url: string): Promise<boolean> {
   }
 }
 
-const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בשוק הישראלי.
-כללי ברזל:
-1. אף פעם אל תמציא URLs, שמות חברות או נתונים שלא קיבלת
-2. השתמש רק במידע שסופק לך
-3. החזר JSON תקני בלבד - ללא markdown, ללא הסברים, ללא טקסט לפני או אחרי ה-JSON
-4. התחל את התשובה ישירות עם { ו-סיים עם }
-5. דבר בעברית`
+const SYSTEM_PROMPT = `You are an Israeli market expert. Return ONLY valid JSON, no markdown, no explanation. Start with { or [ and end with } or ].`
 
 // llama-3.1-8b-instant has a 6k TPM limit — too low for real search data; skip it
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
@@ -68,7 +62,7 @@ async function callGroq(prompt: string): Promise<{ text: string; tokens: number 
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,
-    max_tokens: 4000,
+    max_tokens: 1000,
   })
   return {
     text: result.choices[0].message.content ?? '',
