@@ -10,15 +10,6 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { TrendingUp, TrendingDown, Minus, Loader2, Sparkles } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts"
 
 interface Trend {
   id: string
@@ -107,11 +98,6 @@ export default function TrendsPage() {
     }
   }
 
-  const chartData = trends.map(t => ({
-    name: t.name.length > 15 ? t.name.substring(0, 15) + "..." : t.name,
-    score: t.score,
-  }))
-
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -142,41 +128,6 @@ export default function TrendsPage() {
           )}
         </Button>
       </div>
-
-      {/* Chart */}
-      {trends.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">ציון טרנדים לפי תחום</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis type="number" domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    width={220}
-                    stroke="hsl(var(--muted-foreground))"
-                    tick={{ fontSize: 11, fill: '#374151' }}
-                    tickFormatter={(val: string) => val.length > 25 ? val.slice(0, 25) + '...' : val}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Bar dataKey="score" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Trend Cards */}
       <div className="grid gap-4 md:grid-cols-2">

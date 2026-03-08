@@ -116,9 +116,14 @@ export default function OnboardingPage() {
     setCompetitorError(null)
     setAiCompetitors([])
     try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
       const response = await fetch("/api/find-competitors", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({ industry, description, city, website }),
       })
       const data = await response.json()

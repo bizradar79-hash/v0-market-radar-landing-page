@@ -40,12 +40,14 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 - רק כנסים בשנים 2025 או 2026 בלבד — אסור לכלול אירועים ישנים יותר
 - רק URLs אמיתיים מתוצאות החיפוש
 - תאריך חייב לכלול 2025 או 2026
+- חלץ את התאריך האמיתי מתוצאות החיפוש — אם לא ידוע, השתמש null
+- אסור לכתוב 2026-01-01 כתאריך ברירת מחדל
 - אסור להשתמש בתו " (גרשיים) בתוך ערכי טקסט — כתוב ע"ש כ-עש או פשוט ללא גרשיים
 
 {
   "conferences": [{
     "name": "שם כנס אמיתי",
-    "date": "2026-MM-DD",
+    "date": "2026-03-15",
     "location": "מיקום",
     "description": "תיאור",
     "url": "URL אמיתי מהחיפוש",
@@ -55,8 +57,8 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     let list = Array.isArray(data?.conferences) ? data.conferences : []
     steps.ai = { ok: true, count: list.length }
 
-    // Filter to 2025+ only
-    list = list.filter((c: any) => isRecentYear(c.date || ''))
+    // Filter to 2025+ only (allow null dates through)
+    list = list.filter((c: any) => c.date === null || isRecentYear(c.date || ''))
 
     // Deduplicate by url
     list = deduplicateByField(list, 'url')

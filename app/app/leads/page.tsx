@@ -35,16 +35,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { 
-  Users, 
+import {
+  Users,
   MoreHorizontal,
-  Mail,
-  Phone,
   Eye,
   Loader2,
   Filter,
   Building2,
-  MapPin,
   Sparkles,
   Trash2,
   ExternalLink,
@@ -213,7 +210,6 @@ export default function LeadsPage() {
               <TableRow>
                 <TableHead className="text-right">חברה</TableHead>
                 <TableHead className="text-right">תעשייה</TableHead>
-                <TableHead className="text-right hidden md:table-cell">עיר</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">סיבת גילוי</TableHead>
                 <TableHead className="text-right">ציון ליד</TableHead>
                 <TableHead className="text-right">פעולות</TableHead>
@@ -237,12 +233,6 @@ export default function LeadsPage() {
                     <Badge variant="secondary">
                       {lead.industry || "טכנולוגיה"}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                      <MapPin className="h-3.5 w-3.5" />
-                      {lead.location || "תל אביב"}
-                    </div>
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <span className="text-sm text-muted-foreground">
@@ -279,15 +269,7 @@ export default function LeadsPage() {
                             </a>
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem>
-                          <Mail className="ml-2 h-4 w-4" />
-                          שלח מייל
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Phone className="ml-2 h-4 w-4" />
-                          התקשר
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={() => deleteLead(lead.id)}
                           className="text-red-600"
                         >
@@ -337,10 +319,6 @@ export default function LeadsPage() {
                     <p className="font-medium">{selectedLead.industry || "טכנולוגיה"}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">מיקום</p>
-                    <p className="font-medium">{selectedLead.location || "תל אביב"}</p>
-                  </div>
-                  <div>
                     <p className="text-sm text-muted-foreground">ציון ליד</p>
                     <Badge variant="outline" className={getScoreColor(selectedLead.score)}>
                       {selectedLead.score}
@@ -366,12 +344,8 @@ export default function LeadsPage() {
                       </a>
                     </Button>
                   )}
-                  <Button variant="outline">
-                    <Mail className="ml-2 h-4 w-4" />
-                    שלח מייל
-                  </Button>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     className="text-red-600"
                     onClick={() => deleteLead(selectedLead.id)}
                   >

@@ -42,7 +42,6 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "name": "שם חברה אמיתי",
     "website": "URL אמיתי",
     "industry": "תעשייה",
-    "location": "עיר",
     "reason": "למה יקנו",
     "score": 88,
     "source": "מקור"
@@ -77,7 +76,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
         name: l.name,
         website: l.website,
         industry: l.industry,
-        location: l.location,
+        location: '',
         reason: l.reason,
         score: l.score,
         source: l.source,

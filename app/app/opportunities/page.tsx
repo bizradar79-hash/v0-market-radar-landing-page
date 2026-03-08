@@ -454,9 +454,22 @@ export default function OpportunitiesPage() {
                   <div>
                     <h4 className="text-sm font-medium text-foreground mb-2">מקורות</h4>
                     <div className="flex flex-wrap gap-2">
-                      {selectedOpportunity.sources.map((source, idx) => (
-                        <Badge key={idx} variant="outline">{source}</Badge>
-                      ))}
+                      {selectedOpportunity.sources.map((source, idx) =>
+                        source.startsWith('http') ? (
+                          <a
+                            key={idx}
+                            href={source}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-0.5 text-sm font-medium text-primary hover:underline"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            צפה במקור
+                          </a>
+                        ) : (
+                          <Badge key={idx} variant="outline">{source}</Badge>
+                        )
+                      )}
                     </div>
                   </div>
                 )}

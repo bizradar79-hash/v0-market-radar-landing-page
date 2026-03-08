@@ -132,7 +132,7 @@ export default function AppDashboardPage() {
     try {
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i]
-        setScanProgress(step.label)
+        setScanProgress(`${step.label} (${i + 1}/${steps.length})`)
         try {
           const res = await fetch(step.api, { method: 'POST' })
           const data = await res.json()
@@ -171,7 +171,7 @@ export default function AppDashboardPage() {
   async function runFirstScan() {
     setScanning(true)
     const results = { opportunities: 0, competitors: 0, leads: 0, tenders: 0 }
-    
+
     const steps = [
       { api: '/api/analyze', label: 'מנתח הזדמנויות...', key: 'opportunities' },
       { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
@@ -182,7 +182,7 @@ export default function AppDashboardPage() {
     try {
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i]
-        setScanProgress(step.label)
+        setScanProgress(`${step.label} (${i + 1}/${steps.length})`)
         try {
           const res = await fetch(step.api, { method: 'POST' })
           const data = await res.json()
