@@ -130,7 +130,8 @@ export default function AppDashboardPage() {
     ]
 
     try {
-      for (const step of steps) {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]
         setScanProgress(step.label)
         try {
           const res = await fetch(step.api, { method: 'POST' })
@@ -139,16 +140,17 @@ export default function AppDashboardPage() {
         } catch (e) {
           console.error(`Error in ${step.api}:`, e)
         }
+        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
       }
 
       setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
-      
+
       // Refresh sidebar counts
       if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
         (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
       }
-      
+
       toast({
         title: "הניתוח הושלם בהצלחה!",
         description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.tenders} מכרזים`,
@@ -178,7 +180,8 @@ export default function AppDashboardPage() {
     ]
 
     try {
-      for (const step of steps) {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]
         setScanProgress(step.label)
         try {
           const res = await fetch(step.api, { method: 'POST' })
@@ -187,16 +190,17 @@ export default function AppDashboardPage() {
         } catch (e) {
           console.error(`Error in ${step.api}:`, e)
         }
+        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
       }
 
       setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
-      
+
       // Refresh sidebar counts
       if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
         (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
       }
-      
+
       toast({
         title: "הסריקה הושלמה בהצלחה!",
         description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.competitors} מתחרים`,

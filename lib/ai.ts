@@ -35,14 +35,14 @@ const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בש
 // llama-3.1-8b-instant has a 6k TPM limit — too low for real search data; skip it
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
-async function callWithRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+async function callWithRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   for (let i = 0; i < retries; i++) {
     try {
       return await fn()
     } catch (e: any) {
       if (is429(e) && i < retries - 1) {
-        const delay = (i + 1) * 15000 // 15s, 30s, 45s
-        console.log(`Rate limited, waiting ${delay / 1000}s before retry ${i + 2}/${retries}...`)
+        const delay = 20000 // 20s — enough for TPM window to partially clear
+        console.warn(`[AI] Rate limited (attempt ${i + 1}/${retries}), waiting ${delay / 1000}s...`)
         await new Promise(r => setTimeout(r, delay))
         continue
       }
@@ -91,28 +91,26 @@ async function callGemini(prompt: string): Promise<{ text: string; tokens: numbe
 }
 
 export async function analyzeWithAI(prompt: string): Promise<any> {
-  // Try Groq first
+  // Try Groq with retry on TPM (up to 2 attempts, 20s apart)
   try {
-    const { text, tokens } = await callGroq(prompt)
+    const { text, tokens } = await callWithRetry(() => callGroq(prompt), 2)
     trackUsage('groq', tokens).catch(() => {})
     const extracted = extractJSON(text)
     if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
   } catch (e: any) {
-    console.error('[AI] Groq error — status:', e?.status, '| code:', e?.error?.code, '| type:', e?.error?.type, '| message:', String(e?.message ?? '').slice(0, 300), '| is429:', is429(e))
     if (!is429(e)) throw e
-    console.warn('[AI] Groq → rate limited, falling back to Gemini')
+    console.warn('[AI] Groq exhausted after retries, falling back to Gemini')
   }
 
-  // Groq exhausted — try Gemini
+  // Groq exhausted — try Gemini with retry
   try {
-    const { text, tokens } = await callGemini(prompt)
+    const { text, tokens } = await callWithRetry(() => callGemini(prompt), 2)
     trackUsage('gemini', tokens).catch(() => {})
     const extracted = extractJSON(text)
     if (!extracted) throw new Error(`Gemini did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
   } catch (e: any) {
-    console.error('[AI] Gemini error — status:', e?.status, '| httpStatus:', e?.httpStatus, '| code:', e?.code, '| message:', String(e?.message ?? '').slice(0, 300), '| is429:', is429(e))
     if (is429(e)) throw new Error('BOTH_PROVIDERS_EXHAUSTED')
     throw e
   }
