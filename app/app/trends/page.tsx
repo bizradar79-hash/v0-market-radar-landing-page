@@ -155,7 +155,14 @@ export default function TrendsPage() {
                 <BarChart data={chartData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis type="number" domain={[0, 100]} stroke="hsl(var(--muted-foreground))" />
-                  <YAxis dataKey="name" type="category" width={100} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={220}
+                    stroke="hsl(var(--muted-foreground))"
+                    tick={{ fontSize: 11, fill: '#374151' }}
+                    tickFormatter={(val: string) => val.length > 25 ? val.slice(0, 25) + '...' : val}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",

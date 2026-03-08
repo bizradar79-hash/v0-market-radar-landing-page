@@ -2,6 +2,28 @@ import Groq from 'groq-sdk'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { trackUsage } from './usage'
 
+export async function validateUrl(url: string): Promise<boolean> {
+  if (!url || !url.startsWith('http')) return false
+  try {
+    const res = await fetch(url, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(3000),
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    })
+    if (res.status === 405) {
+      const res2 = await fetch(url, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      })
+      return res2.ok
+    }
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בשוק הישראלי.
 כללי ברזל:
 1. אף פעם אל תמציא URLs, שמות חברות או נתונים שלא קיבלת

@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI } from '@/lib/ai'
+import { analyzeWithAI, validateUrl } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
+import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -15,34 +16,48 @@ export async function POST() {
 
     steps.search = 'starting'
     const results = await multiSearch([
-      `${ctx.company?.industry} חדשות ישראל 2026`,
-      `${ctx.company?.name} חדשות`,
-      `site:calcalist.co.il ${ctx.company?.industry}`,
+      `${ctx.company?.industry} חדשות שוק ישראל 2025 2026`,
+      `${ctx.company?.keywords?.[0]} מגמות ישראל חדשות`,
+      `site:calcalist.co.il OR site:ynet.co.il ${ctx.company?.industry}`,
     ])
     steps.search = { ok: true, count: results.length }
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`בחר 15 חדשות רלוונטיות מהמידע הבא:
+    const data = await analyzeWithAI(`בחר 10 חדשות רלוונטיות לתעשיית ${ctx.company?.industry} מהמידע הבא:
 
 ${ctx.context}
 
 תוצאות חיפוש חדשות:
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-כללים: רק URLs אמיתיים מהחיפוש
+כללים קשיחים:
+- חדשות על התעשייה והשוק, לא על ${ctx.company?.name} ספציפית
+- רק URLs שמופיעים בתוצאות החיפוש — אסור להמציא URLs
+- אסור לכתוב כתבות בדויות על ${ctx.company?.name}
 
 {
   "news": [{
-    "title": "כותרת",
-    "source": "שם מקור",
-    "url": "URL אמיתי מהחיפוש",
+    "title": "כותרת מהחיפוש",
+    "source": "שם אתר",
+    "url": "URL מהחיפוש בלבד",
     "category": "קטגוריה",
     "sentiment": "positive",
     "summary": "תקציר קצר"
   }]
 }`)
-    const list = Array.isArray(data?.news) ? data.news : []
-    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
+    let list = Array.isArray(data?.news) ? data.news : []
+    steps.ai = { ok: true, count: list.length }
+
+    // Deduplicate by url
+    list = deduplicateByField(list, 'url')
+
+    // Validate URLs concurrently
+    steps.validate = 'starting'
+    const withValid = await Promise.all(
+      list.map(async (n: any) => ({ ...n, _valid: await validateUrl(n.url) }))
+    )
+    list = withValid.filter(n => n._valid).map(({ _valid, ...n }) => n)
+    steps.validate = { ok: true, kept: list.length }
 
     steps.db = 'starting'
     await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)

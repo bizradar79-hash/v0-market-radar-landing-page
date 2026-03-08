@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI } from '@/lib/ai'
+import { analyzeWithAI, validateUrl } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
+import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -15,11 +16,20 @@ export async function POST() {
 
     steps.search = 'starting'
     const results = await multiSearch([
-      `מכרזים ${ctx.company?.industry} ישראל 2026`,
-      `מכרז ממשלתי ${ctx.company?.keywords?.[0]} 2026`,
-      `tender ${ctx.company?.industry} Israel 2026`,
+      `מכרז ${ctx.company?.industry} ישראל 2025 2026 site:mr.gov.il`,
+      `מכרז ${ctx.company?.keywords?.[0]} ישראל 2026`,
+      `tender ${ctx.company?.industry} Israel 2025 2026`,
     ])
     steps.search = { ok: true, count: results.length }
+
+    // If no search results → return empty array, don't fabricate
+    if (results.length === 0) {
+      await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
+      steps.ai = { ok: true, count: 0, reason: 'no search results' }
+      return NextResponse.json({ success: true, tenders: [], count: 0, steps })
+    }
+
+    const searchUrls = new Set(results.map(r => r.url))
 
     steps.ai = 'starting'
     const data = await analyzeWithAI(`מצא 8 מכרזים רלוונטיים מהמידע הבא:
@@ -29,10 +39,11 @@ ${ctx.context}
 תוצאות חיפוש מכרזים:
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-כללים:
-- רק מכרזים שמופיעים בתוצאות החיפוש
-- רק URLs אמיתיים
-- דדליין ריאלי
+כללים קשיחים:
+- ONLY use links that appear verbatim in the search results above
+- אם אין מכרז אמיתי בתוצאות — החזר רשימה ריקה
+- דדליין חייב להיות 2025 או 2026
+- link חייב להיות URL שמופיע ברשימת תוצאות החיפוש
 
 {
   "tenders": [{
@@ -41,12 +52,26 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
     "deadline": "2026-05-01",
     "budget": "₪500,000",
     "description": "תיאור",
-    "link": "URL אמיתי",
+    "link": "URL מהחיפוש בלבד",
     "relevance_score": 88
   }]
 }`)
-    const list = Array.isArray(data?.tenders) ? data.tenders : []
-    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
+    let list = Array.isArray(data?.tenders) ? data.tenders : []
+    steps.ai = { ok: true, count: list.length }
+
+    // Keep only tenders whose link appears in search results
+    list = list.filter((t: any) => t.link && searchUrls.has(t.link))
+
+    // Deduplicate by link
+    list = deduplicateByField(list, 'link')
+
+    // Validate URLs concurrently
+    steps.validate = 'starting'
+    const withValid = await Promise.all(
+      list.map(async (t: any) => ({ ...t, _valid: await validateUrl(t.link) }))
+    )
+    list = withValid.filter(t => t._valid).map(({ _valid, ...t }) => t)
+    steps.validate = { ok: true, kept: list.length }
 
     steps.db = 'starting'
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)

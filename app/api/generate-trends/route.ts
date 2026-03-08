@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeWithAI } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
+import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -15,14 +16,14 @@ export async function POST() {
 
     steps.search = 'starting'
     const results = await multiSearch([
-      `טרנדים ${ctx.company?.industry} ישראל 2026`,
+      `טרנדים ${ctx.company?.industry} ישראל 2025 2026`,
       `${ctx.company?.industry} מגמות שוק ישראל`,
       `${ctx.company?.industry} growth trends Israel 2026`,
     ])
     steps.search = { ok: true, count: results.length }
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`זהה 12 טרנדים עסקיים מהמידע:
+    const data = await analyzeWithAI(`זהה 10 טרנדים עסקיים מהמידע:
 
 ${ctx.context}
 
@@ -31,14 +32,18 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
 {
   "trends": [{
-    "name": "שם טרנד",
+    "name": "שם טרנד קצר",
     "description": "תיאור 2-3 משפטים",
     "score": 78,
     "direction": "up",
     "category": "קטגוריה"
   }]
 }`)
-    const list = Array.isArray(data?.trends) ? data.trends : []
+    let list = Array.isArray(data?.trends) ? data.trends : []
+
+    // Deduplicate by name
+    list = deduplicateByField(list, 'name')
+
     steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
 
     steps.db = 'starting'

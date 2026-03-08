@@ -1,9 +1,15 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI } from '@/lib/ai'
+import { analyzeWithAI, validateUrl } from '@/lib/ai'
 import { multiSearch } from '@/lib/search'
+import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
+
+function isRecentYear(dateStr: string): boolean {
+  const match = dateStr?.match(/20(2[5-9]|[3-9]\d)/)
+  return !!match
+}
 
 export async function POST() {
   const steps: Record<string, any> = {}
@@ -15,35 +21,51 @@ export async function POST() {
 
     steps.search = 'starting'
     const results = await multiSearch([
-      `כנסים ${ctx.company?.industry} ישראל 2026`,
-      `conferences ${ctx.company?.industry} Israel 2026`,
-      `ועידה ${ctx.company?.industry} ישראל 2026`,
+      `כנס ${ctx.company?.industry} ישראל 2026 אירוע`,
+      `conference ${ctx.company?.industry} Israel 2025 2026`,
+      `ועידה ${ctx.company?.keywords?.[0]} ישראל 2026`,
     ])
     steps.search = { ok: true, count: results.length }
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`מצא 10 כנסים ואירועים מהמידע הבא:
+    const data = await analyzeWithAI(`מצא 8 כנסים ואירועים מקצועיים מהמידע הבא:
 
 ${ctx.context}
 
 תוצאות חיפוש:
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-כללים: רק כנסים שמופיעים בחיפוש עם URLs אמיתיים
+כללים קשיחים:
+- רק כנסים בשנים 2025 או 2026 בלבד — אסור לכלול אירועים ישנים יותר
+- רק URLs אמיתיים מתוצאות החיפוש
+- תאריך חייב לכלול 2025 או 2026
 
 {
   "conferences": [{
     "name": "שם כנס אמיתי",
-    "date": "תאריך",
+    "date": "2026-MM-DD",
     "location": "מיקום",
     "description": "תיאור",
-    "url": "URL אמיתי",
-    "category": "קטגוריה",
+    "url": "URL אמיתי מהחיפוש",
     "category": "קטגוריה"
   }]
 }`)
-    const list = Array.isArray(data?.conferences) ? data.conferences : []
-    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
+    let list = Array.isArray(data?.conferences) ? data.conferences : []
+    steps.ai = { ok: true, count: list.length }
+
+    // Filter to 2025+ only
+    list = list.filter((c: any) => isRecentYear(c.date || ''))
+
+    // Deduplicate by url
+    list = deduplicateByField(list, 'url')
+
+    // Validate URLs concurrently
+    steps.validate = 'starting'
+    const withValid = await Promise.all(
+      list.map(async (c: any) => ({ ...c, _valid: await validateUrl(c.url) }))
+    )
+    list = withValid.filter(c => c._valid).map(({ _valid, ...c }) => c)
+    steps.validate = { ok: true, kept: list.length }
 
     steps.db = 'starting'
     await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)

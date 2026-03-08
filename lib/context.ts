@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { scrapeWebsite } from './scrape'
 
+function parseDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+}
+
 export async function getFullContext() {
   // Support Bearer token auth for server-to-server calls (e.g. /api/run-tests)
   const reqHeaders = await headers()
@@ -38,24 +42,30 @@ export async function getFullContext() {
 
   if (!company) return null
 
+  const companyDomain = parseDomain(company?.website || '')
+
   // Only scrape website — Tavily searches are done per-route to avoid timeout
   const websiteContent = await scrapeWebsite(company?.website || '')
 
   const context = `
 === פרופיל החברה ===
 שם: ${company?.name}
+דומיין: ${companyDomain}
 אתר: ${company?.website}
 תעשייה: ${company?.industry}
 עיר: ${company?.city}
 גודל: ${company?.size}
 תיאור: ${company?.description}
-מילות מפתח: ${company?.keywords?.join(', ')}
-מודולים: ${company?.modules?.join(', ')}
+מוצרים/שירותים/מילות מפתח: ${company?.keywords?.join(', ')}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}
 
 === תוכן האתר ===
 ${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
+
+=== הנחיה קריטית ===
+אל תכלול את "${company?.name}" (דומיין: ${companyDomain}) בתוצאות כלשהן.
+השתמש אך ורק בנתונים ו-URLs שמופיעים בתוצאות החיפוש שסופקו.
 `
 
-  return { company, competitors, user, supabase, context }
+  return { company, competitors, user, supabase, context, companyDomain }
 }
