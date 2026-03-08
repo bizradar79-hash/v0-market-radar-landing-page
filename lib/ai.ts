@@ -85,6 +85,7 @@ async function callGemini(prompt: string): Promise<{ text: string; tokens: numbe
 }
 
 export async function analyzeWithAI(prompt: string): Promise<any> {
+  let groqErr: any
   // Try Groq with retry on TPM (up to 2 attempts, 20s apart)
   try {
     const { text, tokens } = await callWithRetry(() => callGroq(prompt), 2)
@@ -93,8 +94,8 @@ export async function analyzeWithAI(prompt: string): Promise<any> {
     if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
   } catch (e: any) {
+    groqErr = e
     if (!is429(e)) throw e
-    console.warn('[AI] Groq TPM exhausted, falling back to Gemini')
   }
 
   // Gemini fallback — single attempt only (daily quota won't recover in seconds)
@@ -104,9 +105,11 @@ export async function analyzeWithAI(prompt: string): Promise<any> {
     const extracted = extractJSON(text)
     if (!extracted) throw new Error(`Gemini did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
-  } catch (e: any) {
-    if (is429(e)) throw new Error('BOTH_PROVIDERS_EXHAUSTED')
-    throw e
+  } catch (geminiErr: any) {
+    const groqDetail = `groq_status=${groqErr?.status} groq_msg=${String(groqErr?.message ?? '').slice(0, 150)}`
+    const geminiDetail = `gemini_status=${geminiErr?.status} gemini_msg=${String(geminiErr?.message ?? '').slice(0, 150)}`
+    if (is429(geminiErr)) throw new Error(`BOTH_PROVIDERS_EXHAUSTED | ${groqDetail} | ${geminiDetail}`)
+    throw geminiErr
   }
 }
 
