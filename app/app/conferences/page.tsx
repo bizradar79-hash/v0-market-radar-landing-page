@@ -9,14 +9,18 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
-import { 
-  Calendar, 
-  MapPin, 
-  ExternalLink, 
+import {
+  Calendar,
+  MapPin,
+  ExternalLink,
   Loader2,
   Sparkles,
   Tag,
 } from "lucide-react"
+
+function getHostname(url: string): string | null {
+  try { return new URL(url).hostname } catch { return null }
+}
 
 interface Conference {
   id: string
@@ -184,6 +188,23 @@ export default function ConferencesPage() {
                     <MapPin className="h-4 w-4" />
                     <span>{conference.location}</span>
                   </div>
+                  {conference.url && (() => {
+                    const host = getHostname(conference.url)
+                    if (!host) return null
+                    return (
+                      <div className="flex items-center gap-2">
+                        <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <a
+                          href={conference.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-teal-600 hover:underline truncate block max-w-xs"
+                        >
+                          {host}
+                        </a>
+                      </div>
+                    )
+                  })()}
                   {conference.price && (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Tag className="h-4 w-4" />

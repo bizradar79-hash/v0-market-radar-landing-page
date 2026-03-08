@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import AppSidebar from "@/components/app/app-sidebar"
 import AppHeader from "@/components/app/app-header"
 import { Menu } from "lucide-react"
@@ -12,6 +12,11 @@ export default function AppLayout({
   children: React.ReactNode
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    document.body.style.overflow = sidebarOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [sidebarOpen])
 
   return (
     <div className="flex min-h-screen bg-background">

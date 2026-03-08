@@ -10,31 +10,85 @@ import { Button } from "@/components/ui/button"
 import { Download, Calendar, FileText, TrendingUp, Users, Target, Lightbulb, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
+interface Company {
+  name: string
+  industry: string
+  website: string
+  city: string
+  description: string
+}
+
+interface Opportunity {
+  title: string
+  impact_score: number
+  confidence_score: number
+  priority: string
+  description: string
+  actions: string[]
+}
+
+interface Competitor {
+  name: string
+  website: string
+  services: string
+  threat_score: number
+  positioning: string
+}
+
+interface Lead {
+  name: string
+  website: string
+  industry: string
+  score: number
+  reason: string
+  source: string
+}
+
+interface Tender {
+  title: string
+  organization: string
+  deadline: string
+  budget: string
+  description: string
+  relevance_score: number
+}
+
+interface Trend {
+  name: string
+  description: string
+  score: number
+  direction: string
+  category: string
+}
+
+interface NewsItem {
+  title: string
+  source: string
+  summary: string
+  category: string
+  sentiment: string
+}
+
+interface Conference {
+  name: string
+  date: string
+  location: string
+  description: string
+  url: string
+}
+
 interface ReportData {
   weekRange: string
   generatedAt: string
-  companyName: string
-  highlights: {
-    opportunities: number
-    competitors: number
-    leads: number
-    alerts: number
-  }
-  topOpportunities: Array<{
-    title: string
-    impact_score: number
-    description: string
-  }>
-  competitorActivity: Array<{
-    name: string
-    activity: string
-    threat_score: number
-  }>
-  newLeads: Array<{
-    name: string
-    score: number
-    source: string
-  }>
+  company: Company
+  highlights: { opportunities: number; competitors: number; leads: number; alerts: number }
+  opportunities: Opportunity[]
+  competitors: Competitor[]
+  leads: Lead[]
+  tenders: Tender[]
+  trends: Trend[]
+  news: NewsItem[]
+  conferences: Conference[]
   recommendations: string[]
 }
 
@@ -50,63 +104,68 @@ export default function ReportsPage() {
   }, [])
 
   async function fetchReportData() {
-    // Get counts and data
     const [
       { count: opportunitiesCount },
       { count: competitorsCount },
       { count: leadsCount },
       { count: alertsCount },
-      { data: topOpps },
-      { data: competitors },
+      { data: opps },
+      { data: comps },
       { data: leads },
+      { data: tenders },
+      { data: trends },
+      { data: news },
+      { data: conferences },
       { data: company },
     ] = await Promise.all([
       supabase.from("opportunities").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
-      supabase.from("opportunities").select("title, impact_score, description").order("impact_score", { ascending: false }).limit(3),
-      supabase.from("competitors").select("name, last_activity, threat_score").order("threat_score", { ascending: false }).limit(3),
-      supabase.from("leads").select("name, score, source").order("score", { ascending: false }).limit(3),
-      supabase.from("companies").select("name").single(),
+      supabase.from("opportunities").select("title, impact_score, confidence_score, priority, description, actions").order("impact_score", { ascending: false }),
+      supabase.from("competitors").select("name, website, services, threat_score, positioning").order("threat_score", { ascending: false }),
+      supabase.from("leads").select("name, website, industry, score, reason, source").order("score", { ascending: false }),
+      supabase.from("tenders").select("title, organization, deadline, budget, description, relevance_score").order("relevance_score", { ascending: false }),
+      supabase.from("trends").select("name, description, score, direction, category").order("score", { ascending: false }),
+      supabase.from("news").select("title, source, summary, category, sentiment").order("created_at", { ascending: false }),
+      supabase.from("conferences").select("name, date, location, description, url").order("date", { ascending: true }),
+      supabase.from("companies").select("name, industry, website, city, description").single(),
     ])
 
-    // Generate date range
     const now = new Date()
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const weekRange = `${weekAgo.toLocaleDateString("he-IL", { day: "numeric", month: "long" })} - ${now.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" })}`
     const generatedAt = now.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
 
-    // Generate recommendations based on data
     const recommendations: string[] = []
-    if ((leadsCount || 0) > 0) {
-      recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
-    }
-    if ((competitorsCount || 0) > 0) {
-      recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
-    }
-    if ((opportunitiesCount || 0) > 0) {
-      recommendations.push("לבחון את ההזדמנויות המובילות ולפעול בהתאם")
-    }
+    if ((leadsCount || 0) > 0) recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
+    if ((competitorsCount || 0) > 0) recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
+    if ((opportunitiesCount || 0) > 0) recommendations.push("לבחון את ההזדמנויות המובילות ולפעול בהתאם")
     recommendations.push("להמשיך לעדכן את פרופיל החברה לתוצאות מדויקות יותר")
 
     setReportData({
       weekRange,
       generatedAt,
-      companyName: company?.name || "החברה שלי",
+      company: {
+        name: company?.name || "החברה שלי",
+        industry: company?.industry || "",
+        website: company?.website || "",
+        city: company?.city || "",
+        description: company?.description || "",
+      },
       highlights: {
         opportunities: opportunitiesCount || 0,
         competitors: competitorsCount || 0,
         leads: leadsCount || 0,
         alerts: alertsCount || 0,
       },
-      topOpportunities: topOpps || [],
-      competitorActivity: competitors?.map(c => ({
-        name: c.name,
-        activity: c.last_activity || "פעילות כללית",
-        threat_score: c.threat_score,
-      })) || [],
-      newLeads: leads || [],
+      opportunities: opps || [],
+      competitors: comps || [],
+      leads: leads || [],
+      tenders: tenders || [],
+      trends: trends || [],
+      news: news || [],
+      conferences: conferences || [],
       recommendations,
     })
     setLoading(false)
@@ -114,126 +173,198 @@ export default function ReportsPage() {
 
   async function generatePDF() {
     if (!reportData) return
-    
     setGenerating(true)
     try {
-      // Create a printable version of the report
+      const directionIcon = (d: string) => d === 'up' ? '↑' : d === 'down' ? '↓' : '→'
+
       const printContent = `
         <!DOCTYPE html>
         <html dir="rtl" lang="he">
         <head>
           <meta charset="UTF-8">
-          <title>דוח מודיעין שבועי - ${reportData.companyName}</title>
+          <title>דוח מודיעין שוק - ${reportData.company.name}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 40px; direction: rtl; }
-            h1 { color: #1a1a1a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; }
-            h2 { color: #374151; margin-top: 30px; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 30px; direction: rtl; color: #1a1a1a; line-height: 1.5; }
+            h1 { color: #1a1a1a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-bottom: 5px; }
+            h2 { color: #1e40af; margin-top: 30px; margin-bottom: 12px; border-right: 4px solid #3b82f6; padding-right: 10px; }
+            h3 { color: #374151; margin: 8px 0; }
             .header { text-align: center; margin-bottom: 30px; }
-            .meta { color: #6b7280; font-size: 14px; }
-            .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
-            .stat { background: #f3f4f6; padding: 20px; border-radius: 8px; text-align: center; }
-            .stat-value { font-size: 32px; font-weight: bold; color: #3b82f6; }
-            .stat-label { color: #6b7280; font-size: 14px; }
-            .item { background: #f9fafb; padding: 15px; border-radius: 8px; margin: 10px 0; border-right: 4px solid #3b82f6; }
-            .item-title { font-weight: bold; color: #1a1a1a; }
-            .item-desc { color: #6b7280; font-size: 14px; margin-top: 5px; }
-            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
-            .badge-high { background: #fef3c7; color: #92400e; }
-            .badge-medium { background: #dbeafe; color: #1e40af; }
-            .recommendations { list-style: none; padding: 0; }
-            .recommendations li { background: #eff6ff; padding: 15px; border-radius: 8px; margin: 10px 0; display: flex; align-items: center; gap: 10px; }
-            .rec-number { background: #3b82f6; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
-            @media print { body { padding: 20px; } }
+            .meta { color: #6b7280; font-size: 13px; }
+            .company-profile { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 16px 0; }
+            .company-profile p { margin: 4px 0; font-size: 14px; }
+            .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 16px 0; }
+            .stat { background: #f3f4f6; padding: 16px; border-radius: 8px; text-align: center; }
+            .stat-value { font-size: 28px; font-weight: bold; color: #3b82f6; }
+            .stat-label { color: #6b7280; font-size: 12px; }
+            .item { padding: 12px 16px; border-radius: 8px; margin: 8px 0; border-right: 4px solid #3b82f6; background: #f9fafb; }
+            .item-title { font-weight: bold; font-size: 14px; }
+            .item-desc { color: #6b7280; font-size: 13px; margin-top: 4px; }
+            .item-meta { color: #9ca3af; font-size: 12px; margin-top: 4px; }
+            .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; margin-right: 6px; }
+            .badge-blue { background: #dbeafe; color: #1e40af; }
+            .badge-red { background: #fee2e2; color: #991b1b; }
+            .badge-green { background: #dcfce7; color: #166534; }
+            .badge-yellow { background: #fef9c3; color: #92400e; }
+            .badge-gray { background: #f3f4f6; color: #374151; }
+            .actions-list { margin: 6px 0 0 0; padding-right: 16px; }
+            .actions-list li { font-size: 12px; color: #4b5563; margin: 2px 0; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .score-bar { background: #e5e7eb; border-radius: 4px; height: 6px; margin-top: 4px; }
+            .score-fill { background: #3b82f6; border-radius: 4px; height: 6px; }
+            .recommendations li { background: #eff6ff; padding: 12px; border-radius: 8px; margin: 8px 0; display: flex; align-items: flex-start; gap: 10px; }
+            .rec-num { background: #3b82f6; color: white; min-width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+            @media print { body { padding: 15px; } h2 { page-break-before: auto; } }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>דוח מודיעין שבועי</h1>
+            <h1>דוח מודיעין שוק</h1>
             <p class="meta">${reportData.weekRange}</p>
             <p class="meta">נוצר: ${reportData.generatedAt}</p>
           </div>
 
-          <div class="grid">
-            <div class="stat">
-              <div class="stat-value">${reportData.highlights.opportunities}</div>
-              <div class="stat-label">הזדמנויות חדשות</div>
-            </div>
-            <div class="stat">
-              <div class="stat-value">${reportData.highlights.competitors}</div>
-              <div class="stat-label">מתחרים במעקב</div>
-            </div>
-            <div class="stat">
-              <div class="stat-value">${reportData.highlights.leads}</div>
-              <div class="stat-label">לידים חדשים</div>
-            </div>
-            <div class="stat">
-              <div class="stat-value">${reportData.highlights.alerts}</div>
-              <div class="stat-label">התראות</div>
-            </div>
+          <h2>פרופיל החברה</h2>
+          <div class="company-profile">
+            <p><strong>שם:</strong> ${reportData.company.name}</p>
+            ${reportData.company.industry ? `<p><strong>תעשייה:</strong> ${reportData.company.industry}</p>` : ''}
+            ${reportData.company.city ? `<p><strong>עיר:</strong> ${reportData.company.city}</p>` : ''}
+            ${reportData.company.website ? `<p><strong>אתר:</strong> ${reportData.company.website}</p>` : ''}
+            ${reportData.company.description ? `<p><strong>תיאור:</strong> ${reportData.company.description}</p>` : ''}
           </div>
 
-          ${reportData.topOpportunities.length > 0 ? `
-            <h2>הזדמנויות מובילות</h2>
-            ${reportData.topOpportunities.map(opp => `
+          <h2>סיכום נתונים</h2>
+          <div class="grid-4">
+            <div class="stat"><div class="stat-value">${reportData.highlights.opportunities}</div><div class="stat-label">הזדמנויות</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.competitors}</div><div class="stat-label">מתחרים</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.leads}</div><div class="stat-label">לידים</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.alerts}</div><div class="stat-label">התראות</div></div>
+          </div>
+
+          ${reportData.opportunities.length > 0 ? `
+            <h2>הזדמנויות (${reportData.opportunities.length})</h2>
+            ${reportData.opportunities.map(o => `
               <div class="item">
-                <div class="item-title">${opp.title} <span class="badge badge-high">${opp.impact_score}/100</span></div>
-                <div class="item-desc">${opp.description || ''}</div>
+                <div class="item-title">
+                  ${o.title}
+                  <span class="badge badge-blue">השפעה: ${o.impact_score}</span>
+                  <span class="badge ${o.priority === 'גבוהה' || o.priority === 'דחופה' ? 'badge-red' : 'badge-yellow'}">${o.priority || ''}</span>
+                </div>
+                ${o.description ? `<div class="item-desc">${o.description}</div>` : ''}
+                ${o.actions?.length ? `<ul class="actions-list">${o.actions.map(a => `<li>• ${a}</li>`).join('')}</ul>` : ''}
               </div>
             `).join('')}
           ` : ''}
 
-          ${reportData.competitorActivity.length > 0 ? `
-            <h2>פעילות מתחרים</h2>
-            ${reportData.competitorActivity.map(comp => `
+          ${reportData.competitors.length > 0 ? `
+            <h2>מתחרים (${reportData.competitors.length})</h2>
+            ${reportData.competitors.map(c => `
               <div class="item">
-                <div class="item-title">${comp.name} <span class="badge ${comp.threat_score >= 70 ? 'badge-high' : 'badge-medium'}">איום: ${comp.threat_score}</span></div>
-                <div class="item-desc">${comp.activity}</div>
+                <div class="item-title">
+                  ${c.name}
+                  <span class="badge badge-red">איום: ${c.threat_score}</span>
+                  ${c.positioning ? `<span class="badge badge-gray">${c.positioning}</span>` : ''}
+                </div>
+                ${c.services ? `<div class="item-desc">${c.services}</div>` : ''}
+                ${c.website ? `<div class="item-meta">${c.website}</div>` : ''}
               </div>
             `).join('')}
           ` : ''}
 
-          ${reportData.newLeads.length > 0 ? `
-            <h2>לידים חדשים</h2>
-            ${reportData.newLeads.map(lead => `
+          ${reportData.leads.length > 0 ? `
+            <h2>לידים (${reportData.leads.length})</h2>
+            ${reportData.leads.map(l => `
               <div class="item">
-                <div class="item-title">${lead.name} <span class="badge ${lead.score >= 80 ? 'badge-high' : 'badge-medium'}">ציון: ${lead.score}</span></div>
-                <div class="item-desc">מקור: ${lead.source}</div>
+                <div class="item-title">
+                  ${l.name}
+                  <span class="badge ${l.score >= 80 ? 'badge-green' : 'badge-yellow'}">ציון: ${l.score}</span>
+                  ${l.industry ? `<span class="badge badge-gray">${l.industry}</span>` : ''}
+                </div>
+                ${l.reason ? `<div class="item-desc">${l.reason}</div>` : ''}
+                ${l.website ? `<div class="item-meta">${l.website}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.tenders.length > 0 ? `
+            <h2>מכרזים (${reportData.tenders.length})</h2>
+            ${reportData.tenders.map(t => `
+              <div class="item">
+                <div class="item-title">
+                  ${t.title}
+                  ${t.relevance_score ? `<span class="badge badge-blue">רלוונטיות: ${t.relevance_score}</span>` : ''}
+                </div>
+                <div class="item-desc">${t.organization || ''}${t.deadline ? ` | דדליין: ${t.deadline}` : ''}${t.budget ? ` | תקציב: ${t.budget}` : ''}</div>
+                ${t.description ? `<div class="item-meta">${t.description}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.trends.length > 0 ? `
+            <h2>טרנדים (${reportData.trends.length})</h2>
+            ${reportData.trends.map(t => `
+              <div class="item">
+                <div class="item-title">
+                  ${directionIcon(t.direction)} ${t.name}
+                  <span class="badge badge-blue">ציון: ${t.score}</span>
+                  ${t.category ? `<span class="badge badge-gray">${t.category}</span>` : ''}
+                </div>
+                ${t.description ? `<div class="item-desc">${t.description}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.news.length > 0 ? `
+            <h2>חדשות (${reportData.news.length})</h2>
+            ${reportData.news.map(n => `
+              <div class="item">
+                <div class="item-title">
+                  ${n.title}
+                  ${n.sentiment === 'positive' ? '<span class="badge badge-green">חיובי</span>' : n.sentiment === 'negative' ? '<span class="badge badge-red">שלילי</span>' : '<span class="badge badge-gray">ניטרלי</span>'}
+                  ${n.category ? `<span class="badge badge-gray">${n.category}</span>` : ''}
+                </div>
+                ${n.summary ? `<div class="item-desc">${n.summary}</div>` : ''}
+                ${n.source ? `<div class="item-meta">מקור: ${n.source}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.conferences.length > 0 ? `
+            <h2>כנסים ואירועים (${reportData.conferences.length})</h2>
+            ${reportData.conferences.map(c => `
+              <div class="item">
+                <div class="item-title">${c.name}</div>
+                <div class="item-desc">${c.date ? `תאריך: ${c.date}` : ''}${c.location ? ` | ${c.location}` : ''}</div>
+                ${c.description ? `<div class="item-meta">${c.description}</div>` : ''}
               </div>
             `).join('')}
           ` : ''}
 
           <h2>המלצות</h2>
-          <ul class="recommendations">
+          <ul class="recommendations" style="list-style:none; padding:0;">
             ${reportData.recommendations.map((rec, idx) => `
-              <li><span class="rec-number">${idx + 1}</span> ${rec}</li>
+              <li><span class="rec-num">${idx + 1}</span> <span>${rec}</span></li>
             `).join('')}
           </ul>
         </body>
         </html>
       `
 
-      // Open print dialog
       const printWindow = window.open('', '_blank')
       if (printWindow) {
         printWindow.document.write(printContent)
         printWindow.document.close()
         printWindow.focus()
-        setTimeout(() => {
-          printWindow.print()
-        }, 250)
+        setTimeout(() => { printWindow.print() }, 300)
       }
 
       toast({
         title: "הדוח מוכן",
-        description: "חלון ההדפסה נפתח - בחר 'שמור כ-PDF' כדי להוריד",
+        description: "חלון ההדפסה נפתח — בחר 'שמור כ-PDF' להורדה",
       })
     } catch (error) {
       console.error("Error generating PDF:", error)
-      toast({
-        title: "שגיאה",
-        description: "אירעה שגיאה בעת יצירת הדוח",
-        variant: "destructive",
-      })
+      toast({ title: "שגיאה", description: "אירעה שגיאה בעת יצירת הדוח", variant: "destructive" })
     } finally {
       setGenerating(false)
     }
@@ -264,15 +395,11 @@ export default function ReportsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">דוחות</h1>
-          <p className="text-muted-foreground">דוח מודיעין שבועי</p>
+          <p className="text-muted-foreground">דוח מודיעין שוק מקיף</p>
         </div>
         <Button onClick={generatePDF} disabled={generating}>
-          {generating ? (
-            <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="ml-2 h-4 w-4" />
-          )}
-          הורד PDF
+          {generating ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Download className="ml-2 h-4 w-4" />}
+          הורד PDF מלא
         </Button>
       </div>
 
@@ -281,9 +408,7 @@ export default function ReportsPage() {
         <CardHeader className="border-b">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <CardTitle className="text-xl">
-                דוח מודיעין שבועי
-              </CardTitle>
+              <CardTitle className="text-xl">דוח מודיעין שוק</CardTitle>
               <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
@@ -304,17 +429,17 @@ export default function ReportsPage() {
             <div className="rounded-lg bg-primary/10 p-4 text-center">
               <Lightbulb className="mx-auto mb-2 h-6 w-6 text-primary" />
               <p className="text-2xl font-bold">{reportData.highlights.opportunities}</p>
-              <p className="text-sm text-muted-foreground">הזדמנויות חדשות</p>
+              <p className="text-sm text-muted-foreground">הזדמנויות</p>
             </div>
             <div className="rounded-lg bg-red-100 p-4 text-center">
               <Target className="mx-auto mb-2 h-6 w-6 text-red-600" />
               <p className="text-2xl font-bold">{reportData.highlights.competitors}</p>
-              <p className="text-sm text-muted-foreground">מתחרים במעקב</p>
+              <p className="text-sm text-muted-foreground">מתחרים</p>
             </div>
             <div className="rounded-lg bg-blue-100 p-4 text-center">
               <Users className="mx-auto mb-2 h-6 w-6 text-blue-600" />
               <p className="text-2xl font-bold">{reportData.highlights.leads}</p>
-              <p className="text-sm text-muted-foreground">לידים חדשים</p>
+              <p className="text-sm text-muted-foreground">לידים</p>
             </div>
             <div className="rounded-lg bg-yellow-100 p-4 text-center">
               <TrendingUp className="mx-auto mb-2 h-6 w-6 text-yellow-600" />
@@ -323,100 +448,59 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Top Opportunities */}
-          {reportData.topOpportunities.length > 0 && (
-            <div className="mb-8">
-              <h3 className="mb-4 text-lg font-semibold">הזדמנויות מובילות</h3>
-              <div className="space-y-3">
-                {reportData.topOpportunities.map((opp, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg border bg-muted/30 p-4"
-                  >
+          {/* Summary lists — show top 3 of each for the page preview */}
+          {reportData.opportunities.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-3 text-base font-semibold">הזדמנויות מובילות</h3>
+              <div className="space-y-2">
+                {reportData.opportunities.slice(0, 3).map((opp, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
                     <div>
-                      <p className="font-medium">{opp.title}</p>
-                      <p className="text-sm text-muted-foreground">{opp.description}</p>
+                      <p className="font-medium text-sm">{opp.title}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-1">{opp.description}</p>
                     </div>
-                    <Badge variant="secondary">
-                      {opp.impact_score}/100
-                    </Badge>
+                    <Badge variant="secondary">{opp.impact_score}/100</Badge>
                   </div>
                 ))}
+                {reportData.opportunities.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.opportunities.length - 3} נוספות בדוח המלא</p>
+                )}
               </div>
             </div>
           )}
 
-          {/* Competitor Activity */}
-          {reportData.competitorActivity.length > 0 && (
-            <div className="mb-8">
-              <h3 className="mb-4 text-lg font-semibold">פעילות מתחרים</h3>
-              <div className="space-y-3">
-                {reportData.competitorActivity.map((comp, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg border bg-muted/30 p-4"
-                  >
+          {reportData.competitors.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-3 text-base font-semibold">מתחרים עיקריים</h3>
+              <div className="space-y-2">
+                {reportData.competitors.slice(0, 3).map((c, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
                     <div>
-                      <p className="font-medium">{comp.name}</p>
-                      <p className="text-sm text-muted-foreground">{comp.activity}</p>
+                      <p className="font-medium text-sm">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">{c.services}</p>
                     </div>
-                    <Badge
-                      className={
-                        comp.threat_score >= 70
-                          ? "bg-red-100 text-red-700"
-                          : "bg-yellow-100 text-yellow-700"
-                      }
-                    >
-                      איום: {comp.threat_score}
+                    <Badge className={c.threat_score >= 70 ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}>
+                      איום: {c.threat_score}
                     </Badge>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* New Leads */}
-          {reportData.newLeads.length > 0 && (
-            <div className="mb-8">
-              <h3 className="mb-4 text-lg font-semibold">לידים חדשים</h3>
-              <div className="space-y-3">
-                {reportData.newLeads.map((lead, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between rounded-lg border bg-muted/30 p-4"
-                  >
-                    <div>
-                      <p className="font-medium">{lead.name}</p>
-                      <p className="text-sm text-muted-foreground">מקור: {lead.source}</p>
-                    </div>
-                    <Badge
-                      className={
-                        lead.score >= 80
-                          ? "bg-green-100 text-green-700"
-                          : "bg-yellow-100 text-yellow-700"
-                      }
-                    >
-                      ציון: {lead.score}
-                    </Badge>
-                  </div>
-                ))}
+                {reportData.competitors.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.competitors.length - 3} נוספים בדוח המלא</p>
+                )}
               </div>
             </div>
           )}
 
           {/* Recommendations */}
           <div>
-            <h3 className="mb-4 text-lg font-semibold">המלצות</h3>
+            <h3 className="mb-3 text-base font-semibold">המלצות</h3>
             <ul className="space-y-2">
               {reportData.recommendations.map((rec, index) => (
-                <li
-                  key={index}
-                  className="flex items-start gap-3 rounded-lg border bg-primary/5 p-4"
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                <li key={index} className="flex items-start gap-3 rounded-lg border bg-primary/5 p-3">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                     {index + 1}
                   </span>
-                  <span>{rec}</span>
+                  <span className="text-sm">{rec}</span>
                 </li>
               ))}
             </ul>

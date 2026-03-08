@@ -46,6 +46,15 @@ import {
   Trash2,
   ExternalLink,
 } from "lucide-react"
+
+function getHostname(url: string): string {
+  try {
+    const u = url.startsWith('http') ? url : `https://${url}`
+    return new URL(u).hostname
+  } catch {
+    return url
+  }
+}
 import { useToast } from "@/hooks/use-toast"
 
 interface Lead {
@@ -225,7 +234,16 @@ export default function LeadsPage() {
                       </div>
                       <div>
                         <p className="font-medium">{lead.name}</p>
-                        <p className="text-xs text-muted-foreground" dir="ltr">{lead.website}</p>
+                        {lead.website && (
+                          <a
+                            href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-teal-600 hover:underline truncate block max-w-[180px]"
+                          >
+                            {getHostname(lead.website)}
+                          </a>
+                        )}
                       </div>
                     </div>
                   </TableCell>

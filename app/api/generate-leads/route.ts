@@ -24,7 +24,7 @@ export async function POST() {
     steps.search = { ok: true, count: results.length }
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`מצא 8 לקוחות פוטנציאליים (קונים, מפיצים, שותפים) לחברה ${ctx.company?.name}.
+    const data = await analyzeWithAI(`מצא 10 לקוחות פוטנציאליים (קונים, מפיצים, שותפים) לחברה ${ctx.company?.name}.
 
 ${ctx.context}
 
@@ -36,13 +36,14 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 - אסור לכלול את "${ctx.company?.name}" (דומיין: ${ctx.companyDomain})
 - רק חברות עם websites אמיתיים ושונים
 - CRITICAL: do not include company's own domain ${ctx.companyDomain}
+- reason = משפט אחד ספציפי המסביר למה החברה הזו תרצה לרכוש — לא קטגוריה, לא תיאור גנרי
 
 {
   "leads": [{
     "name": "שם חברה אמיתי",
     "website": "URL אמיתי",
     "industry": "תעשייה",
-    "reason": "למה יקנו",
+    "reason": "משפט אחד ספציפי: למה חברה זו תרצה לרכוש",
     "score": 88,
     "source": "מקור"
   }]

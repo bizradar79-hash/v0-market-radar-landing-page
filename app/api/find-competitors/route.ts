@@ -26,7 +26,7 @@ export async function POST() {
     const searchUrls = new Set(results.map(r => r.url))
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`זהה 8 מתחרים ישראליים אמיתיים לחברה ${ctx.company?.name}.
+    const data = await analyzeWithAI(`זהה 12 מתחרים ישראליים אמיתיים לחברה ${ctx.company?.name}.
 
 ${ctx.context}
 
@@ -37,7 +37,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 - אסור לכלול את "${ctx.company?.name}" (דומיין: ${ctx.companyDomain}) בתוצאות
 - רק חברות שמופיעות בתוצאות החיפוש עם URLs אמיתיים
 - רק מתחרים ישירים (אותה תעשייה, אותם מוצרים/שירותים)
-- לפחות 5 מתחרים ייחודיים
+- לפחות 8 מתחרים ייחודיים
 - name חייב להיות שם חברה אמיתי — לא קטגוריה, תיאור, או סוג תעשייה
 
 {
