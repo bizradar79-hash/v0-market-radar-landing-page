@@ -33,7 +33,7 @@ export async function POST() {
     const searchUrls = new Set(results.map(r => r.url))
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`מצא 8 מכרזים רלוונטיים מהמידע הבא:
+    const data = await analyzeWithAI(`מצא 5 מכרזים רלוונטיים מהמידע הבא:
 
 ${ctx.context}
 

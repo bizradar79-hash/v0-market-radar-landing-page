@@ -62,7 +62,7 @@ async function callGroq(prompt: string): Promise<{ text: string; tokens: number 
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,
-    max_tokens: 2000,
+    max_tokens: 3000,
   })
   return {
     text: result.choices[0].message.content ?? '',
@@ -118,6 +118,9 @@ function extractJSON(text: string): any {
     .replace(/```json\s*/gi, '')
     .replace(/```\s*/gi, '')
     .trim()
+
+  // Repair Hebrew gershayim: " between word chars (e.g. ע"ש) breaks JSON strings
+  clean = clean.replace(/(\w)"(\w)/g, '$1\\"$2')
 
   try {
     return JSON.parse(clean)

@@ -132,25 +132,23 @@ export async function POST() {
     steps.step3_ai = 'starting'
     let data: any
     try {
-      data = await analyzeWithAI(`בהתבסס על המידע הבא, צור 10 הזדמנויות עסקיות:
+      data = await analyzeWithAI(`בהתבסס על המידע הבא, צור 5 הזדמנויות עסקיות:
 
 ${ctx.context}
 
 תוצאות חיפוש:
 ${searchResults.map((r: any) => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
-כל הזדמנות מבוססת על נתון אמיתי, כוללת URL אמיתי, ו-3 פעולות מעשיות לשבוע.
-
 {
   "opportunities": [{
     "title": "כותרת ספציפית",
-    "description": "4-5 משפטים עם נתונים",
+    "description": "2 משפטים",
     "impact_score": 90,
     "confidence_score": 85,
     "priority": "גבוהה",
     "type": "סוג הזדמנות",
-    "actions": ["פעולה 1", "פעולה 2", "פעולה 3"],
-    "sources": ["URL אמיתי מהחיפוש"]
+    "actions": ["פעולה 1", "פעולה 2"],
+    "sources": ["URL מהחיפוש"]
   }]
 }`)
       steps.step3_ai = { ok: true, opportunityCount: data?.opportunities?.length }
