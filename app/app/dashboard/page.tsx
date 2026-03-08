@@ -140,7 +140,7 @@ export default function AppDashboardPage() {
         } catch (e) {
           console.error(`Error in ${step.api}:`, e)
         }
-        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
+        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 30000))
       }
 
       setScanProgress("מעדכן נתונים...")
@@ -190,7 +190,7 @@ export default function AppDashboardPage() {
         } catch (e) {
           console.error(`Error in ${step.api}:`, e)
         }
-        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
+        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 30000))
       }
 
       setScanProgress("מעדכן נתונים...")

@@ -51,7 +51,7 @@ async function main() {
   const token = await getToken()
   console.log(`   Token: ${token.slice(0, 20)}...`)
 
-  console.log('\n🧪 Testing routes (sequential, 10s delay between each):\n')
+  console.log('\n🧪 Testing routes (sequential, 30s delay between each):\n')
 
   const results = []
   for (let i = 0; i < ROUTES.length; i++) {
@@ -69,7 +69,7 @@ async function main() {
       }
     }
 
-    if (i < ROUTES.length - 1) await sleep(10000)
+    if (i < ROUTES.length - 1) await sleep(30000)
   }
 
   console.log('\n--- Final Results ---')
