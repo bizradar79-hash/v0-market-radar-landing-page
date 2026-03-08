@@ -116,10 +116,11 @@ export async function POST() {
     steps.step2_search = 'starting'
     let searchResults: any[]
     try {
+      const { primaryKeywords, industry, city } = ctx.companyProfile
       searchResults = await multiSearch([
-        `${ctx.company?.industry} הזדמנויות שוק ישראל 2026`,
-        `${ctx.company?.name} ${ctx.company?.industry} ישראל`,
-        `${ctx.company?.keywords?.slice(0, 2)?.join(' ')} ישראל`,
+        `${primaryKeywords} הזדמנויות שוק ישראל 2026`,
+        `${primaryKeywords} ${industry} ישראל`,
+        `${industry} ${city} שוק צמיחה 2026`,
       ])
       steps.step2_search = { ok: true, resultCount: searchResults.length }
     } catch (e: any) {

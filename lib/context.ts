@@ -47,6 +47,22 @@ export async function getFullContext() {
   // Only scrape website — Tavily searches are done per-route to avoid timeout
   const websiteContent = await scrapeWebsite(company?.website || '')
 
+  // Build rich company profile from DB data + scraped website content
+  const keywords: string[] = company?.keywords || []
+  const primaryKeywords = keywords.slice(0, 3).join(' ') || company?.industry || ''
+  const companyProfile = {
+    name: company?.name || '',
+    industry: company?.industry || '',
+    description: company?.description || '',
+    city: company?.city || '',
+    website: company?.website || '',
+    keywords,
+    primaryKeywords,
+    // Use first 2 keywords as products proxy, rest as target customers proxy
+    products: keywords.slice(0, 2).join(', ') || company?.description?.slice(0, 80) || '',
+    targetCustomers: keywords.slice(2, 4).join(', ') || company?.industry || '',
+  }
+
   const context = `
 === פרופיל החברה ===
 שם: ${company?.name}
@@ -56,7 +72,7 @@ export async function getFullContext() {
 עיר: ${company?.city}
 גודל: ${company?.size}
 תיאור: ${company?.description}
-מוצרים/שירותים/מילות מפתח: ${company?.keywords?.join(', ')}
+מוצרים/שירותים/מילות מפתח: ${keywords.join(', ')}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}
 
 === תוכן האתר ===
@@ -67,5 +83,5 @@ ${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
 השתמש אך ורק בנתונים ו-URLs שמופיעים בתוצאות החיפוש שסופקו.
 `
 
-  return { company, competitors, user, supabase, context, companyDomain }
+  return { company, competitors, user, supabase, context, companyDomain, companyProfile }
 }

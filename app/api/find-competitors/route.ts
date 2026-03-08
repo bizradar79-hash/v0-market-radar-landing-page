@@ -15,10 +15,11 @@ export async function POST() {
     steps.context = { ok: true, company: ctx.company?.name }
 
     steps.search = 'starting'
+    const { primaryKeywords, products, industry } = ctx.companyProfile
     const results = await multiSearch([
-      `${ctx.company?.industry} חברות מתחרות ישראל 2025 2026`,
-      `${ctx.company?.industry} suppliers Israel competitors`,
-      `${ctx.company?.keywords?.[0]} ${ctx.company?.keywords?.[1]} חברות ישראל`,
+      `${primaryKeywords} מתחרים ישראל`,
+      `${products} חברות ישראל ${industry}`,
+      `${primaryKeywords} competitors Israel`,
     ])
     steps.search = { ok: true, count: results.length }
 
