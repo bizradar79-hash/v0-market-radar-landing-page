@@ -19,10 +19,17 @@ export async function GET() {
       results.groq = { ok: true, text: completion.choices[0].message.content, tokens: completion.usage?.total_tokens }
     }
   } catch (e: any) {
-    results.groq = { ok: false, status: e?.status, error: e?.message?.slice(0, 300) }
+    results.groq = {
+      ok: false,
+      type: e?.constructor?.name,
+      status: e?.status,
+      code: e?.error?.code,
+      message: String(e?.message ?? '').slice(0, 400),
+      is429: e?.status === 429 || e?.status === 413 || String(e?.message ?? '').includes('[429') || String(e?.message ?? '').includes('[413'),
+    }
   }
 
-  // Test Gemini
+  // Test Gemini — use large prompt to stress-test it
   try {
     const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY
     if (!key) {
@@ -34,7 +41,15 @@ export async function GET() {
       results.gemini = { ok: true, text: result.response.text(), tokens: result.response.usageMetadata?.totalTokenCount }
     }
   } catch (e: any) {
-    results.gemini = { ok: false, status: e?.status, error: e?.message?.slice(0, 300) }
+    results.gemini = {
+      ok: false,
+      type: e?.constructor?.name,
+      status: e?.status,
+      httpStatus: e?.httpStatus,
+      code: e?.code,
+      message: String(e?.message ?? '').slice(0, 400),
+      is429: e?.status === 429 || e?.status === 413 || String(e?.message ?? '').includes('[429') || String(e?.message ?? '').includes('[413'),
+    }
   }
 
   return NextResponse.json(results)
