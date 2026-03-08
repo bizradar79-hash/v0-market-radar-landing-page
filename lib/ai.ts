@@ -32,24 +32,20 @@ const SYSTEM_PROMPT = `אתה יועץ אסטרטגי בכיר המתמחה בש
 4. התחל את התשובה ישירות עם { ו-סיים עם }
 5. דבר בעברית`
 
-// Ordered fallback chain — each has a separate Groq quota
-const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
+// llama-3.1-8b-instant has a 6k TPM limit — too low for real search data; skip it
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 function is429(e: any): boolean {
   return e?.status === 429 || String(e?.message ?? '').includes('[429')
 }
 
-async function callGroq(prompt: string, model: string): Promise<{ text: string; tokens: number }> {
+async function callGroq(prompt: string): Promise<{ text: string; tokens: number }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
-  // Smaller model needs stronger English JSON instruction prepended to the user message
-  const userContent = model === 'llama-3.1-8b-instant'
-    ? `CRITICAL: Output ONLY a valid JSON object. Start your response with { and end with }. No introduction, no explanation, no numbered list, no markdown. Just raw JSON.\n\n${prompt}`
-    : prompt
   const result = await groq.chat.completions.create({
-    model,
+    model: GROQ_MODEL,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userContent },
+      { role: 'user', content: prompt },
     ],
     temperature: 0.2,
     max_tokens: 4000,
@@ -75,25 +71,20 @@ async function callGemini(prompt: string): Promise<{ text: string; tokens: numbe
 }
 
 export async function analyzeWithAI(prompt: string): Promise<any> {
-  // Try each Groq model in order
-  for (const model of GROQ_MODELS) {
-    try {
-      const { text, tokens } = await callGroq(prompt, model)
-      trackUsage('groq', tokens).catch(() => {})
-      const extracted = extractJSON(text)
-      if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
-      return extracted
-    } catch (e: any) {
-      if (is429(e)) {
-        console.warn(`Groq ${model} → 429, trying next provider`)
-        continue
-      }
-      throw e
-    }
+  // Try Groq first
+  try {
+    const { text, tokens } = await callGroq(prompt)
+    trackUsage('groq', tokens).catch(() => {})
+    const extracted = extractJSON(text)
+    if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
+    return extracted
+  } catch (e: any) {
+    if (!is429(e)) throw e
+    console.warn('Groq → 429, falling back to Gemini')
   }
 
-  // All Groq models exhausted — try Gemini
-  console.warn('All Groq models exhausted, falling back to Gemini')
+  // Groq exhausted — try Gemini
+  console.warn('Falling back to Gemini')
   try {
     const { text, tokens } = await callGemini(prompt)
     trackUsage('gemini', tokens).catch(() => {})
