@@ -99,6 +99,7 @@ export async function analyzeWithAI(prompt: string): Promise<any> {
     if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
   } catch (e: any) {
+    console.error('[AI] Groq final error — status:', e?.status, '| is429:', is429(e), '| message:', String(e?.message ?? '').slice(0, 300))
     if (!is429(e)) throw e
     console.warn('[AI] Groq exhausted after retries, falling back to Gemini')
   }
@@ -111,6 +112,7 @@ export async function analyzeWithAI(prompt: string): Promise<any> {
     if (!extracted) throw new Error(`Gemini did not return valid JSON. Raw: ${text.slice(0, 200)}`)
     return extracted
   } catch (e: any) {
+    console.error('[AI] Gemini final error — type:', e?.constructor?.name, '| status:', e?.status, '| httpStatus:', e?.httpStatus, '| code:', e?.code, '| is429:', is429(e), '| message:', String(e?.message ?? '').slice(0, 400))
     if (is429(e)) throw new Error('BOTH_PROVIDERS_EXHAUSTED')
     throw e
   }
