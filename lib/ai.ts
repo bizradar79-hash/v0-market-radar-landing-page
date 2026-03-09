@@ -26,8 +26,7 @@ export async function validateUrl(url: string): Promise<boolean> {
 
 const SYSTEM_PROMPT = `You are an Israeli market expert. Return ONLY valid JSON, no markdown, no explanation. Start with { or [ and end with } or ].`
 
-// llama-3.1-8b-instant has a 6k TPM limit — too low for real search data; skip it
-const GROQ_MODEL = 'llama-3.1-8b-instant'
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 async function callWithRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   for (let i = 0; i < retries; i++) {
