@@ -81,7 +81,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
       list.map((t: any) => ({
         title: t.title,
         organization: t.organization,
-        deadline: t.deadline,
+        deadline: /^\d{4}-\d{2}-\d{2}$/.test(t.deadline || '') ? t.deadline : null,
         budget: t.budget,
         description: t.description,
         link: t.link,

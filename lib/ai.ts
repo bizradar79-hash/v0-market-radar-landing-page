@@ -119,7 +119,8 @@ function extractJSON(text: string): any {
     .trim()
 
   // Repair Hebrew gershayim: " between word chars (e.g. ע"ש) breaks JSON strings
-  clean = clean.replace(/(\w)"(\w)/g, '$1\\"$2')
+  // \u0590-\u05FF covers Hebrew Unicode range
+  clean = clean.replace(/([\w\u0590-\u05FF])"([\w\u0590-\u05FF])/g, '$1\\"$2')
 
   try {
     return JSON.parse(clean)

@@ -24,7 +24,7 @@ export async function POST() {
     steps.search = { ok: true, count: results.length }
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`בחר 15 חדשות רלוונטיות לתעשיית ${ctx.company?.industry} מהמידע הבא:
+    const data = await analyzeWithAI(`בחר 8 חדשות רלוונטיות לתעשיית ${ctx.company?.industry} מהמידע הבא:
 
 ${ctx.context}
 
