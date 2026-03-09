@@ -139,6 +139,9 @@ ${ctx.context}
 תוצאות חיפוש:
 ${searchResults.map((r: any) => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
+כללים קשיחים:
+- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any company, person, URL, or data that does not appear in the search results. If insufficient real data found, return empty array.
+
 {
   "opportunities": [{
     "title": "כותרת ספציפית",

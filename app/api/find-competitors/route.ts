@@ -34,6 +34,7 @@ ${ctx.context}
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
 כללים קשיחים:
+- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any company, person, URL, or data that does not appear in the search results. If insufficient real data found, return empty array.
 - אסור לכלול את "${ctx.company?.name}" (דומיין: ${ctx.companyDomain}) בתוצאות
 - רק חברות שמופיעות בתוצאות החיפוש עם URLs אמיתיים
 - רק מתחרים ישירים (אותה תעשייה, אותם מוצרים/שירותים)

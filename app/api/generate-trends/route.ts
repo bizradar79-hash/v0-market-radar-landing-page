@@ -31,6 +31,9 @@ ${ctx.context}
 תוצאות חיפוש:
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
+כללים קשיחים:
+- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any trend, statistic, or data that does not appear in the search results. If insufficient real data found, return empty array.
+
 {
   "trends": [{
     "name": "שם טרנד קצר",

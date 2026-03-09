@@ -37,6 +37,7 @@ ${ctx.context}
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
 כללים קשיחים:
+- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any company, person, URL, or data that does not appear in the search results. If insufficient real data found, return empty array.
 - רק כנסים בשנים 2025 או 2026 בלבד — אסור לכלול אירועים ישנים יותר
 - רק URLs אמיתיים מתוצאות החיפוש
 - תאריך חייב לכלול 2025 או 2026
