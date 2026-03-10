@@ -262,10 +262,14 @@ export default function TendersPage() {
                 </div>
 
                 {/* Action Button */}
-                <Button className="w-full" onClick={(e) => { e.stopPropagation(); }}>
-                  <ExternalLink className="ml-2 h-4 w-4" />
-                  הגש הצעה
-                </Button>
+                {tender.link && (
+                  <a href={tender.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                    <Button className="w-full">
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                      הגש הצעה
+                    </Button>
+                  </a>
+                )}
               </CardContent>
             </Card>
           )
@@ -323,10 +327,14 @@ export default function TendersPage() {
                 </div>
 
                 <div className="flex gap-2 pt-4 border-t">
-                  <Button className="flex-1">
-                    <ExternalLink className="ml-2 h-4 w-4" />
-                    הגש הצעה
-                  </Button>
+                  {selectedTender.link && (
+                    <a href={selectedTender.link} target="_blank" rel="noopener noreferrer" className="flex-1">
+                      <Button className="w-full">
+                        <ExternalLink className="ml-2 h-4 w-4" />
+                        הגש הצעה
+                      </Button>
+                    </a>
+                  )}
                   <Button 
                     variant="outline" 
                     className="text-red-600"

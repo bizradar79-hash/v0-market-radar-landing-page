@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeWithAI, validateUrl } from '@/lib/ai'
-import { multiSearch } from '@/lib/search'
+import { search } from '@/lib/search'
+import { scrapeWebsite } from '@/lib/scrape'
 import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
@@ -29,69 +30,83 @@ export async function POST() {
     steps.context = { ok: true, company: ctx.company?.name }
 
     steps.search = 'starting'
-    const { primaryKeywords, products, industry } = ctx.companyProfile
+    const { products, industry } = ctx.companyProfile
     const companyName = ctx.company?.name || ''
-    const results = await multiSearch([
-      `מכרז ${products} ${industry} ישראל 2025 2026`,
-      `מכרז ${companyName} OR "${primaryKeywords}" mr.gov.il`,
-      `הזמנה להציע הצעות ${products} ישראל 2026`,
-      `מכרז ${industry} ${products} tenders.gov.il OR mr.gov.il`,
-    ])
-    steps.search = { ok: true, count: results.length }
 
-    if (results.length === 0) {
+    // Two targeted searches — one site-specific, one broader
+    const [r1, r2] = await Promise.all([
+      search(`מכרז ${industry} ${products} site:mr.gov.il OR site:tenders.gov.il`, 10),
+      search(`מכרז ${companyName} ${products} ישראל 2025 2026`, 10),
+    ])
+
+    // Keep only results from known tender sites
+    const seen = new Set<string>()
+    const tenderResults = [...r1, ...r2]
+      .filter(r => isTenderSiteUrl(r.url))
+      .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
+      .slice(0, 5) // max 5 pages to scrape within timeout
+
+    steps.search = { ok: true, fromTenderSites: tenderResults.length }
+
+    if (tenderResults.length === 0) {
       await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
-      steps.ai = { ok: true, count: 0, reason: 'no search results' }
+      steps.ai = { ok: true, count: 0, reason: 'no results from tender sites' }
       return NextResponse.json({ success: true, tenders: [], count: 0, steps })
     }
 
-    const searchUrls = new Set(results.map(r => r.url))
+    // Scrape each tender page in parallel
+    steps.scrape = 'starting'
+    const scraped = await Promise.all(
+      tenderResults.map(async (r) => ({
+        url: r.url,
+        title: r.title,
+        content: await scrapeWebsite(r.url) || r.content,
+      }))
+    )
+    steps.scrape = { ok: true, scraped: scraped.filter(s => s.content?.length > 50).length }
 
+    // Use AI only to parse/extract — not to invent
     steps.ai = 'starting'
-    const today = new Date().toISOString().slice(0, 10)
-    const data = await analyzeWithAI(`מצא עד 5 מכרזים ממשלתיים ישראליים רלוונטיים מהתוצאות הבאות:
+    const data = await analyzeWithAI(`חלץ פרטי מכרז מדוייקים אך ורק מהדפים שנסרקו למטה. אל תמציא כלום.
 
-${ctx.context}
+חברה: ${companyName}, תעשייה: ${industry}, מוצרים: ${products}
 
-תוצאות חיפוש:
-${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
+דפים שנסרקו:
+${scraped.map((s, i) => `
+=== דף ${i + 1} ===
+URL: ${s.url}
+כותרת: ${s.title}
+תוכן: ${s.content.slice(0, 1000)}
+`).join('\n')}
 
 כללים קשיחים:
-- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any company, person, URL, or data that does not appear in the search results. If insufficient real data found, return empty array.
-- כלול רק מכרזים עם URL אמיתי מהתוצאות — mr.gov.il, tenders.gov.il, procurement.gov.il, עיריות ישראליות
-- כותרת חייבת לכלול את המילה מכרז, הזמנה להציע, או בקשה להצעות
-- אסור לכלול מודעות דרושים, כתבות חדשות, או עמודי מוצר
-- deadline חייב להיות בפורמט YYYY-MM-DD בלבד, אחרת null
-- status: אם deadline > ${today} = "פתוח", אם deadline < ${today} = "סגור", אם null = "לא ידוע"
+- CRITICAL: Use ONLY data explicitly present in the page content above. Do NOT invent any tender.
+- link חייב להיות אחד מה-URLs שמופיעים ב-=== דף === למעלה בלבד
+- אם הדף אינו מכרז אמיתי (דרושים, חדשות, מוצר) — אל תכלול אותו
+- deadline: חלץ תאריך אמיתי מהתוכן בפורמט YYYY-MM-DD. אם לא מופיע — null
+- אם אין מספיק מידע — החזר tenders: []
 
 {
   "tenders": [{
-    "title": "שם המכרז המלא",
-    "organization": "הגוף המפרסם",
+    "title": "כותרת המכרז המלאה מהדף",
+    "organization": "הגוף המפרסם מהדף",
     "deadline": "2026-06-01",
-    "budget": "₪500,000",
-    "description": "תיאור קצר",
-    "link": "URL מהחיפוש בלבד",
-    "relevance_score": 85,
-    "status": "פתוח"
+    "budget": "לא צוין",
+    "description": "תיאור מהדף",
+    "link": "URL מדויק מהדפים למעלה",
+    "relevance_score": 80
   }]
 }`)
 
     let list = Array.isArray(data?.tenders) ? data.tenders : []
     steps.ai = { ok: true, count: list.length }
 
-    // Keep only tenders whose link appears in search results
-    list = list.filter((t: any) => t.link && searchUrls.has(t.link))
-
-    // Extra: reject links that don't look like tender sites (best-effort)
-    // We still allow through if URL validation passes — isTenderSiteUrl is advisory
-    const tenderSiteOnly = list.filter((t: any) => isTenderSiteUrl(t.link))
-    if (tenderSiteOnly.length > 0) list = tenderSiteOnly
-
-    // Deduplicate by link
+    // Hard filter: only URLs we actually scraped + from tender sites
+    const scrapedUrls = new Set(scraped.map(s => s.url))
+    list = list.filter((t: any) => t.link && scrapedUrls.has(t.link) && isTenderSiteUrl(t.link))
     list = deduplicateByField(list, 'link')
 
-    // Validate URLs concurrently
+    // Validate URLs still reachable
     steps.validate = 'starting'
     const withValid = await Promise.all(
       list.map(async (t: any) => ({ ...t, _valid: await validateUrl(t.link) }))
@@ -101,12 +116,18 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
     steps.db = 'starting'
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
+
+    if (list.length === 0) {
+      steps.db = { ok: true, saved: 0 }
+      return NextResponse.json({ success: true, tenders: [], count: 0, steps })
+    }
+
     const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
       list.map((t: any) => ({
         title: t.title,
         organization: t.organization,
         deadline: isValidDate(t.deadline) ? t.deadline : null,
-        budget: t.budget,
+        budget: t.budget || 'לא צוין',
         description: t.description,
         link: t.link,
         relevance_score: t.relevance_score,
