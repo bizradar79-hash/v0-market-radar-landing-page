@@ -142,6 +142,13 @@ export default function TendersPage() {
   const isBudgetKnown = (budget: string | null) =>
     !!budget && budget !== 'לא צוין' && budget !== 'not specified' && budget !== 'לא ידוע'
 
+  const cleanDesc = (text: string | null) => {
+    if (!text) return ''
+    if (text.includes('0 obj') || text.includes('endobj') || text.includes('stream')) return ''
+    if (text.includes('&#') || text.includes('&amp;')) return ''
+    return text
+  }
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -215,9 +222,11 @@ export default function TendersPage() {
                 </div>
 
                 {/* Description */}
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {tender.description}
-                </p>
+                {cleanDesc(tender.description) && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {cleanDesc(tender.description)}
+                  </p>
+                )}
 
                 {/* Budget — hidden if unknown */}
                 {isBudgetKnown(tender.budget) && (
@@ -305,7 +314,9 @@ export default function TendersPage() {
                   <span className="font-medium">{selectedTender.organization}</span>
                 </div>
                 
-                <p className="text-muted-foreground">{selectedTender.description}</p>
+                {cleanDesc(selectedTender.description) && (
+                  <p className="text-muted-foreground">{cleanDesc(selectedTender.description)}</p>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   {isBudgetKnown(selectedTender.budget) && (
