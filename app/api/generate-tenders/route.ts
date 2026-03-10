@@ -7,26 +7,15 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-const TENDER_SITES = ['mr.gov.il', 'tenders.gov.il', 'procurement.gov.il']
-
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
-// Keep only Hebrew (\u0590-\u05FF), ASCII printable (0x20-0x7E), and basic punctuation
 function cleanForPrompt(text: string): string {
   return text
     .replace(/[^\u0590-\u05FF\u0020-\u007E\n]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-function isTenderSiteUrl(url: string): boolean {
-  if (!url) return false
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, '')
-    return TENDER_SITES.some(s => host === s || host.endsWith('.' + s))
-  } catch { return false }
 }
 
 export async function POST() {
@@ -41,32 +30,31 @@ export async function POST() {
     const { products, industry } = ctx.companyProfile
     const companyName = ctx.company?.name || ''
 
-    // Two targeted searches — one site-specific, one broader
     const [r1, r2] = await Promise.all([
       search(`מכרז ${industry} ${products} site:mr.gov.il OR site:tenders.gov.il`, 10),
       search(`מכרז ${companyName} ${products} ישראל 2025 2026`, 10),
     ])
 
-    // Keep only results from known tender sites
     const seen = new Set<string>()
-    const tenderResults = [...r1, ...r2]
-      .filter(r => isTenderSiteUrl(r.url))
-      .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
-      .slice(0, 5) // max 5 pages to scrape within timeout
+    const allResults = [...r1, ...r2].filter(r => {
+      if (!r.url || seen.has(r.url)) return false
+      seen.add(r.url)
+      return true
+    }).slice(0, 5)
 
-    steps.search = { ok: true, fromTenderSites: tenderResults.length }
+    steps.search = { ok: true, count: allResults.length }
 
-    if (tenderResults.length === 0) {
+    if (allResults.length === 0) {
       await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
-      steps.ai = { ok: true, count: 0, reason: 'no results from tender sites' }
+      steps.ai = { ok: true, count: 0, reason: 'no search results' }
       return NextResponse.json({ success: true, tenders: [], count: 0, steps })
     }
 
-    // Scrape each tender page in parallel — fall back to search snippet on error
+    // Scrape each page — fall back to search snippet on error
     steps.scrape = 'starting'
     const scraped = await Promise.all(
-      tenderResults.map(async (r) => {
-        let content = r.content // fallback: search snippet
+      allResults.map(async (r) => {
+        let content = r.content
         try {
           const raw = await scrapeWebsite(r.url)
           if (raw && raw.length > 50) content = raw
@@ -80,33 +68,51 @@ export async function POST() {
     )
     steps.scrape = { ok: true, scraped: scraped.filter(s => s.content?.length > 20).length }
 
-    // Use AI only to parse/extract — not to invent
+    // AI extracts structured data — permissive, not strict
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`Extract tender details ONLY from the pages below. Do NOT invent.
+    let list: any[] = []
+    try {
+      const data = await analyzeWithAI(`Extract tender/procurement details from the search results below.
+If anything looks like a government or corporate procurement tender, include it. Be permissive not strict.
 
 Company: ${cleanForPrompt(companyName)}, Industry: ${cleanForPrompt(industry)}
 
-Pages:
-${scraped.map((s, i) => `=== PAGE ${i + 1} ===\nURL: ${s.url}\nTitle: ${s.title}\nContent: ${s.content}`).join('\n')}
+Results:
+${scraped.map((s, i) => `[${i + 1}] URL: ${s.url}\nTitle: ${s.title}\nContent: ${s.content}`).join('\n\n')}
 
 Rules:
-- CRITICAL: Use ONLY data from the pages above. Do NOT invent any tender not shown.
 - link must be one of the URLs listed above exactly
-- Exclude job listings, news articles, product pages
-- deadline: extract real date as YYYY-MM-DD or null if not found
-- If no real tender found return tenders: []
+- deadline: extract as YYYY-MM-DD or null
+- If nothing found return tenders: []
 
-{"tenders":[{"title":"full tender title","organization":"publisher","deadline":"2026-06-01","budget":"not specified","description":"description from page","link":"exact URL from above","relevance_score":80}]}`)
+{"tenders":[{"title":"tender title","organization":"org name","deadline":"2026-06-01","budget":"not specified","description":"brief description","link":"exact URL from above","relevance_score":75}]}`)
+      list = Array.isArray(data?.tenders) ? data.tenders : []
+    } catch (aiErr: any) {
+      steps.ai = { ok: false, error: aiErr?.message?.slice(0, 100) }
+    }
 
-    let list = Array.isArray(data?.tenders) ? data.tenders : []
-    steps.ai = { ok: true, count: list.length }
+    steps.ai = { ...steps.ai, count: list.length }
 
-    // Hard filter: only URLs we actually scraped + from tender sites
-    const scrapedUrls = new Set(scraped.map(s => s.url))
-    list = list.filter((t: any) => t.link && scrapedUrls.has(t.link) && isTenderSiteUrl(t.link))
+    // Filter to URLs we actually have
+    const resultUrls = new Set(scraped.map(s => s.url))
+    list = list.filter((t: any) => t.link && resultUrls.has(t.link))
     list = deduplicateByField(list, 'link')
 
-    // Validate URLs still reachable
+    // Fallback: if AI returned 0, save search results directly as tenders
+    if (list.length === 0) {
+      steps.ai = { ...steps.ai, fallback: true }
+      list = scraped.map(s => ({
+        title: s.title || 'מכרז',
+        organization: 'לא צוין',
+        deadline: null,
+        budget: 'לא צוין',
+        description: s.content.slice(0, 200) || '',
+        link: s.url,
+        relevance_score: 60,
+      }))
+    }
+
+    // Validate URLs reachable
     steps.validate = 'starting'
     const withValid = await Promise.all(
       list.map(async (t: any) => ({ ...t, _valid: await validateUrl(t.link) }))
