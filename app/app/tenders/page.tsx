@@ -215,7 +215,7 @@ export default function TendersPage() {
                 </div>
 
                 {/* Description */}
-                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
+                <p className="text-sm text-muted-foreground leading-relaxed">
                   {tender.description}
                 </p>
 

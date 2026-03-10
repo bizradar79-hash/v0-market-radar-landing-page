@@ -30,11 +30,12 @@ export async function POST() {
 
     steps.search = 'starting'
     const { primaryKeywords, products, industry } = ctx.companyProfile
+    const companyName = ctx.company?.name || ''
     const results = await multiSearch([
-      `מכרז ${industry} site:mr.gov.il OR site:tenders.gov.il`,
-      `מכרז ${primaryKeywords} ${industry} ישראל 2025 2026`,
-      `הזמנה להציע הצעות ${industry} ישראל 2026`,
-      `מכרז ${products} 2025 2026`,
+      `מכרז ${products} ${industry} ישראל 2025 2026`,
+      `מכרז ${companyName} OR "${primaryKeywords}" mr.gov.il`,
+      `הזמנה להציע הצעות ${products} ישראל 2026`,
+      `מכרז ${industry} ${products} tenders.gov.il OR mr.gov.il`,
     ])
     steps.search = { ok: true, count: results.length }
 
