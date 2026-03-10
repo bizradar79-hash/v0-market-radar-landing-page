@@ -30,9 +30,10 @@ export async function POST() {
     const { products, industry } = ctx.companyProfile
     const companyName = ctx.company?.name || ''
 
+    const currentYear = new Date().getFullYear()
     const [r1, r2] = await Promise.all([
-      search(`מכרז ${industry} ${products} site:mr.gov.il OR site:tenders.gov.il`, 10),
-      search(`מכרז ${companyName} ${products} ישראל 2025 2026`, 10),
+      search(`מכרז ${industry} ${products} site:mr.gov.il ${currentYear}`, 10),
+      search(`מכרז ${products} site:mr.gov.il OR site:tenders.gov.il ${currentYear}`, 10),
     ])
 
     const seen = new Set<string>()
@@ -82,7 +83,7 @@ ${scraped.map((s, i) => `[${i + 1}] URL: ${s.url}\nTitle: ${s.title}\nContent: $
 
 Rules:
 - link must be one of the URLs listed above exactly
-- deadline: extract as YYYY-MM-DD or null
+- deadline: look for Hebrew date patterns: "תאריך הגשה", "מועד אחרון", "תוקף", "הגשת הצעות". Extract as YYYY-MM-DD or null
 - If nothing found return tenders: []
 
 {"tenders":[{"title":"tender title","organization":"org name","deadline":"2026-06-01","budget":"not specified","description":"brief description","link":"exact URL from above","relevance_score":75}]}`)

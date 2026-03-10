@@ -132,12 +132,15 @@ export default function TendersPage() {
 
   const getDeadlineStatus = (deadline: string | null) => {
     const days = getDaysUntilDeadline(deadline)
-    if (days === null) return { text: "לא ידוע", color: "text-gray-400", urgent: false }
-    if (days < 0) return { text: "סגור", color: "text-gray-500", urgent: false }
-    if (days <= 7) return { text: `${days} ימים`, color: "text-red-600", urgent: true }
-    if (days <= 14) return { text: `${days} ימים`, color: "text-yellow-600", urgent: false }
-    return { text: `פתוח — ${days} ימים`, color: "text-green-600", urgent: false }
+    if (days === null) return { text: "לא ידוע", badge: "bg-gray-100 text-gray-500", color: "text-gray-400", urgent: false }
+    if (days < 0) return { text: "סגור", badge: "bg-red-100 text-red-700", color: "text-red-600", urgent: false }
+    if (days <= 7) return { text: `פתוח — ${days} ימים`, badge: "bg-green-100 text-green-700", color: "text-red-600", urgent: true }
+    if (days <= 14) return { text: `פתוח — ${days} ימים`, badge: "bg-green-100 text-green-700", color: "text-yellow-600", urgent: false }
+    return { text: `פתוח — ${days} ימים`, badge: "bg-green-100 text-green-700", color: "text-green-600", urgent: false }
   }
+
+  const isBudgetKnown = (budget: string | null) =>
+    !!budget && budget !== 'לא צוין' && budget !== 'not specified' && budget !== 'לא ידוע'
 
   if (loading) {
     return (
@@ -196,12 +199,9 @@ export default function TendersPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <Badge variant="secondary">מכרז</Badge>
-                  {deadlineStatus.urgent && (
-                    <Badge variant="destructive" className="bg-red-100 text-red-700">
-                      <AlertTriangle className="ml-1 h-3 w-3" />
-                      דחוף
-                    </Badge>
-                  )}
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${deadlineStatus.badge}`}>
+                    {deadlineStatus.text}
+                  </span>
                 </div>
                 <CardTitle className="mt-2 text-base leading-tight">
                   {tender.title}
@@ -219,14 +219,16 @@ export default function TendersPage() {
                   {tender.description}
                 </p>
 
-                {/* Budget */}
-                <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3">
-                  <Banknote className="h-5 w-5 text-primary" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">תקציב משוער</p>
-                    <p className="font-semibold">{tender.budget}</p>
+                {/* Budget — hidden if unknown */}
+                {isBudgetKnown(tender.budget) && (
+                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-3">
+                    <Banknote className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">תקציב משוער</p>
+                      <p className="font-semibold">{tender.budget}</p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Relevance Score */}
                 <div className="space-y-1.5">
@@ -306,10 +308,12 @@ export default function TendersPage() {
                 <p className="text-muted-foreground">{selectedTender.description}</p>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-lg bg-muted/50 p-3">
-                    <p className="text-xs text-muted-foreground">תקציב משוער</p>
-                    <p className="font-semibold text-lg">{selectedTender.budget}</p>
-                  </div>
+                  {isBudgetKnown(selectedTender.budget) && (
+                    <div className="rounded-lg bg-muted/50 p-3">
+                      <p className="text-xs text-muted-foreground">תקציב משוער</p>
+                      <p className="font-semibold text-lg">{selectedTender.budget}</p>
+                    </div>
+                  )}
                   <div className="rounded-lg bg-muted/50 p-3">
                     <p className="text-xs text-muted-foreground">ציון רלוונטיות</p>
                     <p className="font-semibold text-lg text-primary">{selectedTender.relevance_score}%</p>
