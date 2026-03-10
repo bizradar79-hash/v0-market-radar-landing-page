@@ -110,28 +110,33 @@ export default function TendersPage() {
     }
   }
 
-  const getDaysUntilDeadline = (deadline: string) => {
-    const now = new Date()
+  const getDaysUntilDeadline = (deadline: string | null) => {
+    if (!deadline) return null
     const deadlineDate = new Date(deadline)
+    if (isNaN(deadlineDate.getTime())) return null
+    const now = new Date()
     const diffTime = deadlineDate.getTime() - now.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    return diffDays
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
   }
 
-  const formatDeadline = (deadline: string) => {
-    return new Date(deadline).toLocaleDateString("he-IL", {
+  const formatDeadline = (deadline: string | null) => {
+    if (!deadline) return "לא צוין"
+    const d = new Date(deadline)
+    if (isNaN(d.getTime())) return "לא צוין"
+    return d.toLocaleDateString("he-IL", {
       day: "numeric",
       month: "long",
       year: "numeric",
     })
   }
 
-  const getDeadlineStatus = (deadline: string) => {
+  const getDeadlineStatus = (deadline: string | null) => {
     const days = getDaysUntilDeadline(deadline)
-    if (days < 0) return { text: "פג תוקף", color: "text-gray-500", urgent: false }
+    if (days === null) return { text: "לא ידוע", color: "text-gray-400", urgent: false }
+    if (days < 0) return { text: "סגור", color: "text-gray-500", urgent: false }
     if (days <= 7) return { text: `${days} ימים`, color: "text-red-600", urgent: true }
     if (days <= 14) return { text: `${days} ימים`, color: "text-yellow-600", urgent: false }
-    return { text: `${days} ימים`, color: "text-green-600", urgent: false }
+    return { text: `פתוח — ${days} ימים`, color: "text-green-600", urgent: false }
   }
 
   if (loading) {
@@ -156,7 +161,7 @@ export default function TendersPage() {
           <div className="flex items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-red-600" />
             <span className="text-muted-foreground">
-              {tenders.filter(t => getDaysUntilDeadline(t.deadline) <= 7 && getDaysUntilDeadline(t.deadline) >= 0).length} עם דדליין קרוב
+              {tenders.filter(t => { const d = getDaysUntilDeadline(t.deadline); return d !== null && d <= 7 && d >= 0 }).length} עם דדליין קרוב
             </span>
           </div>
           <Button onClick={generateTenders} disabled={generating}>

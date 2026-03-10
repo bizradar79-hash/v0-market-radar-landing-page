@@ -6,6 +6,20 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
+const TENDER_SITES = ['mr.gov.il', 'tenders.gov.il', 'procurement.gov.il']
+
+function isValidDate(d: string | null | undefined): boolean {
+  return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
+}
+
+function isTenderSiteUrl(url: string): boolean {
+  if (!url) return false
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    return TENDER_SITES.some(s => host === s || host.endsWith('.' + s))
+  } catch { return false }
+}
+
 export async function POST() {
   const steps: Record<string, any> = {}
   try {
@@ -17,13 +31,13 @@ export async function POST() {
     steps.search = 'starting'
     const { primaryKeywords, products, industry } = ctx.companyProfile
     const results = await multiSearch([
-      `מכרז ${primaryKeywords} ישראל 2026`,
-      `מכרז ${products} ישראל 2025 2026`,
-      `tender ${industry} Israel 2025 2026`,
+      `מכרז ${industry} site:mr.gov.il OR site:tenders.gov.il`,
+      `מכרז ${primaryKeywords} ${industry} ישראל 2025 2026`,
+      `הזמנה להציע הצעות ${industry} ישראל 2026`,
+      `מכרז ${products} 2025 2026`,
     ])
     steps.search = { ok: true, count: results.length }
 
-    // If no search results → return empty array, don't fabricate
     if (results.length === 0) {
       await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
       steps.ai = { ok: true, count: 0, reason: 'no search results' }
@@ -33,36 +47,45 @@ export async function POST() {
     const searchUrls = new Set(results.map(r => r.url))
 
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`מצא 5 מכרזים רלוונטיים מהמידע הבא:
+    const today = new Date().toISOString().slice(0, 10)
+    const data = await analyzeWithAI(`מצא עד 5 מכרזים ממשלתיים ישראליים רלוונטיים מהתוצאות הבאות:
 
 ${ctx.context}
 
-תוצאות חיפוש מכרזים:
+תוצאות חיפוש:
 ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
 
 כללים קשיחים:
 - CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any company, person, URL, or data that does not appear in the search results. If insufficient real data found, return empty array.
-- ONLY use links that appear verbatim in the search results above
-- אם אין מכרז אמיתי בתוצאות — החזר רשימה ריקה
-- דדליין חייב להיות 2025 או 2026
-- link חייב להיות URL שמופיע ברשימת תוצאות החיפוש
+- כלול רק מכרזים עם URL אמיתי מהתוצאות — mr.gov.il, tenders.gov.il, procurement.gov.il, עיריות ישראליות
+- כותרת חייבת לכלול את המילה מכרז, הזמנה להציע, או בקשה להצעות
+- אסור לכלול מודעות דרושים, כתבות חדשות, או עמודי מוצר
+- deadline חייב להיות בפורמט YYYY-MM-DD בלבד, אחרת null
+- status: אם deadline > ${today} = "פתוח", אם deadline < ${today} = "סגור", אם null = "לא ידוע"
 
 {
   "tenders": [{
-    "title": "כותרת מכרז",
-    "organization": "ארגון",
-    "deadline": "2026-05-01",
+    "title": "שם המכרז המלא",
+    "organization": "הגוף המפרסם",
+    "deadline": "2026-06-01",
     "budget": "₪500,000",
-    "description": "תיאור",
+    "description": "תיאור קצר",
     "link": "URL מהחיפוש בלבד",
-    "relevance_score": 88
+    "relevance_score": 85,
+    "status": "פתוח"
   }]
 }`)
+
     let list = Array.isArray(data?.tenders) ? data.tenders : []
     steps.ai = { ok: true, count: list.length }
 
     // Keep only tenders whose link appears in search results
     list = list.filter((t: any) => t.link && searchUrls.has(t.link))
+
+    // Extra: reject links that don't look like tender sites (best-effort)
+    // We still allow through if URL validation passes — isTenderSiteUrl is advisory
+    const tenderSiteOnly = list.filter((t: any) => isTenderSiteUrl(t.link))
+    if (tenderSiteOnly.length > 0) list = tenderSiteOnly
 
     // Deduplicate by link
     list = deduplicateByField(list, 'link')
@@ -81,7 +104,7 @@ ${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
       list.map((t: any) => ({
         title: t.title,
         organization: t.organization,
-        deadline: /^\d{4}-\d{2}-\d{2}$/.test(t.deadline || '') ? t.deadline : null,
+        deadline: isValidDate(t.deadline) ? t.deadline : null,
         budget: t.budget,
         description: t.description,
         link: t.link,
