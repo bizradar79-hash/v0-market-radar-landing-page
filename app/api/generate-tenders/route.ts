@@ -13,6 +13,14 @@ function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
+// Keep only Hebrew (\u0590-\u05FF), ASCII printable (0x20-0x7E), and basic punctuation
+function cleanForPrompt(text: string): string {
+  return text
+    .replace(/[^\u0590-\u05FF\u0020-\u007E\n]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function isTenderSiteUrl(url: string): boolean {
   if (!url) return false
   try {
@@ -54,49 +62,41 @@ export async function POST() {
       return NextResponse.json({ success: true, tenders: [], count: 0, steps })
     }
 
-    // Scrape each tender page in parallel
+    // Scrape each tender page in parallel — fall back to search snippet on error
     steps.scrape = 'starting'
     const scraped = await Promise.all(
-      tenderResults.map(async (r) => ({
-        url: r.url,
-        title: r.title,
-        content: await scrapeWebsite(r.url) || r.content,
-      }))
+      tenderResults.map(async (r) => {
+        let content = r.content // fallback: search snippet
+        try {
+          const raw = await scrapeWebsite(r.url)
+          if (raw && raw.length > 50) content = raw
+        } catch { /* keep search snippet */ }
+        return {
+          url: r.url,
+          title: cleanForPrompt(r.title),
+          content: cleanForPrompt(content).slice(0, 500),
+        }
+      })
     )
-    steps.scrape = { ok: true, scraped: scraped.filter(s => s.content?.length > 50).length }
+    steps.scrape = { ok: true, scraped: scraped.filter(s => s.content?.length > 20).length }
 
     // Use AI only to parse/extract — not to invent
     steps.ai = 'starting'
-    const data = await analyzeWithAI(`חלץ פרטי מכרז מדוייקים אך ורק מהדפים שנסרקו למטה. אל תמציא כלום.
+    const data = await analyzeWithAI(`Extract tender details ONLY from the pages below. Do NOT invent.
 
-חברה: ${companyName}, תעשייה: ${industry}, מוצרים: ${products}
+Company: ${cleanForPrompt(companyName)}, Industry: ${cleanForPrompt(industry)}
 
-דפים שנסרקו:
-${scraped.map((s, i) => `
-=== דף ${i + 1} ===
-URL: ${s.url}
-כותרת: ${s.title}
-תוכן: ${s.content.slice(0, 1000)}
-`).join('\n')}
+Pages:
+${scraped.map((s, i) => `=== PAGE ${i + 1} ===\nURL: ${s.url}\nTitle: ${s.title}\nContent: ${s.content}`).join('\n')}
 
-כללים קשיחים:
-- CRITICAL: Use ONLY data explicitly present in the page content above. Do NOT invent any tender.
-- link חייב להיות אחד מה-URLs שמופיעים ב-=== דף === למעלה בלבד
-- אם הדף אינו מכרז אמיתי (דרושים, חדשות, מוצר) — אל תכלול אותו
-- deadline: חלץ תאריך אמיתי מהתוכן בפורמט YYYY-MM-DD. אם לא מופיע — null
-- אם אין מספיק מידע — החזר tenders: []
+Rules:
+- CRITICAL: Use ONLY data from the pages above. Do NOT invent any tender not shown.
+- link must be one of the URLs listed above exactly
+- Exclude job listings, news articles, product pages
+- deadline: extract real date as YYYY-MM-DD or null if not found
+- If no real tender found return tenders: []
 
-{
-  "tenders": [{
-    "title": "כותרת המכרז המלאה מהדף",
-    "organization": "הגוף המפרסם מהדף",
-    "deadline": "2026-06-01",
-    "budget": "לא צוין",
-    "description": "תיאור מהדף",
-    "link": "URL מדויק מהדפים למעלה",
-    "relevance_score": 80
-  }]
-}`)
+{"tenders":[{"title":"full tender title","organization":"publisher","deadline":"2026-06-01","budget":"not specified","description":"description from page","link":"exact URL from above","relevance_score":80}]}`)
 
     let list = Array.isArray(data?.tenders) ? data.tenders : []
     steps.ai = { ok: true, count: list.length }
