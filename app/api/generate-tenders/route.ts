@@ -1,16 +1,16 @@
+import { analyzeWithAI } from '@/lib/ai'
 import { getFullContext } from '@/lib/context'
 import { deduplicateByField } from '@/lib/dedup'
 import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
-const ROUTE_VERSION = 'v12-deadline-keyword'
+const ROUTE_VERSION = 'v13-groq-enrichment'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
-// Convert DD/MM/YYYY or D.M.YYYY → YYYY-MM-DD
 function parseHebrewDate(raw: string): string | null {
   const m = raw.match(/(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](20\d{2})/)
   if (!m) return null
@@ -31,7 +31,15 @@ function decodeEntities(text: string): string {
     .trim()
 }
 
-// Direct Serper call with full snippets (not using shared search() which limits to 80 chars)
+function extractDateFromText(text: string): string | null {
+  const matches = text.match(/(\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]20\d{2})/g) || []
+  for (const m of matches) {
+    const d = parseHebrewDate(m)
+    if (d) return d
+  }
+  return null
+}
+
 async function searchSerperFull(query: string): Promise<Array<{
   title: string; url: string; snippet: string; date: string
 }>> {
@@ -57,29 +65,59 @@ async function searchSerperFull(query: string): Promise<Array<{
   } catch { return [] }
 }
 
-// Check content-type — skip PDFs and binaries
-async function isHtmlUrl(url: string): Promise<boolean> {
-  if (!url?.startsWith('http')) return false
-  try {
-    const res = await fetch(url, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(3000),
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    })
-    const ct = res.headers.get('content-type') || ''
-    return ct.includes('text/html') || ct.includes('text/plain')
-  } catch { return false }
+interface Enriched {
+  tender_number: string | null
+  deadline: string | null
+  ministry: string | null
+  is_specific: boolean
 }
 
-// Extract date from snippet — look for DD/MM/YYYY patterns
-function extractDateFromText(text: string): string | null {
-  // Patterns: "מועד אחרון: 12/05/2026", "הגשה עד 15.04.2026", etc.
-  const matches = text.match(/(\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]20\d{2})/g) || []
-  for (const m of matches) {
-    const d = parseHebrewDate(m)
-    if (d) return d
+async function enrichWithGroq(
+  results: Array<{ title: string; url: string; snippet: string; date: string }>
+): Promise<Enriched[]> {
+  const fallback: Enriched[] = results.map(() => ({
+    tender_number: null, deadline: null, ministry: null, is_specific: true,
+  }))
+  if (results.length === 0) return fallback
+
+  const items = results.map((r, i) =>
+    `[${i + 1}] Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}${r.date ? `\nDate: ${r.date}` : ''}`
+  ).join('\n\n')
+
+  const system = `You analyze Israeli government tender search results.
+For each result extract:
+- tender_number: tender number like "02/2026" or "24/2025", null if not found
+- deadline: submission deadline in YYYY-MM-DD, null if not found
+- ministry: publishing organization name in Hebrew, null if not found
+- is_specific: true if this is a specific individual tender announcement, false if it is a listing/index page or unrelated page
+
+Return ONLY a JSON array, no markdown, no explanation.`
+
+  const user = `CRITICAL: Output ONLY JSON array. No markdown code blocks.
+
+Analyze these ${results.length} search results:
+
+${items}
+
+Return array of ${results.length} objects: [{"tender_number":...,"deadline":...,"ministry":...,"is_specific":...}, ...]`
+
+  try {
+    const raw = await analyzeWithAI(system, user)
+    const jsonMatch = raw.match(/\[[\s\S]*\]/)
+    if (!jsonMatch) return fallback
+    const parsed: any[] = JSON.parse(jsonMatch[0])
+    return results.map((_, i) => {
+      const item = parsed[i] || {}
+      return {
+        tender_number: item.tender_number || null,
+        deadline: isValidDate(item.deadline) ? item.deadline : parseHebrewDate(String(item.deadline || '')),
+        ministry: item.ministry || null,
+        is_specific: item.is_specific !== false,
+      }
+    })
+  } catch {
+    return fallback
   }
-  return null
 }
 
 export async function POST() {
@@ -91,87 +129,79 @@ export async function POST() {
     steps.context = { ok: true, company: ctx.company?.name }
 
     const { products, industry } = ctx.companyProfile
-    const companyName = ctx.company?.name || ''
     const year = new Date().getFullYear()
 
+    // Step 1: Serper — find specific tender pages
     steps.search = 'starting'
-    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} "מועד אחרון" ${year}`
-    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} "מועד אחרון" ${year}`
+    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} gov.il`
+    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} gov.il`
     const [r1, r2] = await Promise.all([
       searchSerperFull(q1),
       searchSerperFull(q2),
     ])
 
-    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled', 'רשימת מכרזים', 'מאגר']
+    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled']
     const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org']
-    const isJunkTitle = (title: string) => JUNK_TITLES.some(j => title.includes(j))
-    const isJunkDomain = (url: string) => JUNK_DOMAINS.some(d => url.includes(d))
-    const hasDate = (r: { snippet: string; date: string }) =>
-      /\d{1,2}[.\/]\d{1,2}[.\/]20\d{2}/.test(r.snippet + ' ' + r.date)
 
     const seen = new Set<string>()
-    const results = [...r1, ...r2]
-      // Skip PDFs and DOCs
+    const candidates = [...r1, ...r2]
+      .filter(r => r.url?.includes('.gov.il'))
       .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
-      // Skip junk titles and junk domains
-      .filter(r => !isJunkTitle(r.title) && !isJunkDomain(r.url))
-      // Must have a date visible in snippet (ensures we can extract deadline)
-      .filter(r => hasDate(r))
-      // Deduplicate
+      .filter(r => !JUNK_TITLES.some(j => r.title.includes(j)))
+      .filter(r => !JUNK_DOMAINS.some(d => r.url.includes(d)))
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
-      .slice(0, 8)
+      .slice(0, 10)
 
     steps.search = {
       ok: true,
-      count: results.length,
+      count: candidates.length,
       queries: [q1, q2],
-      rawTitles: [...r1, ...r2].slice(0, 8).map(r => ({ title: r.title, url: r.url })),
+      rawTitles: [...r1, ...r2].slice(0, 10).map(r => ({ title: r.title, url: r.url })),
     }
 
-    if (results.length === 0) {
+    if (candidates.length === 0) {
       await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
       return NextResponse.json({ success: true, tenders: [], count: 0, steps })
     }
 
-    // Check content-type — skip PDFs
-    steps.validate = 'starting'
-    const withType = await Promise.all(
-      results.map(async (r) => ({ ...r, _html: await isHtmlUrl(r.url) }))
-    )
-    const htmlResults = withType.filter(r => r._html)
-    steps.validate = { ok: true, htmlPages: htmlResults.length, skippedPdfs: results.length - htmlResults.length }
+    // Step 2: Groq enrichment — extract tender_number, deadline, ministry, is_specific
+    steps.enrich = 'starting'
+    const enriched = await enrichWithGroq(candidates)
+    steps.enrich = { ok: true, enrichedCount: enriched.length }
 
-    // Build tender objects directly from Serper data — no scraping needed
+    // Step 3: Build tender list
     const today = new Date().toISOString().slice(0, 10)
-    let list = htmlResults.map(r => {
-      const combined = r.snippet + ' ' + r.date + ' ' + r.title
-      const deadline = extractDateFromText(combined)
-      const status = deadline ? (deadline > today ? 'פתוח' : 'סגור') : 'לא ידוע'
-      // Strip trailing site name from title
+    let list = candidates.map((r, i) => {
+      const e = enriched[i]
+      const deadline = e.deadline || extractDateFromText(r.snippet + ' ' + r.date)
       const cleanTitle = r.title
-        .replace(/\s*[-|–]\s*(mr\.gov\.il|מרכז רכש|ILG Site).*$/i, '')
+        .replace(/\s*[-|–]\s*(gov\.il|mr\.gov\.il|ממשלת ישראל|מרכז רכש|ILG Site).*$/i, '')
         .trim() || r.title
       return {
         title: cleanTitle,
-        organization: r.url.includes('mr.gov.il') ? 'מרכז רכש ממשלתי'
+        organization: e.ministry
+          || (r.url.includes('mr.gov.il') ? 'מרכז רכש ממשלתי'
           : r.url.includes('health.gov.il') ? 'משרד הבריאות'
           : r.url.includes('economy.gov.il') ? 'משרד הכלכלה'
           : r.url.includes('gov.il') ? 'ממשלת ישראל'
-          : new URL(r.url).hostname.replace(/^www\./, ''),
+          : new URL(r.url).hostname.replace(/^www\./, '')),
         deadline,
         budget: 'לא צוין',
         description: r.snippet.slice(0, 300),
         link: r.url,
         relevance_score: 75,
-        status,
+        _is_specific: e.is_specific,
       }
     })
-    // Drop expired tenders (deadline known and in the past)
-    list = list.filter(t => !t.deadline || t.deadline >= today)
 
+    // Filter: Groq says this is a listing page → drop it
+    list = list.filter(t => t._is_specific)
+    // Filter: known expired
+    list = list.filter(t => !t.deadline || t.deadline >= today)
     list = deduplicateByField(list, 'link')
     steps.build = { ok: true, count: list.length }
 
+    // Save to DB
     steps.db = 'starting'
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
