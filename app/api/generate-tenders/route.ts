@@ -140,16 +140,29 @@ export async function POST() {
       searchSerperFull(q2),
     ])
 
-    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled']
-    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org']
-    // URL patterns that indicate a listing/index page rather than a specific tender
+    // Titles that must never appear
+    const BAD_TITLE = [
+      '[XLS]', '[PDF]', '[DOC]', '.xls', '.xlsx',
+      'רשימת מכרזים', 'מכרזים והתקשרויות', 'govextra',
+      'Freedom of Information', 'אתר הכנסת',
+      'תוצאות חיפוש', 'נמצאו', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled',
+    ]
+    // Title must contain at least one of these to be a real tender
+    const GOOD_TITLE_RE = /מכרז פומבי|מכרז מס'|מכרז מספר|הזמנה להציע|\d{2,6}[\/\-]\d{2,4}/
+
+    const isBadTitle = (t: string) => BAD_TITLE.some(b => t.includes(b)) || /^מכרזי /.test(t)
+    const isGoodTitle = (t: string) => GOOD_TITLE_RE.test(t)
+
+    // URL patterns that indicate listing/index pages
     const LISTING_URL = [/\/tenders\.aspx/i, /\/pages\/tenders/i, /\/tenders\/?$/, /\/bids\/?$/, /\/procurement\/?$/, /procurementManager/]
+    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org']
 
     const seen = new Set<string>()
     const candidates = [...r1, ...r2]
       .filter(r => r.url?.includes('.gov.il'))
-      .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
-      .filter(r => !JUNK_TITLES.some(j => r.title.includes(j)))
+      .filter(r => !r.url.match(/\.(pdf|doc|docx|xls|xlsx)$/i))
+      .filter(r => !isBadTitle(r.title))
+      .filter(r => isGoodTitle(r.title))
       .filter(r => !JUNK_DOMAINS.some(d => r.url.includes(d)))
       .filter(r => !LISTING_URL.some(p => p.test(r.url)))
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
