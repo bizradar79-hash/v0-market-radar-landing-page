@@ -94,10 +94,11 @@ export async function POST() {
     const year = new Date().getFullYear()
 
     steps.search = 'starting'
-    // Search specifically on mr.gov.il via Serper — Google has already rendered the JS
+    const q1 = `site:mr.gov.il מכרז ${industry} ${products} ${year}`
+    const q2 = `site:mr.gov.il מכרז ${companyName} ${year}`
     const [r1, r2] = await Promise.all([
-      searchSerperFull(`site:mr.gov.il מכרז ${industry} ${products} ${year}`),
-      searchSerperFull(`site:mr.gov.il מכרז ${companyName} ${year}`),
+      searchSerperFull(q1),
+      searchSerperFull(q2),
     ])
 
     const seen = new Set<string>()
@@ -106,7 +107,11 @@ export async function POST() {
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
       .slice(0, 8)
 
-    steps.search = { ok: true, count: results.length }
+    steps.search = {
+      ok: true, count: results.length,
+      queries: [q1, q2],
+      rawTitles: [...r1, ...r2].map(r => r.title).slice(0, 10),
+    }
 
     if (results.length === 0) {
       await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
