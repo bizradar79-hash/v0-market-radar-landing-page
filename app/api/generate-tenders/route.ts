@@ -4,7 +4,7 @@ import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
-const ROUTE_VERSION = 'v9-specific-tender-query'
+const ROUTE_VERSION = 'v10-filetype-no-govil-filter'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -102,18 +102,21 @@ export async function POST() {
       searchSerperFull(q2),
     ])
 
-    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם']
-    const isJunk = (title: string) => JUNK_TITLES.some(j => title.includes(j))
-    const isTenderNumber = (text: string) => /\d{5,}/.test(text) // tender numbers are long digit strings
+    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'sitemap', '/sitemaps/']
+    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled']
+    const TENDER_KEYWORDS = ['מכרז', 'הזמנה', 'פומבי', 'רכש', 'tender']
+    const isJunkDomain = (url: string) => JUNK_DOMAINS.some(d => url.includes(d))
+    const isJunkTitle = (title: string) => JUNK_TITLES.some(j => title.includes(j))
+    const hasTenderKeyword = (title: string) => TENDER_KEYWORDS.some(k => title.includes(k))
 
     const seen = new Set<string>()
     const results = [...r1, ...r2]
-      // Must be from a gov.il domain
-      .filter(r => r.url?.includes('.gov.il'))
       // Skip PDFs and DOCs
       .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
-      // Skip junk titles
-      .filter(r => !isJunk(r.title))
+      // Skip junk domains and titles
+      .filter(r => !isJunkDomain(r.url) && !isJunkTitle(r.title))
+      // Must look like an actual tender (not a blog post, not a job listing)
+      .filter(r => hasTenderKeyword(r.title))
       // Deduplicate
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
       .slice(0, 8)
@@ -150,7 +153,11 @@ export async function POST() {
         .trim() || r.title
       return {
         title: cleanTitle,
-        organization: r.url.includes('mr.gov.il') ? 'מרכז רכש ממשלתי' : 'ממשלת ישראל',
+        organization: r.url.includes('mr.gov.il') ? 'מרכז רכש ממשלתי'
+          : r.url.includes('health.gov.il') ? 'משרד הבריאות'
+          : r.url.includes('economy.gov.il') ? 'משרד הכלכלה'
+          : r.url.includes('gov.il') ? 'ממשלת ישראל'
+          : new URL(r.url).hostname.replace(/^www\./, ''),
         deadline,
         budget: 'לא צוין',
         description: r.snippet.slice(0, 300),
