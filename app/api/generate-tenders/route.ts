@@ -5,7 +5,7 @@ import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
-const ROUTE_VERSION = 'v13-groq-enrichment'
+const ROUTE_VERSION = 'v14-no-jobs'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -87,9 +87,9 @@ async function enrichWithGroq(
   const system = `You analyze Israeli government tender search results.
 For each result extract:
 - tender_number: tender number like "02/2026" or "24/2025", null if not found
-- deadline: submission deadline in YYYY-MM-DD, null if not found
+- deadline: submission deadline in YYYY-MM-DD. Look aggressively for date patterns near words like "מועד אחרון", "הגשה עד", "תאריך סיום", "פתוח עד", "סגירה". Convert DD/MM/YYYY or D.M.YYYY to YYYY-MM-DD. If no date found, return null.
 - ministry: publishing organization name in Hebrew, null if not found
-- is_specific: true if this is a specific individual tender announcement, false if it is a listing/index page or unrelated page
+- is_specific: true if this is a specific individual tender announcement, false if it is a listing/index page, HR job posting, or unrelated page
 
 Return ONLY a JSON array, no markdown, no explanation.`
 
@@ -133,8 +133,8 @@ export async function POST() {
 
     // Step 1: Serper — find specific tender pages
     steps.search = 'starting'
-    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} gov.il`
-    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} gov.il`
+    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} gov.il -"למשרת" -"לתפקיד" -"דרושים"`
+    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} gov.il -"למשרת" -"לתפקיד" -"דרושים"`
     const [r1, r2] = await Promise.all([
       searchSerperFull(q1),
       searchSerperFull(q2),
@@ -146,6 +146,8 @@ export async function POST() {
       'רשימת מכרזים', 'מכרזים והתקשרויות', 'govextra',
       'Freedom of Information', 'אתר הכנסת',
       'תוצאות חיפוש', 'נמצאו', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled',
+      // Job postings — not procurement tenders
+      'למשרת', 'לתפקיד', 'דרושים', ' משרה ', ' תפקיד ',
     ]
     // Title must contain at least one of these to be a real tender
     const GOOD_TITLE_RE = /מכרז פומבי|מכרז מס'|מכרז מספר|הזמנה להציע|\d{2,6}[\/\-]\d{2,4}/
@@ -155,7 +157,7 @@ export async function POST() {
 
     // URL patterns that indicate listing/index pages
     const LISTING_URL = [/\/tenders\.aspx/i, /\/pages\/tenders/i, /\/tenders\/?$/, /\/bids\/?$/, /\/procurement\/?$/, /procurementManager/]
-    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org']
+    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org', 'ejobs.gov.il']
 
     const seen = new Set<string>()
     const candidates = [...r1, ...r2]
