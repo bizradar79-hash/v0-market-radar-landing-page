@@ -4,7 +4,7 @@ import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
-const ROUTE_VERSION = 'v10-filetype-no-govil-filter'
+const ROUTE_VERSION = 'v11-phrases-govil-filter'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -95,28 +95,26 @@ export async function POST() {
     const year = new Date().getFullYear()
 
     steps.search = 'starting'
-    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} filetype:html`
-    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} filetype:html`
+    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} gov.il`
+    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} gov.il`
     const [r1, r2] = await Promise.all([
       searchSerperFull(q1),
       searchSerperFull(q2),
     ])
 
-    const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'sitemap', '/sitemaps/']
+    const INDEX_URL_PATTERNS = [/\/topics\//, /landing-page/, /\/Pages\/default/, /\/about\//i, /\/Departments\/General\//, /\/pages\/[a-z-]+$/i, /search\?/, /\?q=/]
     const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled']
-    const TENDER_KEYWORDS = ['מכרז', 'הזמנה', 'פומבי', 'רכש', 'tender']
-    const isJunkDomain = (url: string) => JUNK_DOMAINS.some(d => url.includes(d))
+    const isIndexUrl = (url: string) => INDEX_URL_PATTERNS.some(p => p.test(url))
     const isJunkTitle = (title: string) => JUNK_TITLES.some(j => title.includes(j))
-    const hasTenderKeyword = (title: string) => TENDER_KEYWORDS.some(k => title.includes(k))
 
     const seen = new Set<string>()
     const results = [...r1, ...r2]
+      // Must be from a gov.il domain
+      .filter(r => r.url?.includes('.gov.il'))
       // Skip PDFs and DOCs
       .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
-      // Skip junk domains and titles
-      .filter(r => !isJunkDomain(r.url) && !isJunkTitle(r.title))
-      // Must look like an actual tender (not a blog post, not a job listing)
-      .filter(r => hasTenderKeyword(r.title))
+      // Skip junk titles and index/aggregator page URLs
+      .filter(r => !isJunkTitle(r.title) && !isIndexUrl(r.url))
       // Deduplicate
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
       .slice(0, 8)
