@@ -4,7 +4,7 @@ import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
-const ROUTE_VERSION = 'v8-no-site-filter'
+const ROUTE_VERSION = 'v9-specific-tender-query'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -95,8 +95,8 @@ export async function POST() {
     const year = new Date().getFullYear()
 
     steps.search = 'starting'
-    const q1 = `מכרז ממשלתי ${industry} ${products} ישראל ${year} gov.il`
-    const q2 = `מכרז ${products} ${industry} ישראל ${year} "הזמנה להציע" OR "מרכז רכש"`
+    const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} filetype:html`
+    const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} filetype:html`
     const [r1, r2] = await Promise.all([
       searchSerperFull(q1),
       searchSerperFull(q2),
