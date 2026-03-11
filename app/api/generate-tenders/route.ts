@@ -94,23 +94,35 @@ export async function POST() {
     const year = new Date().getFullYear()
 
     steps.search = 'starting'
-    const q1 = `site:mr.gov.il מכרז ${industry} ${products} ${year}`
-    const q2 = `site:mr.gov.il מכרז ${companyName} ${year}`
+    const q1 = `מכרז ממשלתי ${industry} ${products} ישראל ${year} gov.il`
+    const q2 = `מכרז ${products} ${industry} ישראל ${year} "הזמנה להציע" OR "מרכז רכש"`
     const [r1, r2] = await Promise.all([
       searchSerperFull(q1),
       searchSerperFull(q2),
     ])
 
+    const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם']
+    const isJunk = (title: string) => JUNK_TITLES.some(j => title.includes(j))
+    const isTenderNumber = (text: string) => /\d{5,}/.test(text) // tender numbers are long digit strings
+
+    const today = new Date().toISOString().slice(0, 10)
     const seen = new Set<string>()
     const results = [...r1, ...r2]
-      .filter(r => r.url?.includes('mr.gov.il') && !r.url.endsWith('.pdf'))
+      // Must be from a gov.il domain
+      .filter(r => r.url?.includes('.gov.il'))
+      // Skip PDFs and DOCs
+      .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
+      // Skip junk titles
+      .filter(r => !isJunk(r.title))
+      // Deduplicate
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
       .slice(0, 8)
 
     steps.search = {
-      ok: true, count: results.length,
+      ok: true,
+      count: results.length,
       queries: [q1, q2],
-      rawTitles: [...r1, ...r2].map(r => r.title).slice(0, 10),
+      rawTitles: [...r1, ...r2].slice(0, 8).map(r => ({ title: r.title, url: r.url })),
     }
 
     if (results.length === 0) {
@@ -129,11 +141,16 @@ export async function POST() {
     // Build tender objects directly from Serper data — no scraping needed
     const today = new Date().toISOString().slice(0, 10)
     let list = htmlResults.map(r => {
-      const deadline = extractDateFromText(r.snippet + ' ' + r.date)
+      const combined = r.snippet + ' ' + r.date + ' ' + r.title
+      const deadline = extractDateFromText(combined)
       const status = deadline ? (deadline > today ? 'פתוח' : 'סגור') : 'לא ידוע'
+      // Strip trailing site name from title
+      const cleanTitle = r.title
+        .replace(/\s*[-|–]\s*(mr\.gov\.il|מרכז רכש|ILG Site).*$/i, '')
+        .trim() || r.title
       return {
-        title: r.title.replace(/\s*[-|]\s*.*?(מרכז רכש|mr\.gov).*$/i, '').trim() || r.title,
-        organization: 'מרכז רכש ממשלתי',
+        title: cleanTitle,
+        organization: r.url.includes('mr.gov.il') ? 'מרכז רכש ממשלתי' : 'ממשלת ישראל',
         deadline,
         budget: 'לא צוין',
         description: r.snippet.slice(0, 300),
@@ -142,6 +159,8 @@ export async function POST() {
         status,
       }
     })
+    // Drop expired tenders (deadline known and in the past)
+    list = list.filter(t => !t.deadline || t.deadline >= today)
 
     list = deduplicateByField(list, 'link')
     steps.build = { ok: true, count: list.length }
