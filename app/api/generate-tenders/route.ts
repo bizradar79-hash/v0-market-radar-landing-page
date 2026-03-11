@@ -4,6 +4,7 @@ import { trackSearchUsage } from '@/lib/usage'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
+const ROUTE_VERSION = 'v8-no-site-filter'
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -105,7 +106,6 @@ export async function POST() {
     const isJunk = (title: string) => JUNK_TITLES.some(j => title.includes(j))
     const isTenderNumber = (text: string) => /\d{5,}/.test(text) // tender numbers are long digit strings
 
-    const today = new Date().toISOString().slice(0, 10)
     const seen = new Set<string>()
     const results = [...r1, ...r2]
       // Must be from a gov.il domain
