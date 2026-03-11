@@ -142,6 +142,8 @@ export async function POST() {
 
     const JUNK_TITLES = ['תוצאות חיפוש', 'נמצאו', '[PDF]', '[DOC]', 'ILG Site', 'search results', 'חיפוש מתקדם', 'Untitled']
     const JUNK_DOMAINS = ['indeed.com', 'rssing.com', 'anyflip.com', 'fliphtml5.com', 'svn.apache.org']
+    // URL patterns that indicate a listing/index page rather than a specific tender
+    const LISTING_URL = [/\/tenders\.aspx/i, /\/pages\/tenders/i, /\/tenders\/?$/, /\/bids\/?$/, /\/procurement\/?$/, /procurementManager/]
 
     const seen = new Set<string>()
     const candidates = [...r1, ...r2]
@@ -149,6 +151,7 @@ export async function POST() {
       .filter(r => !r.url.match(/\.(pdf|doc|docx)$/i))
       .filter(r => !JUNK_TITLES.some(j => r.title.includes(j)))
       .filter(r => !JUNK_DOMAINS.some(d => r.url.includes(d)))
+      .filter(r => !LISTING_URL.some(p => p.test(r.url)))
       .filter(r => { if (seen.has(r.url)) return false; seen.add(r.url); return true })
       .slice(0, 10)
 
