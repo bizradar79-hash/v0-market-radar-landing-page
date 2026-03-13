@@ -76,7 +76,7 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('companies')
-      .select('name, city, swot, business_overview')
+      .select('name, city, swot, business_overview, geo_data')
       .eq('id', user.id)
       .single()
 
@@ -85,6 +85,9 @@ export default function ProfilePage() {
       setCompanyCity(data.city || '')
       if (data.business_overview) setOverview(data.business_overview)
       if (data.swot && Object.keys(data.swot).length > 0) setSwot(data.swot as SwotData)
+      if (data.geo_data && typeof data.geo_data === 'object' && Object.keys(data.geo_data).length > 0) {
+        setPlaces(data.geo_data as PlacesData)
+      }
     }
     setLoading(false)
   }

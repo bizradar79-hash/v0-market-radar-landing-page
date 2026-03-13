@@ -31,7 +31,7 @@ export async function GET() {
           if (detailsRes.ok) {
             const detailsData = await detailsRes.json()
             const details = detailsData.result || {}
-            return NextResponse.json({
+            const result = {
               rating: details.rating || place.rating || null,
               reviewCount: details.user_ratings_total || place.user_ratings_total || 0,
               address: details.formatted_address || place.formatted_address || '',
@@ -44,7 +44,10 @@ export async function GET() {
                 time: r.relative_time_description || '',
               })),
               source: 'google',
-            })
+            }
+            // Persist to DB
+            await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
+            return NextResponse.json(result)
           }
         }
       }
@@ -77,10 +80,8 @@ export async function GET() {
     const kg = data.knowledgeGraph || {}
     const local: any = (data.localResults || [])[0] || {}
 
-    // Rating
     const rating: number | null = kg.rating ?? local.rating ?? null
 
-    // Review count
     let reviewCount = 0
     if (typeof local.ratingCount === 'number') {
       reviewCount = local.ratingCount
@@ -90,22 +91,10 @@ export async function GET() {
       reviewCount = kg.ratingCount
     }
 
-    // Address
-    const address = local.address
-      || kg.attributes?.['כתובת']
-      || kg.attributes?.['Address']
-      || ''
-
-    // Phone
-    const phone = local.phone
-      || kg.attributes?.['טלפון']
-      || kg.attributes?.['Phone']
-      || ''
-
-    // Website
+    const address = local.address || kg.attributes?.['כתובת'] || kg.attributes?.['Address'] || ''
+    const phone = local.phone || kg.attributes?.['טלפון'] || kg.attributes?.['Phone'] || ''
     const website = kg.website || local.website || ''
 
-    // Reviews — Serper knowledge graph occasionally includes review snippets
     const rawReviews: any[] = Array.isArray(kg.reviews) ? kg.reviews : []
     const reviews = rawReviews
       .map((r: any) => ({
@@ -116,15 +105,16 @@ export async function GET() {
       }))
       .filter((r) => r.text || r.author)
 
-    return NextResponse.json({
-      rating,
-      reviewCount,
-      reviews,
-      address,
-      phone,
-      website,
-      source: 'serper',
-    })
+    const result = { rating, reviewCount, reviews, address, phone, website, source: 'serper' }
+
+    // Persist to DB (graceful if geo_data column doesn't exist yet)
+    const { error: dbError } = await ctx.supabase
+      .from('companies')
+      .update({ geo_data: result })
+      .eq('id', ctx.user.id)
+    if (dbError) console.warn('google-places DB save failed:', dbError.message)
+
+    return NextResponse.json(result)
   } catch (e: any) {
     console.error('google-places serper fallback error:', e?.message)
     return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
