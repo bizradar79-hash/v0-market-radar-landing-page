@@ -242,45 +242,8 @@ export default function OnboardingPage() {
         await supabase.from("competitors").insert(competitorRecords)
       }
 
-      // Step 3: Insert sample opportunities for the user
-      const sampleOpportunities = [
-        {
-          company_id: user.id,
-          title: `הזדמנות חדשה בשוק ה${industry}`,
-          description: `זוהתה עלייה משמעותית בביקוש לפתרונות ${industry} בקרב עסקים קטנים ובינוניים בישראל`,
-          impact_score: 85,
-          confidence_score: 92,
-          priority: "גבוהה",
-          type: industry,
-          actions: ["לפנות ללקוח��ת פוטנציאליים", "להכין הצעת מחיר", "לתאם פגישת הדגמה"],
-          sources: ["ניתוח שוק"]
-        },
-        {
-          company_id: user.id,
-          title: "שותפות אסטרטגית פוטנציאלית",
-          description: "חברת טכנולוגיה מובילה מחפשת שותפים בתחום שלך",
-          impact_score: 78,
-          confidence_score: 85,
-          priority: "גבוהה",
-          type: "שותפות",
-          actions: ["ליצור קשר עם מחלקת הפיתוח העסקי", "להכין מצגת שותפות"],
-          sources: ["לינקדאין"]
-        },
-        {
-          company_id: user.id,
-          title: "התרחבות לשוק חדש",
-          description: "רגולציה חדשה פותחת הזדמנויות לחברות ישראליות",
-          impact_score: 65,
-          confidence_score: 70,
-          priority: "בינונית",
-          type: "שוק",
-          actions: ["לבדוק דרישות רגולטוריות", "למפות מתחרים"],
-          sources: ["חדשות"]
-        }
-      ]
-      await supabase.from("opportunities").insert(sampleOpportunities)
+      // Step 3: Insert sample leads
 
-      // Step 4: Insert sample leads
       const sampleLeads = [
         {
           company_id: user.id,

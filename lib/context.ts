@@ -36,7 +36,7 @@ export async function getFullContext() {
   if (!user) return null
 
   const [{ data: company }, { data: competitors }] = await Promise.all([
-    supabase.from('companies').select('*').eq('id', user.id).single(),
+    supabase.from('companies').select('*, geographic_area, target_customers').eq('id', user.id).single(),
     supabase.from('competitors').select('*').eq('company_id', user.id)
   ])
 
@@ -50,6 +50,9 @@ export async function getFullContext() {
   // Build rich company profile from DB data + scraped website content
   const keywords: string[] = company?.keywords || []
   const primaryKeywords = keywords.slice(0, 3).join(' ') || company?.industry || ''
+  const geographicArea: string[] = company?.geographic_area || []
+  const targetCustomers: string[] = company?.target_customers || []
+
   const companyProfile = {
     name: company?.name || '',
     industry: company?.industry || '',
@@ -60,7 +63,8 @@ export async function getFullContext() {
     primaryKeywords,
     // Use first 2 keywords as products proxy, rest as target customers proxy
     products: keywords.slice(0, 2).join(', ') || company?.description?.slice(0, 80) || '',
-    targetCustomers: keywords.slice(2, 4).join(', ') || company?.industry || '',
+    targetCustomers: targetCustomers.length > 0 ? targetCustomers.join(', ') : (keywords.slice(2, 4).join(', ') || company?.industry || ''),
+    geographicArea: geographicArea.join(', '),
   }
 
   const context = `
@@ -73,6 +77,8 @@ export async function getFullContext() {
 גודל: ${company?.size}
 תיאור: ${company?.description}
 מוצרים/שירותים/מילות מפתח: ${keywords.join(', ')}
+אזור גיאוגרפי: ${geographicArea.length > 0 ? geographicArea.join(', ') : company?.city || 'לא צוין'}
+לקוחות יעד: ${targetCustomers.length > 0 ? targetCustomers.join(', ') : 'לא צוין'}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}
 
 === תוכן האתר ===

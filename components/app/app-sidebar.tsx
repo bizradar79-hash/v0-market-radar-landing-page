@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
-  Lightbulb,
   Users,
   Target,
   FileText,
@@ -19,6 +18,7 @@ import {
   X,
   LogOut,
   Calendar,
+  UserCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -35,7 +35,6 @@ interface UserData {
 }
 
 interface NavCounts {
-  opportunities: number
   leads: number
   tenders: number
   alerts: number
@@ -47,7 +46,7 @@ interface NavCounts {
 
 const getNavItems = (counts: NavCounts) => [
   { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
-  { href: "/app/opportunities", label: "הזדמנויות", icon: Lightbulb, badge: counts.opportunities || undefined },
+  { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
   { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
   { href: "/app/leads", label: "לידים", icon: Users, badge: counts.leads || undefined },
   { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
@@ -63,7 +62,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const pathname = usePathname()
   const [user, setUser] = useState<UserData | null>(null)
   const [counts, setCounts] = useState<NavCounts>({
-    opportunities: 0,
     leads: 0,
     tenders: 0,
     alerts: 0,
@@ -75,9 +73,8 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
-    
+
     const [
-      { count: opportunitiesCount },
       { count: leadsCount },
       { count: tendersCount },
       { count: alertsCount },
@@ -86,7 +83,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
       { count: newsCount },
       { count: conferencesCount },
     ] = await Promise.all([
-      supabase.from("opportunities").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
@@ -97,7 +93,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     ])
 
     setCounts({
-      opportunities: opportunitiesCount || 0,
       leads: leadsCount || 0,
       tenders: tendersCount || 0,
       alerts: alertsCount || 0,
@@ -112,13 +107,13 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     const fetchUser = async () => {
       const supabase = createClient()
       const { data: { user: authUser } } = await supabase.auth.getUser()
-      
+
       if (authUser) {
-        const fullName = authUser.user_metadata?.full_name || 
+        const fullName = authUser.user_metadata?.full_name ||
                          authUser.user_metadata?.name ||
-                         authUser.email?.split('@')[0] || 
+                         authUser.email?.split('@')[0] ||
                          'משתמש'
-        
+
         const nameParts = fullName.split(' ')
         let initials = ''
         if (nameParts.length >= 2) {
@@ -126,7 +121,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         } else {
           initials = fullName.substring(0, 2)
         }
-        
+
         setUser({
           name: fullName,
           email: authUser.email || '',

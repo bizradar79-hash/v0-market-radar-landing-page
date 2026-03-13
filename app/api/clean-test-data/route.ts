@@ -7,7 +7,7 @@ export async function POST() {
   const ctx = await getFullContext()
   if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const tables = ['opportunities', 'competitors', 'leads', 'tenders', 'trends', 'news', 'conferences', 'alerts']
+  const tables = ['competitors', 'leads', 'tenders', 'trends', 'news', 'conferences', 'alerts']
   const results: Record<string, any> = {}
 
   for (const table of tables) {

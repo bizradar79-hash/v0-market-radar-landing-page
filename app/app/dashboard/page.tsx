@@ -9,9 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
-import { 
+import {
   TrendingUp,
-  Lightbulb,
   Target,
   Users,
   FileText,
@@ -21,18 +20,25 @@ import {
   ArrowLeft,
   Loader2,
   RefreshCw,
+  Building2,
 } from "lucide-react"
 
+interface CompanyInfo {
+  name: string
+  industry: string
+  city: string
+}
+
 interface DashboardData {
-  opportunitiesCount: number
   leadsCount: number
   tendersCount: number
   competitorsCount: number
   trendsCount: number
   alertsCount: number
-  topOpportunities: Array<{ title: string; impact_score: number; priority: string }>
+  topLeads: Array<{ name: string; score: number; industry: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
   lastAnalyzed: string | null
+  companyInfo: CompanyInfo | null
 }
 
 export default function AppDashboardPage() {
@@ -54,18 +60,12 @@ export default function AppDashboardPage() {
       .catch(() => {})
   }, [])
 
-  // Auto-run analysis once when dashboard loads if data exists but hasn't been analyzed recently
   useEffect(() => {
     if (!data || loading || scanning || autoAnalyzing || hasAutoAnalyzed.current) return
-    
+
     const shouldAutoAnalyze = () => {
-      // Only auto-analyze if we have some data
-      if (data.opportunitiesCount === 0 && data.leadsCount === 0 && data.competitorsCount === 0) return false
-      
-      // If never analyzed, run analysis
+      if (data.leadsCount === 0 && data.competitorsCount === 0) return false
       if (!data.lastAnalyzed) return true
-      
-      // If last analyzed >24h ago, run analysis
       const lastAnalyzed = new Date(data.lastAnalyzed)
       const now = new Date()
       const diffHours = (now.getTime() - lastAnalyzed.getTime()) / (1000 * 60 * 60)
@@ -80,47 +80,48 @@ export default function AppDashboardPage() {
 
   async function fetchDashboardData() {
     const [
-      { count: opportunitiesCount },
       { count: leadsCount },
       { count: tendersCount },
       { count: competitorsCount },
       { count: trendsCount },
       { count: alertsCount },
-      { data: topOpps },
+      { data: topLeads },
       { data: upcomingTenders },
       { data: companyData },
     ] = await Promise.all([
-      supabase.from("opportunities").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
-      supabase.from("opportunities").select("title, impact_score, priority").order("impact_score", { ascending: false }).limit(3),
+      supabase.from("leads").select("name, score, industry").order("score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
-      supabase.from("companies").select("last_analyzed").single(),
+      supabase.from("companies").select("name, industry, city, last_analyzed").single(),
     ])
 
     setData({
-      opportunitiesCount: opportunitiesCount || 0,
       leadsCount: leadsCount || 0,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
       alertsCount: alertsCount || 0,
-      topOpportunities: topOpps || [],
+      topLeads: topLeads || [],
       upcomingTenders: upcomingTenders || [],
       lastAnalyzed: companyData?.last_analyzed || null,
+      companyInfo: companyData ? {
+        name: companyData.name || '',
+        industry: companyData.industry || '',
+        city: companyData.city || '',
+      } : null,
     })
     setLoading(false)
   }
 
   async function runAutoAnalysis() {
     setAutoAnalyzing(true)
-    const results = { opportunities: 0, competitors: 0, leads: 0, tenders: 0, trends: 0, news: 0, conferences: 0 }
-    
+    const results = { competitors: 0, leads: 0, tenders: 0, trends: 0, news: 0, conferences: 0 }
+
     const steps = [
-      { api: '/api/analyze', label: 'מנתח הזדמנויות...', key: 'opportunities' },
       { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
       { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
       { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
@@ -146,14 +147,13 @@ export default function AppDashboardPage() {
       setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
 
-      // Refresh sidebar counts
       if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
         (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
       }
 
       toast({
         title: "הניתוח הושלם בהצלחה!",
-        description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.tenders} מכרזים`,
+        description: `נמצאו ${results.leads} לידים ו-${results.tenders} מכרזים`,
       })
     } catch (error) {
       console.error("Error in auto analysis:", error)
@@ -170,10 +170,9 @@ export default function AppDashboardPage() {
 
   async function runFirstScan() {
     setScanning(true)
-    const results = { opportunities: 0, competitors: 0, leads: 0, tenders: 0 }
+    const results = { competitors: 0, leads: 0, tenders: 0 }
 
     const steps = [
-      { api: '/api/analyze', label: 'מנתח הזדמנויות...', key: 'opportunities' },
       { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
       { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
       { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
@@ -196,14 +195,13 @@ export default function AppDashboardPage() {
       setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
 
-      // Refresh sidebar counts
       if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
         (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
       }
 
       toast({
         title: "הסריקה הושלמה בהצלחה!",
-        description: `נמצאו ${results.opportunities} הזדמנויות, ${results.leads} לידים ו-${results.competitors} מתחרים`,
+        description: `נמצאו ${results.leads} לידים ו-${results.competitors} מתחרים`,
       })
     } catch (error) {
       console.error("Error running scan:", error)
@@ -223,7 +221,7 @@ export default function AppDashboardPage() {
     const date = new Date(dateStr)
     const now = new Date()
     const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
-    
+
     if (diffMinutes < 1) return "עכשיו"
     if (diffMinutes < 60) return `לפני ${diffMinutes} דקות`
     const diffHours = Math.floor(diffMinutes / 60)
@@ -233,7 +231,6 @@ export default function AppDashboardPage() {
   }
 
   const kpiCards = [
-    { key: "opportunities", label: "הזדמנויות", icon: Lightbulb, href: "/app/opportunities", value: data?.opportunitiesCount || 0 },
     { key: "leads", label: "לידים", icon: Users, href: "/app/leads", value: data?.leadsCount || 0 },
     { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0 },
     { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0 },
@@ -280,6 +277,29 @@ export default function AppDashboardPage() {
         </div>
       )}
 
+      {/* Profile Summary Card */}
+      {data?.companyInfo && (
+        <Card className="border-primary/20">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">{data.companyInfo.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {data.companyInfo.industry}
+                  {data.companyInfo.city ? ` · ${data.companyInfo.city}` : ''}
+                </p>
+              </div>
+            </div>
+            <Link href="/app/profile">
+              <Button variant="outline" size="sm">ערוך פרופיל</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -293,11 +313,11 @@ export default function AppDashboardPage() {
               <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
             </div>
           )}
-          {(data?.opportunitiesCount || 0) > 0 && (
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={runFirstScan} 
+          {(data?.leadsCount || 0) > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runFirstScan}
               disabled={scanning || autoAnalyzing}
             >
               {scanning ? (
@@ -347,7 +367,7 @@ export default function AppDashboardPage() {
       </div>
 
       {/* Empty State or Data Sections */}
-      {data && (data.opportunitiesCount === 0 && data.leadsCount === 0) ? (
+      {data && (data.leadsCount === 0 && data.competitorsCount === 0) ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
@@ -375,36 +395,39 @@ export default function AppDashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Lightbulb className="h-5 w-5 text-primary" />
-                הזדמנויות מובילות
+                <Users className="h-5 w-5 text-primary" />
+                לידים מובילים
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {data?.topOpportunities && data.topOpportunities.length > 0 ? (
+              {data?.topLeads && data.topLeads.length > 0 ? (
                 <div className="space-y-3">
-                  {data.topOpportunities.map((opp, idx) => (
+                  {data.topLeads.map((lead, idx) => (
                     <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-sm font-bold text-primary">
-                          {opp.impact_score || 0}
+                          {lead.score || 0}
                         </div>
-                        <span className="text-sm font-medium">{opp.title}</span>
+                        <div>
+                          <span className="text-sm font-medium">{lead.name}</span>
+                          {lead.industry && <p className="text-xs text-muted-foreground">{lead.industry}</p>}
+                        </div>
                       </div>
                       <Badge variant="outline" className={
-                        opp.priority === "גבוהה" || opp.priority === "דחופה"
-                          ? "border-orange-200 text-orange-600" 
+                        (lead.score || 0) >= 80
+                          ? "border-green-200 text-green-600"
                           : "border-yellow-200 text-yellow-600"
                       }>
-                        {opp.priority || "בינונית"}
+                        {(lead.score || 0) >= 80 ? "חם" : "בינוני"}
                       </Badge>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-center text-sm text-muted-foreground py-4">אין הזדמנויות עדיין</p>
+                <p className="text-center text-sm text-muted-foreground py-4">אין לידים עדיין</p>
               )}
-              <Link href="/app/opportunities" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                צפה בכל ההזדמנויות
+              <Link href="/app/leads" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                צפה בכל הלידים
                 <ArrowLeft className="h-3.5 w-3.5" />
               </Link>
             </CardContent>
@@ -429,8 +452,8 @@ export default function AppDashboardPage() {
                           <p className="text-xs text-muted-foreground">{tender.organization}</p>
                         </div>
                         <Badge variant="outline" className={
-                          days <= 14 
-                            ? "border-red-200 text-red-600" 
+                          days <= 14
+                            ? "border-red-200 text-red-600"
                             : "border-green-200 text-green-600"
                         }>
                           {days > 0 ? `${days} ימים` : "היום"}

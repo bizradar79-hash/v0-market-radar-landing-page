@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Download, Calendar, FileText, TrendingUp, Users, Target, Lightbulb, Loader2 } from "lucide-react"
+import { Download, Calendar, FileText, TrendingUp, Users, Target, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Company {
@@ -16,15 +16,6 @@ interface Company {
   website: string
   city: string
   description: string
-}
-
-interface Opportunity {
-  title: string
-  impact_score: number
-  confidence_score: number
-  priority: string
-  description: string
-  actions: string[]
 }
 
 interface Competitor {
@@ -81,8 +72,7 @@ interface ReportData {
   weekRange: string
   generatedAt: string
   company: Company
-  highlights: { opportunities: number; competitors: number; leads: number; alerts: number }
-  opportunities: Opportunity[]
+  highlights: { tenders: number; competitors: number; leads: number; alerts: number }
   competitors: Competitor[]
   leads: Lead[]
   tenders: Tender[]
@@ -105,11 +95,10 @@ export default function ReportsPage() {
 
   async function fetchReportData() {
     const [
-      { count: opportunitiesCount },
+      { count: tendersCount },
       { count: competitorsCount },
       { count: leadsCount },
       { count: alertsCount },
-      { data: opps },
       { data: comps },
       { data: leads },
       { data: tenders },
@@ -118,11 +107,10 @@ export default function ReportsPage() {
       { data: conferences },
       { data: company },
     ] = await Promise.all([
-      supabase.from("opportunities").select("*", { count: "exact", head: true }),
+      supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
-      supabase.from("opportunities").select("title, impact_score, confidence_score, priority, description, actions").order("impact_score", { ascending: false }),
       supabase.from("competitors").select("name, website, services, threat_score, positioning").order("threat_score", { ascending: false }),
       supabase.from("leads").select("name, website, industry, score, reason, source").order("score", { ascending: false }),
       supabase.from("tenders").select("title, organization, deadline, budget, description, relevance_score").order("relevance_score", { ascending: false }),
@@ -140,7 +128,7 @@ export default function ReportsPage() {
     const recommendations: string[] = []
     if ((leadsCount || 0) > 0) recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
     if ((competitorsCount || 0) > 0) recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
-    if ((opportunitiesCount || 0) > 0) recommendations.push("לבחון את ההזדמנויות המובילות ולפעול בהתאם")
+    if ((tendersCount || 0) > 0) recommendations.push("לבחון את המכרזים הפתוחים ולפעול בהתאם")
     recommendations.push("להמשיך לעדכן את פרופיל החברה לתוצאות מדויקות יותר")
 
     setReportData({
@@ -154,12 +142,11 @@ export default function ReportsPage() {
         description: company?.description || "",
       },
       highlights: {
-        opportunities: opportunitiesCount || 0,
+        tenders: tendersCount || 0,
         competitors: competitorsCount || 0,
         leads: leadsCount || 0,
         alerts: alertsCount || 0,
       },
-      opportunities: opps || [],
       competitors: comps || [],
       leads: leads || [],
       tenders: tenders || [],
@@ -207,11 +194,7 @@ export default function ReportsPage() {
             .badge-green { background: #dcfce7; color: #166534; }
             .badge-yellow { background: #fef9c3; color: #92400e; }
             .badge-gray { background: #f3f4f6; color: #374151; }
-            .actions-list { margin: 6px 0 0 0; padding-right: 16px; }
-            .actions-list li { font-size: 12px; color: #4b5563; margin: 2px 0; }
             .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-            .score-bar { background: #e5e7eb; border-radius: 4px; height: 6px; margin-top: 4px; }
-            .score-fill { background: #3b82f6; border-radius: 4px; height: 6px; }
             .recommendations li { background: #eff6ff; padding: 12px; border-radius: 8px; margin: 8px 0; display: flex; align-items: flex-start; gap: 10px; }
             .rec-num { background: #3b82f6; color: white; min-width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
             @media print { body { padding: 15px; } h2 { page-break-before: auto; } }
@@ -235,26 +218,11 @@ export default function ReportsPage() {
 
           <h2>סיכום נתונים</h2>
           <div class="grid-4">
-            <div class="stat"><div class="stat-value">${reportData.highlights.opportunities}</div><div class="stat-label">הזדמנויות</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.tenders}</div><div class="stat-label">מכרזים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.competitors}</div><div class="stat-label">מתחרים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.leads}</div><div class="stat-label">לידים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.alerts}</div><div class="stat-label">התראות</div></div>
           </div>
-
-          ${reportData.opportunities.length > 0 ? `
-            <h2>הזדמנויות (${reportData.opportunities.length})</h2>
-            ${reportData.opportunities.map(o => `
-              <div class="item">
-                <div class="item-title">
-                  ${o.title}
-                  <span class="badge badge-blue">השפעה: ${o.impact_score}</span>
-                  <span class="badge ${o.priority === 'גבוהה' || o.priority === 'דחופה' ? 'badge-red' : 'badge-yellow'}">${o.priority || ''}</span>
-                </div>
-                ${o.description ? `<div class="item-desc">${o.description}</div>` : ''}
-                ${o.actions?.length ? `<ul class="actions-list">${o.actions.map(a => `<li>• ${a}</li>`).join('')}</ul>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
 
           ${reportData.competitors.length > 0 ? `
             <h2>מתחרים (${reportData.competitors.length})</h2>
@@ -427,9 +395,9 @@ export default function ReportsPage() {
           {/* Highlights */}
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="rounded-lg bg-primary/10 p-4 text-center">
-              <Lightbulb className="mx-auto mb-2 h-6 w-6 text-primary" />
-              <p className="text-2xl font-bold">{reportData.highlights.opportunities}</p>
-              <p className="text-sm text-muted-foreground">הזדמנויות</p>
+              <FileText className="mx-auto mb-2 h-6 w-6 text-primary" />
+              <p className="text-2xl font-bold">{reportData.highlights.tenders}</p>
+              <p className="text-sm text-muted-foreground">מכרזים</p>
             </div>
             <div className="rounded-lg bg-red-100 p-4 text-center">
               <Target className="mx-auto mb-2 h-6 w-6 text-red-600" />
@@ -448,27 +416,7 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Summary lists — show top 3 of each for the page preview */}
-          {reportData.opportunities.length > 0 && (
-            <div className="mb-6">
-              <h3 className="mb-3 text-base font-semibold">הזדמנויות מובילות</h3>
-              <div className="space-y-2">
-                {reportData.opportunities.slice(0, 3).map((opp, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-                    <div>
-                      <p className="font-medium text-sm">{opp.title}</p>
-                      <p className="text-xs text-muted-foreground line-clamp-1">{opp.description}</p>
-                    </div>
-                    <Badge variant="secondary">{opp.impact_score}/100</Badge>
-                  </div>
-                ))}
-                {reportData.opportunities.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.opportunities.length - 3} נוספות בדוח המלא</p>
-                )}
-              </div>
-            </div>
-          )}
-
+          {/* Competitors preview */}
           {reportData.competitors.length > 0 && (
             <div className="mb-6">
               <h3 className="mb-3 text-base font-semibold">מתחרים עיקריים</h3>
@@ -486,6 +434,27 @@ export default function ReportsPage() {
                 ))}
                 {reportData.competitors.length > 3 && (
                   <p className="text-xs text-muted-foreground text-center">+ {reportData.competitors.length - 3} נוספים בדוח המלא</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Leads preview */}
+          {reportData.leads.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-3 text-base font-semibold">לידים מובילים</h3>
+              <div className="space-y-2">
+                {reportData.leads.slice(0, 3).map((l, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+                    <div>
+                      <p className="font-medium text-sm">{l.name}</p>
+                      <p className="text-xs text-muted-foreground">{l.industry}</p>
+                    </div>
+                    <Badge variant="secondary">{l.score}/100</Badge>
+                  </div>
+                ))}
+                {reportData.leads.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.leads.length - 3} נוספים בדוח המלא</p>
                 )}
               </div>
             </div>

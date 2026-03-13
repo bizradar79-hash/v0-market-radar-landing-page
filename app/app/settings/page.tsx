@@ -353,7 +353,6 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-muted-foreground">התראות מודולים</h3>
                 {[
-                  { key: "opportunities", label: "הזדמנויות חדשות" },
                   { key: "competitors", label: "פעילות מתחרים" },
                   { key: "leads", label: "לידים חדשים" },
                   { key: "tenders", label: "מכרזים רלוונטיים" },
