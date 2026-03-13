@@ -10,7 +10,7 @@ export async function GET() {
   const companyName = ctx.company?.name || ''
   const city = ctx.company?.city || ''
   if (!companyName) {
-    return NextResponse.json({ error: 'No company name', rating: null, reviewCount: 0, reviews: [] })
+    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
   }
 
   // Try Google Places API first if key exists
@@ -37,7 +37,7 @@ export async function GET() {
               address: details.formatted_address || place.formatted_address || '',
               phone: details.formatted_phone_number || '',
               website: details.website || '',
-              reviews: (details.reviews || []).slice(0, 3).map((r: any) => ({
+              reviews: (details.reviews || []).map((r: any) => ({
                 author: r.author_name || '',
                 rating: r.rating || 0,
                 text: r.text || '',
@@ -53,13 +53,10 @@ export async function GET() {
     }
   }
 
-  // Serper fallback — extracts business info from knowledge graph / local results
+  // Serper fallback
   const serperKey = process.env.SERPER_API_KEY
   if (!serperKey) {
-    return NextResponse.json({
-      error: 'לא מוגדר מפתח Google Places API ולא Serper API',
-      rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '',
-    })
+    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
   }
 
   try {
@@ -73,43 +70,56 @@ export async function GET() {
     })
 
     if (!res.ok) {
-      return NextResponse.json({ error: 'Serper search failed', rating: null, reviewCount: 0, reviews: [] })
+      return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
     }
 
     const data = await res.json()
     const kg = data.knowledgeGraph || {}
     const local: any = (data.localResults || [])[0] || {}
 
-    // Extract rating
+    // Rating
     const rating: number | null = kg.rating ?? local.rating ?? null
 
-    // Extract review count
+    // Review count
     let reviewCount = 0
     if (typeof local.ratingCount === 'number') {
       reviewCount = local.ratingCount
     } else if (typeof kg.ratingCount === 'string') {
       reviewCount = parseInt(kg.ratingCount.replace(/\D/g, '')) || 0
+    } else if (typeof kg.ratingCount === 'number') {
+      reviewCount = kg.ratingCount
     }
 
-    // Extract address
+    // Address
     const address = local.address
       || kg.attributes?.['כתובת']
       || kg.attributes?.['Address']
       || ''
 
-    // Extract phone
+    // Phone
     const phone = local.phone
       || kg.attributes?.['טלפון']
       || kg.attributes?.['Phone']
       || ''
 
-    // Extract website
+    // Website
     const website = kg.website || local.website || ''
+
+    // Reviews — Serper knowledge graph occasionally includes review snippets
+    const rawReviews: any[] = Array.isArray(kg.reviews) ? kg.reviews : []
+    const reviews = rawReviews
+      .map((r: any) => ({
+        author: r.author || r.user || r.name || '',
+        rating: Number(r.rating) || 0,
+        text: r.snippet || r.text || r.review || '',
+        time: r.date || r.time || '',
+      }))
+      .filter((r) => r.text || r.author)
 
     return NextResponse.json({
       rating,
       reviewCount,
-      reviews: [], // Serper doesn't expose individual review text
+      reviews,
       address,
       phone,
       website,
@@ -117,6 +127,6 @@ export async function GET() {
     })
   } catch (e: any) {
     console.error('google-places serper fallback error:', e?.message)
-    return NextResponse.json({ error: e?.message, rating: null, reviewCount: 0, reviews: [] })
+    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
   }
 }
