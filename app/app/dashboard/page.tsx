@@ -27,6 +27,7 @@ interface CompanyInfo {
   name: string
   industry: string
   city: string
+  businessOverview: string
 }
 
 interface DashboardData {
@@ -76,7 +77,7 @@ export default function AppDashboardPage() {
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
       supabase.from("leads").select("name, score, industry").order("score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
-      supabase.from("companies").select("name, industry, city, last_analyzed").single(),
+      supabase.from("companies").select("name, industry, city, last_analyzed, business_overview").single(),
     ])
 
     setData({
@@ -92,6 +93,7 @@ export default function AppDashboardPage() {
         name: companyData.name || '',
         industry: companyData.industry || '',
         city: companyData.city || '',
+        businessOverview: companyData.business_overview || '',
       } : null,
     })
     setLoading(false)
@@ -208,9 +210,14 @@ export default function AppDashboardPage() {
                   {data.companyInfo.industry}
                   {data.companyInfo.city ? ` · ${data.companyInfo.city}` : ''}
                 </p>
+                {data.companyInfo.businessOverview && (
+                  <p className="text-xs text-muted-foreground mt-0.5 max-w-sm line-clamp-1">
+                    {data.companyInfo.businessOverview.split(/[.!?]/)[0].trim()}
+                  </p>
+                )}
               </div>
             </div>
-            <Link href="/app/profile">
+            <Link href="/app/settings">
               <Button variant="outline" size="sm">ערוך פרופיל</Button>
             </Link>
           </CardContent>
