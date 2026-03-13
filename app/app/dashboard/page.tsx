@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -46,9 +46,7 @@ export default function AppDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState("")
-  const [autoAnalyzing, setAutoAnalyzing] = useState(false)
   const [bothExhausted, setBothExhausted] = useState(false)
-  const hasAutoAnalyzed = useRef(false)
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -59,24 +57,6 @@ export default function AppDashboardPage() {
       .then(d => { if (d?.bothExhausted) setBothExhausted(true) })
       .catch(() => {})
   }, [])
-
-  useEffect(() => {
-    if (!data || loading || scanning || autoAnalyzing || hasAutoAnalyzed.current) return
-
-    const shouldAutoAnalyze = () => {
-      if (data.leadsCount === 0 && data.competitorsCount === 0) return false
-      if (!data.lastAnalyzed) return true
-      const lastAnalyzed = new Date(data.lastAnalyzed)
-      const now = new Date()
-      const diffHours = (now.getTime() - lastAnalyzed.getTime()) / (1000 * 60 * 60)
-      return diffHours >= 24
-    }
-
-    if (shouldAutoAnalyze()) {
-      hasAutoAnalyzed.current = true
-      runAutoAnalysis()
-    }
-  }, [data, loading])
 
   async function fetchDashboardData() {
     const [
@@ -117,57 +97,6 @@ export default function AppDashboardPage() {
     setLoading(false)
   }
 
-  async function runAutoAnalysis() {
-    setAutoAnalyzing(true)
-    const results = { competitors: 0, leads: 0, tenders: 0, trends: 0, news: 0, conferences: 0 }
-
-    const steps = [
-      { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
-      { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
-      { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
-      { api: '/api/generate-trends', label: 'מנתח טרנדים...', key: 'trends' },
-      { api: '/api/generate-news', label: 'אוסף חדשות...', key: 'news' },
-      { api: '/api/generate-conferences', label: 'מחפש כנסים...', key: 'conferences' },
-    ]
-
-    try {
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i]
-        setScanProgress(`${step.label} (${i + 1}/${steps.length})`)
-        try {
-          const res = await fetch(step.api, { method: 'POST' })
-          const data = await res.json()
-          results[step.key as keyof typeof results] = data.count || 0
-        } catch (e) {
-          console.error(`Error in ${step.api}:`, e)
-        }
-        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
-      }
-
-      setScanProgress("מעדכן נתונים...")
-      await fetchDashboardData()
-
-      if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
-        (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
-      }
-
-      toast({
-        title: "הניתוח הושלם בהצלחה!",
-        description: `נמצאו ${results.leads} לידים ו-${results.tenders} מכרזים`,
-      })
-    } catch (error) {
-      console.error("Error in auto analysis:", error)
-      toast({
-        title: "שגיאה בניתוח",
-        description: "חלק מהנתונים לא נטענו כראוי",
-        variant: "destructive",
-      })
-    } finally {
-      setAutoAnalyzing(false)
-      setScanProgress("")
-    }
-  }
-
   async function runFirstScan() {
     setScanning(true)
     const results = { competitors: 0, leads: 0, tenders: 0 }
@@ -195,9 +124,7 @@ export default function AppDashboardPage() {
       setScanProgress("מעדכן נתונים...")
       await fetchDashboardData()
 
-      if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
-        (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
-      }
+      ;(window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts?.()
 
       toast({
         title: "הסריקה הושלמה בהצלחה!",
@@ -267,16 +194,6 @@ export default function AppDashboardPage() {
         </div>
       )}
 
-      {/* Auto-analyzing banner */}
-      {autoAnalyzing && (
-        <div className="flex items-center justify-center gap-3 rounded-lg bg-primary/10 border border-primary/20 p-4">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          <span className="text-sm font-medium text-primary">
-            {scanProgress || "מנתח את השוק עבורך..."}
-          </span>
-        </div>
-      )}
-
       {/* Profile Summary Card */}
       {data?.companyInfo && (
         <Card className="border-primary/20">
@@ -318,7 +235,7 @@ export default function AppDashboardPage() {
               variant="outline"
               size="sm"
               onClick={runFirstScan}
-              disabled={scanning || autoAnalyzing}
+              disabled={scanning}
             >
               {scanning ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

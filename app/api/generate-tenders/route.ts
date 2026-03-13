@@ -102,10 +102,9 @@ ${items}
 Return array of ${results.length} objects: [{"tender_number":...,"deadline":...,"ministry":...,"is_specific":...}, ...]`
 
   try {
-    const raw = await analyzeWithAI(system, user)
-    const jsonMatch = raw.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return fallback
-    const parsed: any[] = JSON.parse(jsonMatch[0])
+    const prompt = `${system}\n\n${user}`
+    const parsed: any[] = await analyzeWithAI(prompt)
+    if (!Array.isArray(parsed)) return fallback
     return results.map((_, i) => {
       const item = parsed[i] || {}
       return {

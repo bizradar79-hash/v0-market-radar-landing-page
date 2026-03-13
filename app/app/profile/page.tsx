@@ -23,6 +23,11 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  ChevronDown,
+  ChevronUp,
+  Phone,
+  Globe,
+  MapPin,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -69,30 +74,48 @@ interface PlacesData {
   rating: number | null
   reviewCount: number
   reviews: Array<{ author: string; rating: number; text: string; time: string }>
+  address?: string
+  phone?: string
+  website?: string
+  source?: string
   message?: string
   error?: string
+}
+
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <div className="flex gap-0.5">
+      {[1, 2, 3, 4, 5].map(i => (
+        <Star
+          key={i}
+          className={`h-4 w-4 ${i <= Math.round(rating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`}
+        />
+      ))}
+    </div>
+  )
 }
 
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [generatingOverview, setGeneratingOverview] = useState(false)
   const [generatingSwot, setGeneratingSwot] = useState(false)
   const [loadingPlaces, setLoadingPlaces] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [newKeyword, setNewKeyword] = useState("")
 
   const [company, setCompany] = useState<CompanyData>({
     name: "", website: "", industry: "", city: "", size: "", description: "",
     keywords: [], geographic_area: [], target_customers: [],
   })
+  const [overview, setOverview] = useState<string>("")
   const [swot, setSwot] = useState<SwotData | null>(null)
   const [places, setPlaces] = useState<PlacesData | null>(null)
 
   const supabase = createClient()
   const { toast } = useToast()
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  useEffect(() => { loadData() }, [])
 
   async function loadData() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -100,7 +123,7 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('companies')
-      .select('name, website, industry, city, size, description, keywords, geographic_area, target_customers, swot')
+      .select('name, website, industry, city, size, description, keywords, geographic_area, target_customers, swot, business_overview')
       .eq('id', user.id)
       .single()
 
@@ -116,11 +139,58 @@ export default function ProfilePage() {
         geographic_area: data.geographic_area || [],
         target_customers: data.target_customers || [],
       })
-      if (data.swot && Object.keys(data.swot).length > 0) {
-        setSwot(data.swot as SwotData)
-      }
+      if (data.business_overview) setOverview(data.business_overview)
+      if (data.swot && Object.keys(data.swot).length > 0) setSwot(data.swot as SwotData)
     }
     setLoading(false)
+  }
+
+  async function generateOverview() {
+    setGeneratingOverview(true)
+    try {
+      const res = await fetch('/api/generate-overview', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setOverview(data.overview)
+        toast({ title: "הסקירה עודכנה בהצלחה" })
+      } else {
+        toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור סקירה", variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
+    } finally {
+      setGeneratingOverview(false)
+    }
+  }
+
+  async function generateSwot() {
+    setGeneratingSwot(true)
+    try {
+      const res = await fetch('/api/generate-swot', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setSwot(data.swot)
+        toast({ title: "ניתוח SWOT נוצר בהצלחה" })
+      } else {
+        toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור ניתוח", variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
+    } finally {
+      setGeneratingSwot(false)
+    }
+  }
+
+  async function loadPlaces() {
+    setLoadingPlaces(true)
+    try {
+      const res = await fetch('/api/google-places')
+      setPlaces(await res.json())
+    } catch {
+      setPlaces({ rating: null, reviewCount: 0, reviews: [], error: 'שגיאה בטעינת נתוני Google' })
+    } finally {
+      setLoadingPlaces(false)
+    }
   }
 
   async function saveProfile() {
@@ -148,45 +218,13 @@ export default function ProfilePage() {
       toast({ title: "שגיאה בשמירה", description: error.message, variant: "destructive" })
     } else {
       toast({ title: "הפרופיל נשמר בהצלחה" })
-    }
-  }
-
-  async function generateSwot() {
-    setGeneratingSwot(true)
-    try {
-      const res = await fetch('/api/generate-swot', { method: 'POST' })
-      const data = await res.json()
-      if (data.success) {
-        setSwot(data.swot)
-        toast({ title: "ניתוח SWOT נוצר בהצלחה" })
-      } else {
-        toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור ניתוח", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
-    } finally {
-      setGeneratingSwot(false)
-    }
-  }
-
-  async function loadPlaces() {
-    setLoadingPlaces(true)
-    try {
-      const res = await fetch('/api/google-places')
-      const data = await res.json()
-      setPlaces(data)
-    } catch {
-      setPlaces({ rating: null, reviewCount: 0, reviews: [], error: 'שגיאה בטעינת נתוני Google' })
-    } finally {
-      setLoadingPlaces(false)
+      setEditOpen(false)
     }
   }
 
   const toggleMultiSelect = (field: 'geographic_area' | 'target_customers', value: string) => {
     const current = company[field]
-    const updated = current.includes(value)
-      ? current.filter(v => v !== value)
-      : [...current, value]
+    const updated = current.includes(value) ? current.filter(v => v !== value) : [...current, value]
     setCompany({ ...company, [field]: updated })
   }
 
@@ -197,22 +235,7 @@ export default function ProfilePage() {
     }
   }
 
-  const removeKeyword = (kw: string) => {
-    setCompany({ ...company, keywords: company.keywords.filter(k => k !== kw) })
-  }
-
-  function StarRating({ rating }: { rating: number }) {
-    return (
-      <div className="flex gap-0.5">
-        {[1, 2, 3, 4, 5].map(i => (
-          <Star
-            key={i}
-            className={`h-4 w-4 ${i <= Math.round(rating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`}
-          />
-        ))}
-      </div>
-    )
-  }
+  const mapQuery = encodeURIComponent(`${company.name} ${company.city}`)
 
   if (loading) {
     return (
@@ -227,242 +250,164 @@ export default function ProfilePage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
-        <p className="text-muted-foreground">נתוני הפרופיל משמשים את כל מודולי המערכת לתוצאות מדויקות</p>
+        <p className="text-muted-foreground">סקירה ונוכחות גיאוגרפית של העסק</p>
       </div>
 
-      {/* Section 1: Company Form */}
+      {/* Section 1: Business Overview */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />
-            פרטי החברה
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Basic fields */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>שם החברה</Label>
-              <Input
-                value={company.name}
-                onChange={e => setCompany({ ...company, name: e.target.value })}
-                placeholder="שם החברה"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>אתר אינטרנט</Label>
-              <Input
-                value={company.website}
-                onChange={e => setCompany({ ...company, website: e.target.value })}
-                placeholder="https://example.co.il"
-                dir="ltr"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>תחום עיסוק</Label>
-              <Select value={company.industry} onValueChange={v => setCompany({ ...company, industry: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="בחר תחום" />
-                </SelectTrigger>
-                <SelectContent>
-                  {industries.map(ind => (
-                    <SelectItem key={ind} value={ind}>{ind}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>עיר</Label>
-              <Input
-                value={company.city}
-                onChange={e => setCompany({ ...company, city: e.target.value })}
-                placeholder="תל אביב"
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label>גודל חברה</Label>
-              <Select value={company.size} onValueChange={v => setCompany({ ...company, size: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="בחר גודל" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companySizes.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label>תיאור מוצרים / שירותים</Label>
-              <Textarea
-                value={company.description}
-                onChange={e => setCompany({ ...company, description: e.target.value })}
-                placeholder="תאר את המוצרים או השירותים שהחברה מציעה..."
-                className="min-h-[80px]"
-              />
-            </div>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              סקירת העסק
+            </CardTitle>
+            <Button onClick={generateOverview} disabled={generatingOverview} variant="outline" size="sm">
+              {generatingOverview
+                ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מייצר...</>
+                : <><RefreshCw className="ml-2 h-4 w-4" />עדכן סקירה</>
+              }
+            </Button>
           </div>
-
-          {/* Keywords */}
-          <div className="space-y-3">
-            <Label>מילות מפתח</Label>
-            <div className="flex gap-2">
-              <Input
-                value={newKeyword}
-                onChange={e => setNewKeyword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addKeyword()}
-                placeholder="הוסף מילת מפתח..."
-              />
-              <Button type="button" variant="outline" onClick={addKeyword} disabled={!newKeyword.trim()}>
-                <Plus className="h-4 w-4" />
+        </CardHeader>
+        <CardContent>
+          {overview ? (
+            <p className="text-foreground leading-relaxed">{overview}</p>
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <p className="text-sm text-muted-foreground">לחץ על "עדכן סקירה" לקבלת תיאור עסקי מ-AI</p>
+              <Button onClick={generateOverview} disabled={generatingOverview}>
+                {generatingOverview
+                  ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מייצר...</>
+                  : <><Sparkles className="ml-2 h-4 w-4" />צור סקירה עסקית</>
+                }
               </Button>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {company.keywords.map(kw => (
-                <Badge key={kw} variant="secondary" className="gap-1 py-1">
-                  {kw}
-                  <button onClick={() => removeKeyword(kw)}>
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
-              {company.keywords.length === 0 && (
-                <p className="text-sm text-muted-foreground">אין מילות מפתח</p>
-              )}
-            </div>
-          </div>
-
-          {/* Geographic Area */}
-          <div className="space-y-3">
-            <Label>אזור גיאוגרפי (ניתן לבחור כמה)</Label>
-            <div className="flex flex-wrap gap-2">
-              {geographicAreaOptions.map(area => (
-                <button
-                  key={area}
-                  type="button"
-                  onClick={() => toggleMultiSelect('geographic_area', area)}
-                  className={`rounded-full border px-3 py-1 text-sm transition-colors ${
-                    company.geographic_area.includes(area)
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/50'
-                  }`}
-                >
-                  {area}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Target Customers */}
-          <div className="space-y-3">
-            <Label>לקוחות יעד (ניתן לבחור כמה)</Label>
-            <div className="flex flex-wrap gap-2">
-              {targetCustomerOptions.map(tc => (
-                <button
-                  key={tc}
-                  type="button"
-                  onClick={() => toggleMultiSelect('target_customers', tc)}
-                  className={`rounded-full border px-3 py-1 text-sm transition-colors ${
-                    company.target_customers.includes(tc)
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/50'
-                  }`}
-                >
-                  {tc}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Button onClick={saveProfile} disabled={saving}>
-            {saving ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Save className="ml-2 h-4 w-4" />}
-            שמור פרופיל
-          </Button>
+          )}
         </CardContent>
       </Card>
 
-      {/* Section 2: Google Places */}
+      {/* Section 2: Geographic Presence */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Star className="h-5 w-5 text-yellow-500" />
-            דירוג Google
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-primary" />
+              נוכחות גיאוגרפית
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={loadPlaces} disabled={loadingPlaces}>
+              {loadingPlaces
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <><RefreshCw className="ml-1 h-4 w-4" />רענן</>
+              }
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
-          {!places ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm text-muted-foreground">טען את הדירוג והביקורות מ-Google</p>
+        <CardContent className="space-y-4">
+          {/* Google Maps embed */}
+          {company.city && (
+            <div className="overflow-hidden rounded-lg border">
+              <iframe
+                src={`https://maps.google.com/maps?q=${mapQuery}&t=&z=14&ie=UTF8&iwloc=&output=embed`}
+                className="h-64 w-full"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                title="מפה"
+              />
+            </div>
+          )}
+
+          {/* Load button if no places data */}
+          {!places && (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <p className="text-sm text-muted-foreground">טען דירוג Google וביקורות</p>
               <Button variant="outline" onClick={loadPlaces} disabled={loadingPlaces}>
-                {loadingPlaces ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <RefreshCw className="ml-2 h-4 w-4" />}
+                {loadingPlaces ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Star className="ml-2 h-4 w-4" />}
                 טען מ-Google
               </Button>
             </div>
-          ) : places.error && !places.rating ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm text-muted-foreground">
-                {places.error === 'GOOGLE_PLACES_API_KEY not set'
-                  ? 'מפתח GOOGLE_PLACES_API_KEY לא מוגדר בסביבה'
-                  : places.message || places.error}
-              </p>
-              <Button variant="outline" size="sm" onClick={loadPlaces} disabled={loadingPlaces}>
-                <RefreshCw className="ml-1 h-3.5 w-3.5" />
-                נסה שוב
-              </Button>
-            </div>
-          ) : (
+          )}
+
+          {/* Places data */}
+          {places && (
             <div className="space-y-4">
-              {/* Rating summary */}
-              <div className="flex items-center justify-between">
+              {/* Rating row */}
+              {places.rating ? (
                 <div className="flex items-center gap-3">
-                  {places.rating ? (
-                    <>
-                      <span className="text-3xl font-bold">{places.rating.toFixed(1)}</span>
-                      <div>
-                        <StarRating rating={places.rating} />
-                        <p className="text-xs text-muted-foreground mt-1">{places.reviewCount} ביקורות</p>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">{places.message || 'לא נמצאו נתונים'}</p>
-                  )}
+                  <span className="text-3xl font-bold">{places.rating.toFixed(1)}</span>
+                  <div>
+                    <StarRating rating={places.rating} />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {places.reviewCount} ביקורות
+                      {places.source === 'serper' && ' (Google)'}
+                    </p>
+                  </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={loadPlaces} disabled={loadingPlaces}>
-                  <RefreshCw className={`h-4 w-4 ${loadingPlaces ? 'animate-spin' : ''}`} />
-                </Button>
+              ) : places.error || places.message ? (
+                <p className="text-sm text-muted-foreground">{places.message || places.error}</p>
+              ) : null}
+
+              {/* Address / phone / website */}
+              <div className="grid gap-2 text-sm">
+                {places.address && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    <span>{places.address}</span>
+                  </div>
+                )}
+                {places.phone && (
+                  <div className="flex items-center gap-2 text-muted-foreground" dir="ltr">
+                    <Phone className="h-4 w-4 shrink-0" />
+                    <span>{places.phone}</span>
+                  </div>
+                )}
+                {places.website && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Globe className="h-4 w-4 shrink-0" />
+                    <a href={places.website} target="_blank" rel="noopener noreferrer"
+                       className="text-primary hover:underline truncate" dir="ltr">
+                      {places.website.replace(/^https?:\/\//, '')}
+                    </a>
+                  </div>
+                )}
               </div>
 
-              {/* Recent reviews */}
-              {places.reviews.length > 0 && (
+              {/* Reviews */}
+              {places.reviews && places.reviews.length > 0 && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium">ביקורות אחרונות</p>
                   {places.reviews.map((review, i) => (
                     <div key={i} className="rounded-lg border bg-muted/30 p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium">{review.author}</span>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-2">
                           <StarRating rating={review.rating} />
                           <span className="text-xs text-muted-foreground">{review.time}</span>
                         </div>
                       </div>
                       {review.text && (
-                        <p className="text-sm text-muted-foreground line-clamp-2">{review.text}</p>
+                        <p className="text-sm text-muted-foreground line-clamp-3">{review.text}</p>
                       )}
                     </div>
                   ))}
                 </div>
+              )}
+
+              {places.source === 'serper' && places.reviews?.length === 0 && places.rating && (
+                <p className="text-xs text-muted-foreground">
+                  לביקורות מפורטות נדרש Google Places API Key
+                </p>
               )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Section 3: SWOT Analysis */}
+      {/* Section 3: SWOT */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
+              <Building2 className="h-5 w-5 text-primary" />
               ניתוח SWOT
             </CardTitle>
             <Button onClick={generateSwot} disabled={generatingSwot} variant="outline" size="sm">
@@ -476,69 +421,54 @@ export default function ProfilePage() {
         <CardContent>
           {!swot ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">לחץ על "צור ניתוח AI" לקבלת ניתוח SWOT מותאם לעסק שלך</p>
+              <p className="text-sm text-muted-foreground">לחץ על "צור ניתוח AI" לקבלת ניתוח SWOT</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {/* Strengths */}
               <div className="rounded-lg border border-green-200 bg-green-50 p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-semibold text-green-800">
-                  <TrendingUp className="h-4 w-4" />
-                  חוזקות
+                  <TrendingUp className="h-4 w-4" />חוזקות
                 </h3>
                 <ul className="space-y-1.5">
                   {swot.strengths.map((s, i) => (
-                    <li key={i} className="text-sm text-green-700 flex items-start gap-2">
-                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
-                      {s}
+                    <li key={i} className="flex items-start gap-2 text-sm text-green-700">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{s}
                     </li>
                   ))}
                 </ul>
               </div>
-
-              {/* Weaknesses */}
               <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-semibold text-red-800">
-                  <TrendingDown className="h-4 w-4" />
-                  חולשות
+                  <TrendingDown className="h-4 w-4" />חולשות
                 </h3>
                 <ul className="space-y-1.5">
                   {swot.weaknesses.map((w, i) => (
-                    <li key={i} className="text-sm text-red-700 flex items-start gap-2">
-                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
-                      {w}
+                    <li key={i} className="flex items-start gap-2 text-sm text-red-700">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />{w}
                     </li>
                   ))}
                 </ul>
               </div>
-
-              {/* Opportunities */}
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-semibold text-blue-800">
-                  <Plus className="h-4 w-4" />
-                  הזדמנויות
+                  <Plus className="h-4 w-4" />הזדמנויות
                 </h3>
                 <ul className="space-y-1.5">
                   {swot.opportunities.map((o, i) => (
-                    <li key={i} className="text-sm text-blue-700 flex items-start gap-2">
-                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
-                      {o}
+                    <li key={i} className="flex items-start gap-2 text-sm text-blue-700">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />{o}
                     </li>
                   ))}
                 </ul>
               </div>
-
-              {/* Threats */}
               <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-semibold text-yellow-800">
-                  <Minus className="h-4 w-4" />
-                  איומים
+                  <Minus className="h-4 w-4" />איומים
                 </h3>
                 <ul className="space-y-1.5">
                   {swot.threats.map((t, i) => (
-                    <li key={i} className="text-sm text-yellow-800 flex items-start gap-2">
-                      <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-500" />
-                      {t}
+                    <li key={i} className="flex items-start gap-2 text-sm text-yellow-800">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-500" />{t}
                     </li>
                   ))}
                 </ul>
@@ -546,6 +476,117 @@ export default function ProfilePage() {
             </div>
           )}
         </CardContent>
+      </Card>
+
+      {/* Collapsible: Edit Profile */}
+      <Card>
+        <CardHeader
+          className="cursor-pointer select-none"
+          onClick={() => setEditOpen(!editOpen)}
+        >
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              עריכת פרופיל
+            </CardTitle>
+            {editOpen ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+          </div>
+        </CardHeader>
+
+        {editOpen && (
+          <CardContent className="space-y-6 border-t pt-6">
+            {/* Basic fields */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>שם החברה</Label>
+                <Input value={company.name} onChange={e => setCompany({ ...company, name: e.target.value })} placeholder="שם החברה" />
+              </div>
+              <div className="space-y-2">
+                <Label>אתר אינטרנט</Label>
+                <Input value={company.website} onChange={e => setCompany({ ...company, website: e.target.value })} placeholder="https://example.co.il" dir="ltr" />
+              </div>
+              <div className="space-y-2">
+                <Label>תחום עיסוק</Label>
+                <Select value={company.industry} onValueChange={v => setCompany({ ...company, industry: v })}>
+                  <SelectTrigger><SelectValue placeholder="בחר תחום" /></SelectTrigger>
+                  <SelectContent>
+                    {industries.map(ind => <SelectItem key={ind} value={ind}>{ind}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>עיר</Label>
+                <Input value={company.city} onChange={e => setCompany({ ...company, city: e.target.value })} placeholder="תל אביב" />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>גודל חברה</Label>
+                <Select value={company.size} onValueChange={v => setCompany({ ...company, size: v })}>
+                  <SelectTrigger><SelectValue placeholder="בחר גודל" /></SelectTrigger>
+                  <SelectContent>
+                    {companySizes.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>תיאור מוצרים / שירותים</Label>
+                <Textarea value={company.description} onChange={e => setCompany({ ...company, description: e.target.value })} placeholder="תאר את המוצרים או השירותים..." className="min-h-[80px]" />
+              </div>
+            </div>
+
+            {/* Keywords */}
+            <div className="space-y-3">
+              <Label>מילות מפתח</Label>
+              <div className="flex gap-2">
+                <Input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => e.key === 'Enter' && addKeyword()} placeholder="הוסף מילת מפתח..." />
+                <Button type="button" variant="outline" onClick={addKeyword} disabled={!newKeyword.trim()}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {company.keywords.map(kw => (
+                  <Badge key={kw} variant="secondary" className="gap-1 py-1">
+                    {kw}
+                    <button onClick={() => setCompany({ ...company, keywords: company.keywords.filter(k => k !== kw) })}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+                {company.keywords.length === 0 && <p className="text-sm text-muted-foreground">אין מילות מפתח</p>}
+              </div>
+            </div>
+
+            {/* Geographic Area */}
+            <div className="space-y-3">
+              <Label>אזור גיאוגרפי</Label>
+              <div className="flex flex-wrap gap-2">
+                {geographicAreaOptions.map(area => (
+                  <button key={area} type="button" onClick={() => toggleMultiSelect('geographic_area', area)}
+                    className={`rounded-full border px-3 py-1 text-sm transition-colors ${company.geographic_area.includes(area) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+                    {area}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Customers */}
+            <div className="space-y-3">
+              <Label>לקוחות יעד</Label>
+              <div className="flex flex-wrap gap-2">
+                {targetCustomerOptions.map(tc => (
+                  <button key={tc} type="button" onClick={() => toggleMultiSelect('target_customers', tc)}
+                    className={`rounded-full border px-3 py-1 text-sm transition-colors ${company.target_customers.includes(tc) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+                    {tc}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button onClick={saveProfile} disabled={saving}>
+              {saving ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Save className="ml-2 h-4 w-4" />}
+              שמור פרופיל
+            </Button>
+          </CardContent>
+        )}
       </Card>
     </div>
   )
