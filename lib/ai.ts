@@ -52,10 +52,10 @@ function is429(e: any): boolean {
   return status === 429 || status === 413 || msg.includes('[429') || msg.includes('[413')
 }
 
-async function callGroq(prompt: string): Promise<{ text: string; tokens: number }> {
+async function callGroq(prompt: string, model = GROQ_MODEL): Promise<{ text: string; tokens: number }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
   const result = await groq.chat.completions.create({
-    model: GROQ_MODEL,
+    model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: prompt },
@@ -83,11 +83,11 @@ async function callGemini(prompt: string): Promise<{ text: string; tokens: numbe
   }
 }
 
-export async function analyzeWithAI(prompt: string): Promise<any> {
+export async function analyzeWithAI(prompt: string, model?: string): Promise<any> {
   let groqErr: any
   // Try Groq with retry on TPM (up to 2 attempts, 20s apart)
   try {
-    const { text, tokens } = await callWithRetry(() => callGroq(prompt), 2)
+    const { text, tokens } = await callWithRetry(() => callGroq(prompt, model), 2)
     trackUsage('groq', tokens).catch(() => {})
     const extracted = extractJSON(text)
     if (!extracted) throw new Error(`Model did not return valid JSON. Raw: ${text.slice(0, 200)}`)

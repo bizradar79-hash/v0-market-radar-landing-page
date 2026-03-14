@@ -19,6 +19,7 @@ export async function POST() {
 
     steps.ai = 'starting'
     const list: any[] = await analyzeWithAI(
+      // compound-beta has built-in web search — finds real Israeli companies online
       `בהתבסס על הסקירה הבאה של עסק ישראלי: ${businessOverview}
 ואתר העסק: ${website}
 
@@ -30,7 +31,8 @@ export async function POST() {
 החזר JSON בלבד במבנה הזה:
 [{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
 
-CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
+CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`,
+      'compound-beta'
     )
 
     // Normalize — analyzeWithAI may return object or array
