@@ -27,10 +27,12 @@ export async function POST() {
 כלול רק יצרנים, מפעלים, או ספקים ישראליים מאותו תחום בדיוק.
 אסור לכלול: רשתות קמעונאיות, פארמקיות, חנויות, סופרמרקטים, מפיצים בלבד, iherb, amazon, eBay, Super-Pharm, סופר-פארם, שופרסל, רמי לוי.
 אם אינך בטוח באתר האינטרנט של חברה — השאר website ריק ("").
+עבור כל מתחרה: פרט את המוצרים/שירותים הספציפיים שלו (לא "ייצור תוספי תזונה" כללי).
+threat_score: מספר בין 10 ל-100 שמייצג רמת איום (100 = מתחרה ישיר גדול).
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]
 
-[{"name": "", "website": "", "services": "", "threat_score": 0, "type": "ישיר/עקיף"}]`
+[{"name": "", "website": "", "services": "", "threat_score": 75, "type": "ישיר/עקיף"}]`
     )
 
     steps.ai = {
@@ -87,7 +89,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
         website: c.website,
         services: c.services || c.type || '',
         pricing: '',
-        threat_score: typeof c.threat_score === 'number' ? c.threat_score : 70,
+        // Normalize score: Groq sometimes returns 1-10, convert to 0-100
+        threat_score: typeof c.threat_score === 'number'
+          ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
+          : 70,
         company_id: ctx.user.id,
       }))
     ).select()
