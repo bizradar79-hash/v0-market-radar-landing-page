@@ -21,14 +21,13 @@ export async function POST() {
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
 כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
-החזר את כל הטקסט בעברית בלבד — שמות שירותים, תיאורים, הכל בעברית.
 
 חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
 
 החזר JSON בלבד במבנה הזה:
 [{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
 
-CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
+CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
     steps.ai = { status: 'starting' }
 
