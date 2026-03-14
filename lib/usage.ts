@@ -4,8 +4,10 @@ const GROQ_DAILY_LIMIT = 100_000
 const GEMINI_DAILY_LIMIT = 1_000_000
 const TAVILY_MONTHLY_LIMIT = 1_000
 const SERPER_MONTHLY_LIMIT = 2_500
+const BRAVE_MONTHLY_LIMIT = 2_000
+// DuckDuckGo is free/unlimited — tracked for visibility only
 
-const SEARCH_PROVIDERS = new Set(['tavily', 'serper'])
+const SEARCH_PROVIDERS = new Set(['tavily', 'serper', 'brave', 'duckduckgo'])
 
 function getServiceClient() {
   return createServerClient(
@@ -38,11 +40,13 @@ export async function getUsageStats() {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const sinceMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-    // AI usage: last 24h
+    const searchProviders = ['tavily', 'serper', 'brave', 'duckduckgo']
+
+    // AI usage: last 24h (exclude search providers)
     const { data: aiData } = await sb
       .from('ai_usage')
       .select('provider, tokens, created_at')
-      .not('provider', 'in', '(tavily,serper)')
+      .not('provider', 'in', `(${searchProviders.join(',')})`)
       .gte('created_at', since24h)
       .order('created_at', { ascending: false })
       .limit(500)
@@ -51,7 +55,7 @@ export async function getUsageStats() {
     const { data: searchData } = await sb
       .from('ai_usage')
       .select('provider, created_at')
-      .in('provider', ['tavily', 'serper'])
+      .in('provider', searchProviders)
       .gte('created_at', sinceMonthStart)
 
     // Recent activity (all types, last 20)
@@ -68,6 +72,8 @@ export async function getUsageStats() {
     const geminiUsed = aiRows.filter(r => r.provider === 'gemini').reduce((s, r) => s + r.tokens, 0)
     const tavilyUsed = searchRows.filter(r => r.provider === 'tavily').length
     const serperUsed = searchRows.filter(r => r.provider === 'serper').length
+    const braveUsed = searchRows.filter(r => r.provider === 'brave').length
+    const ddgUsed = searchRows.filter(r => r.provider === 'duckduckgo').length
 
     return {
       groq: {
@@ -90,9 +96,23 @@ export async function getUsageStats() {
         limit: SERPER_MONTHLY_LIMIT,
         percent: Math.min(100, Math.round((serperUsed / SERPER_MONTHLY_LIMIT) * 100)),
       },
+      brave: {
+        used: braveUsed,
+        limit: BRAVE_MONTHLY_LIMIT,
+        percent: Math.min(100, Math.round((braveUsed / BRAVE_MONTHLY_LIMIT) * 100)),
+      },
+      duckduckgo: {
+        used: ddgUsed,
+        limit: null, // unlimited
+        percent: 0,
+      },
       bothExhausted: groqUsed >= GROQ_DAILY_LIMIT && geminiUsed >= GEMINI_DAILY_LIMIT,
       activeProvider: groqUsed < GROQ_DAILY_LIMIT ? 'groq' : geminiUsed < GEMINI_DAILY_LIMIT ? 'gemini' : 'none',
-      activeSearch: tavilyUsed < TAVILY_MONTHLY_LIMIT ? 'tavily' : serperUsed < SERPER_MONTHLY_LIMIT ? 'serper' : 'none',
+      activeSearch: tavilyUsed < TAVILY_MONTHLY_LIMIT ? 'tavily'
+        : ddgUsed >= 0 ? 'duckduckgo' // always available
+        : braveUsed < BRAVE_MONTHLY_LIMIT ? 'brave'
+        : serperUsed < SERPER_MONTHLY_LIMIT ? 'serper'
+        : 'none',
       recent: recentData || [],
     }
   } catch (e) {

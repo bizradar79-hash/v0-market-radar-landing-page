@@ -56,10 +56,62 @@ export async function GET() {
     }
   }
 
-  // Serper fallback
+  const emptyResult = { rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' }
+  const searchQuery = `${companyName} ${city}`.trim()
+
+  // Fallback 1: DuckDuckGo Infobox (free, no key)
+  try {
+    const ddgRes = await fetch(
+      `https://api.duckduckgo.com/?q=${encodeURIComponent(searchQuery)}&format=json&no_html=1&skip_disambig=1`,
+      { signal: AbortSignal.timeout(5000) }
+    )
+    if (ddgRes.ok) {
+      const d = await ddgRes.json()
+      const box: any[] = d.Infobox?.content || []
+      const get = (...labels: string[]) =>
+        box.find((c: any) => labels.some(l => c.label?.toLowerCase().includes(l)))?.value || ''
+      const address = get('address', 'כתובת', 'headquarters', 'location')
+      const phone = get('phone', 'טלפון', 'telephone')
+      const website = get('website', 'אתר', 'url') || d.AbstractURL || ''
+      if (address || phone || website) {
+        const result = { ...emptyResult, address, phone, website, source: 'duckduckgo' }
+        await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
+        return NextResponse.json(result)
+      }
+    }
+  } catch (e: any) {
+    console.warn('google-places DDG fallback error:', e?.message)
+  }
+
+  // Fallback 2: Brave Search (free 2000/month)
+  const braveKey = process.env.BRAVE_API_KEY
+  if (braveKey) {
+    try {
+      const braveRes = await fetch(
+        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}&count=5`,
+        {
+          headers: { 'X-Subscription-Token': braveKey, 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        }
+      )
+      if (braveRes.ok) {
+        const d = await braveRes.json()
+        const top = (d.web?.results || [])[0]
+        if (top?.url) {
+          const result = { ...emptyResult, website: top.url, source: 'brave' }
+          await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
+          return NextResponse.json(result)
+        }
+      }
+    } catch (e: any) {
+      console.warn('google-places Brave fallback error:', e?.message)
+    }
+  }
+
+  // Fallback 3: Serper (last resort — returns rating + reviews via Google KG)
   const serperKey = process.env.SERPER_API_KEY
   if (!serperKey) {
-    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
+    return NextResponse.json(emptyResult)
   }
 
   try {
@@ -69,11 +121,11 @@ export async function GET() {
         'X-API-KEY': serperKey,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ q: `${companyName} ${city}`, gl: 'il', hl: 'he', num: 5 }),
+      body: JSON.stringify({ q: searchQuery, gl: 'il', hl: 'he', num: 5 }),
     })
 
     if (!res.ok) {
-      return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
+      return NextResponse.json(emptyResult)
     }
 
     const data = await res.json()
@@ -117,6 +169,6 @@ export async function GET() {
     return NextResponse.json(result)
   } catch (e: any) {
     console.error('google-places serper fallback error:', e?.message)
-    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
+    return NextResponse.json(emptyResult)
   }
 }

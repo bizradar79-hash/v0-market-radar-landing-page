@@ -40,17 +40,63 @@ function extractDateFromText(text: string): string | null {
   return null
 }
 
-async function searchSerperFull(query: string): Promise<Array<{
-  title: string; url: string; snippet: string; date: string
-}>> {
+type TenderResult = { title: string; url: string; snippet: string; date: string }
+
+async function searchWeb(query: string): Promise<TenderResult[]> {
+  // 1. DuckDuckGo (free, no key)
+  try {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    if (res.ok) {
+      const data = await res.json()
+      const results: TenderResult[] = []
+      for (const topic of (data.RelatedTopics || [])) {
+        if (topic.FirstURL && topic.Text) {
+          results.push({ title: decodeEntities(topic.Text.slice(0, 120)), url: topic.FirstURL, snippet: decodeEntities(topic.Text), date: '' })
+        }
+        for (const sub of (topic.Topics || [])) {
+          if (sub.FirstURL && sub.Text) {
+            results.push({ title: decodeEntities(sub.Text.slice(0, 120)), url: sub.FirstURL, snippet: decodeEntities(sub.Text), date: '' })
+          }
+        }
+      }
+      if (results.length > 0) {
+        trackSearchUsage('duckduckgo').catch(() => {})
+        return results
+      }
+    }
+  } catch {}
+
+  // 2. Brave
+  if (process.env.BRAVE_API_KEY) {
+    try {
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10&country=il&search_lang=he`
+      const res = await fetch(url, {
+        headers: { 'X-Subscription-Token': process.env.BRAVE_API_KEY, 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const results: TenderResult[] = (data.web?.results || []).map((r: any) => ({
+          title: decodeEntities(r.title || ''),
+          url: r.url || '',
+          snippet: decodeEntities(r.description || ''),
+          date: r.age || '',
+        }))
+        if (results.length > 0) {
+          trackSearchUsage('brave').catch(() => {})
+          return results
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Serper (fallback)
   if (!process.env.SERPER_API_KEY) return []
   try {
     const res = await fetch('https://google.serper.dev/search', {
       method: 'POST',
-      headers: {
-        'X-API-KEY': process.env.SERPER_API_KEY,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'X-API-KEY': process.env.SERPER_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ q: query, gl: 'il', hl: 'he', num: 10 }),
     })
     if (!res.ok) return []
@@ -135,8 +181,8 @@ export async function POST() {
     const q1 = `"הזמנה להציע" OR "מכרז פומבי" ${products} ${year} gov.il -"למשרת" -"לתפקיד" -"דרושים"`
     const q2 = `"הזמנה להציע" OR "מכרז פומבי" ${industry} ${year} gov.il -"למשרת" -"לתפקיד" -"דרושים"`
     const [r1, r2] = await Promise.all([
-      searchSerperFull(q1),
-      searchSerperFull(q2),
+      searchWeb(q1),
+      searchWeb(q2),
     ])
 
     // Titles that must never appear
