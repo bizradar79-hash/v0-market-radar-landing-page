@@ -31,7 +31,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     steps.ai = { status: 'starting' }
 
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+    const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -39,15 +39,21 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       },
       body: JSON.stringify({
         model: 'grok-4-fast-non-reasoning',
-        messages: [{ role: 'user', content: prompt }],
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
       }),
     })
     const data = await response.json()
-    if (!response.ok || !data.choices?.[0]) {
+    if (!response.ok || !data.output) {
       steps.ai.error = data
       return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
     }
-    const text = data.choices[0].message.content
+    const text = data.output
+      .filter((item: any) => item.type === 'message')
+      .flatMap((item: any) => item.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('')
 
     // Strip markdown fences if present, then parse JSON
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
