@@ -24,8 +24,9 @@ export async function POST() {
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
 אל תכלול את החברה עצמה "${companyName}".
-כלול רק חברות ישראליות אמיתיות מאותו תחום בדיוק — אותו סוג ייצור, עיבוד, או אספקה.
-אל תכלול רשתות קמעונאיות, חנויות, סופרמרקטים, או מפיצים בלבד.
+כלול רק יצרנים, מפעלים, או ספקים ישראליים מאותו תחום בדיוק.
+אסור לכלול: רשתות קמעונאיות, פארמקיות, חנויות, סופרמרקטים, מפיצים בלבד, iherb, amazon, eBay, Super-Pharm, סופר-פארם, שופרסל, רמי לוי.
+אם אינך בטוח באתר האינטרנט של חברה — השאר website ריק ("").
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]
 
@@ -44,23 +45,29 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
-    // Blocklist: retailers, chains, supermarkets
+    // Blocklist: retailers, chains, pharmacies, supermarkets
     const RETAIL_BLOCKLIST = ['שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופרמרקט',
-      'רשת', 'חנות', 'amazon', 'ebay', 'iherb', 'aliexpress']
-    competitors = competitors.filter((c: any) =>
-      !RETAIL_BLOCKLIST.some(b => c.name?.includes(b) || c.website?.includes(b.toLowerCase()))
-    )
+      'רשת', 'חנות', 'super-pharm', 'סופר-פארם', 'super pharm', 'פארמקי', 'pharmacy',
+      'amazon', 'ebay', 'iherb', 'aliexpress', 'walgreens', 'boots']
+    competitors = competitors.filter((c: any) => {
+      const name = (c.name || '').toLowerCase()
+      const site = (c.website || '').toLowerCase()
+      return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()) || site.includes(b.toLowerCase()))
+    })
 
     // Deduplicate by domain
     competitors = deduplicateByDomain(competitors, 'website')
 
-    // Validate URLs to filter hallucinations
+    // Validate URLs — blank website if invalid (don't discard the competitor entirely)
     steps.validate = 'starting'
     const withValid = await Promise.all(
-      competitors.map(async (c: any) => ({ ...c, _valid: c.website ? await validateUrl(c.website) : false }))
+      competitors.map(async (c: any) => ({
+        ...c,
+        website: c.website && await validateUrl(c.website) ? c.website : '',
+      }))
     )
-    competitors = withValid.filter(c => c._valid).map(({ _valid, ...c }) => c)
-    steps.validate = { ok: true, kept: competitors.length }
+    competitors = withValid
+    steps.validate = { ok: true, withWebsite: competitors.filter(c => c.website).length, total: competitors.length }
 
     steps.db = 'starting'
     await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
