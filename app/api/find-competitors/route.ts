@@ -17,10 +17,7 @@ export async function POST() {
     const website = ctx.company?.website || ''
     const companyName = ctx.company?.name || ''
 
-    steps.ai = 'starting'
-    const list: any[] = await analyzeWithAI(
-      // compound-beta has built-in web search — finds real Israeli companies online
-      `בהתבסס על הסקירה הבאה של עסק ישראלי: ${businessOverview}
+    const prompt = `בהתבסס על הסקירה הבאה של עסק ישראלי: ${businessOverview}
 ואתר העסק: ${website}
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
@@ -32,9 +29,13 @@ export async function POST() {
 החזר JSON בלבד במבנה הזה:
 [{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
 
-CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`,
-      'compound-beta'
-    )
+CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
+
+    console.log('[find-competitors] PROMPT:\n', prompt)
+    steps.ai = 'starting'
+    steps.debug_prompt = prompt
+
+    const list: any[] = await analyzeWithAI(prompt, 'compound-beta')
 
     // Normalize — analyzeWithAI may return object or array
     let competitors: any[] = Array.isArray(list) ? list : (list as any)?.competitors || []

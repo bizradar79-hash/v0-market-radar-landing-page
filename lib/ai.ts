@@ -63,10 +63,9 @@ async function callGroq(prompt: string, model = GROQ_MODEL): Promise<{ text: str
     temperature: 0.2,
     max_tokens: 3000,
   })
-  return {
-    text: result.choices[0].message.content ?? '',
-    tokens: result.usage?.total_tokens ?? 0,
-  }
+  const text = result.choices[0].message.content ?? ''
+  console.log('[callGroq] RAW RESPONSE:\n', text)
+  return { text, tokens: result.usage?.total_tokens ?? 0 }
 }
 
 async function callGemini(prompt: string): Promise<{ text: string; tokens: number }> {
