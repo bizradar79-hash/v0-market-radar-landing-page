@@ -56,7 +56,7 @@ export async function POST() {
     const end = clean.lastIndexOf(']')
     let list: any[] = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
 
-    steps.ai = { ok: true, count: list.length }
+    steps.ai = { ok: true, count: list.length, raw_text: text.slice(0, 500) }
 
     // Filter: relevance_score >= 80
     list = list.filter((t: any) => (t.relevance_score ?? 100) >= 80)
