@@ -1,9 +1,40 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI, validateUrl } from '@/lib/ai'
+import { analyzeWithAI } from '@/lib/ai'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
+
+// DDG Instant Answer API — extract best URL for a company name
+async function findUrlWithDDG(name: string): Promise<string | null> {
+  try {
+    const query = encodeURIComponent(`${name} ישראל`)
+    const res = await fetch(
+      `https://api.duckduckgo.com/?q=${query}&format=json&no_html=1&skip_disambig=1`,
+      { signal: AbortSignal.timeout(5000) }
+    )
+    if (!res.ok) return null
+    const d = await res.json()
+
+    // 1. Infobox website field (company's own site — most accurate)
+    const box: any[] = d.Infobox?.content || []
+    const infoWebsite = box.find((c: any) =>
+      ['website', 'אתר', 'url'].some(l => c.label?.toLowerCase().includes(l))
+    )?.value || ''
+    if (infoWebsite?.startsWith('http')) return infoWebsite
+
+    // 2. AbstractURL (usually Wikipedia — confirms existence)
+    if (d.AbstractURL?.startsWith('http')) return d.AbstractURL
+
+    // 3. First related topic URL
+    const firstUrl = d.RelatedTopics?.[0]?.FirstURL
+    if (firstUrl?.startsWith('http')) return firstUrl
+
+    return null
+  } catch {
+    return null
+  }
+}
 
 export async function POST() {
   const steps: Record<string, any> = {}
@@ -23,39 +54,30 @@ export async function POST() {
 ואתר העסק: ${website}
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
-כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
+כלול רק חברות שאתה בטוח שקיימות בישראל.
 
 החזר JSON בלבד במבנה הזה:
-[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
+[{"name": "", "services": "", "threat_score": 0-100, "type": "ישיר/עקיף"}]
 
-חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
 אל תכלול את החברה עצמה "${companyName}".
 אסור לכלול: רשתות קמעונאיות, פארמקיות, חנויות, סופרמרקטים, מפיצים בלבד, iherb, amazon, eBay, Super-Pharm, סופר-פארם, שופרסל, רמי לוי.
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
     )
 
-    steps.ai = {
-      ok: true,
-      raw: Array.isArray(list) ? list.length : typeof list,
-      names: Array.isArray(list) ? list.map((c: any) => `${c.name} → ${c.website || 'NO URL'}`) : [],
-    }
-
     // Normalize — analyzeWithAI may return object or array
     let competitors: any[] = Array.isArray(list) ? list : (list as any)?.competitors || []
 
-    // Hard filter: drop any entry without a real http URL
-    competitors = competitors.filter((c: any) =>
-      typeof c.website === 'string' && c.website.startsWith('http')
-    )
-    steps.ai.afterUrlFilter = competitors.length
+    steps.ai = {
+      ok: true,
+      raw: competitors.length,
+      names: competitors.map((c: any) => c.name),
+    }
 
     // Filter out own company
-    competitors = competitors.filter((c: any) => {
-      const domain = extractDomain(c.website || '')
-      return domain !== ctx.companyDomain &&
-        !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
-    })
+    competitors = competitors.filter((c: any) =>
+      !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
+    )
 
     // Blocklist: known retailers, pharmacy chains, e-commerce
     const RETAIL_BLOCKLIST = [
@@ -64,38 +86,64 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
     ]
     competitors = competitors.filter((c: any) => {
       const name = (c.name || '').toLowerCase()
-      const site = (c.website || '').toLowerCase()
-      return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()) || site.includes(b.toLowerCase()))
+      return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()))
     })
 
-    // Deduplicate by domain
-    const seenDomains = new Set<string>()
+    // Deduplicate by name
+    const seenNames = new Set<string>()
     competitors = competitors.filter((c: any) => {
-      const domain = extractDomain(c.website)
-      if (!domain || seenDomains.has(domain)) return false
-      seenDomains.add(domain)
+      const key = (c.name || '').toLowerCase().trim()
+      if (!key || seenNames.has(key)) return false
+      seenNames.add(key)
       return true
     })
 
-    // Validate URLs — discard competitors whose URL doesn't resolve
-    steps.validate = 'starting'
-    const withValid = await Promise.all(
-      competitors.map(async (c: any) => ({ ...c, _valid: await validateUrl(c.website) }))
+    // DDG URL lookup — parallel for all competitors
+    steps.ddg = 'starting'
+    const withUrls = await Promise.all(
+      competitors.map(async (c: any) => {
+        const url = await findUrlWithDDG(c.name)
+        return { ...c, website: url || '' }
+      })
     )
-    competitors = withValid.filter(c => c._valid).map(({ _valid, ...c }) => c)
-    steps.validate = { ok: true, kept: competitors.length }
+
+    const withRealUrls = withUrls.filter(c => c.website)
+    const withoutUrls = withUrls.filter(c => !c.website)
+
+    steps.ddg = {
+      ok: true,
+      withUrl: withRealUrls.length,
+      withoutUrl: withoutUrls.length,
+      found: withRealUrls.map(c => `${c.name} → ${c.website}`),
+    }
+
+    // >= 3 real URLs → use only those (deduped by domain)
+    // < 3 → pad with unverified up to fill minimum of 3
+    let final: any[]
+    if (withRealUrls.length >= 3) {
+      const seenDomains = new Set<string>()
+      final = withRealUrls.filter((c: any) => {
+        const domain = extractDomain(c.website)
+        if (!domain || seenDomains.has(domain)) return false
+        seenDomains.add(domain)
+        return true
+      })
+    } else {
+      const needed = Math.max(0, 3 - withRealUrls.length)
+      final = [...withRealUrls, ...withoutUrls.slice(0, needed)]
+    }
 
     steps.db = 'starting'
     await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
 
-    if (competitors.length === 0) {
+    if (final.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
     }
 
     const { data: saved, error: insertError } = await ctx.supabase.from('competitors').insert(
-      competitors.map((c: any) => ({
+      final.map((c: any) => ({
         name: c.name,
-        website: c.website,
+        website: c.website || '',
         services: c.services || '',
         pricing: '',
         threat_score: typeof c.threat_score === 'number'
