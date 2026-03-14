@@ -43,6 +43,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       }
     )
     const data = await response.json()
+    steps.ai.gemini_status = response.status
+    steps.ai.gemini_raw = data
+    if (!response.ok || !data.candidates?.[0]) {
+      return NextResponse.json({ error: 'Gemini API error', steps }, { status: 500 })
+    }
     const text = data.candidates[0].content.parts[0].text
     steps.ai.raw_text = text
 
