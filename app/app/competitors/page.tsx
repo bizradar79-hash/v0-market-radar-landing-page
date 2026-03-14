@@ -109,58 +109,70 @@ type ModalTab = 'details' | 'ai' | 'traffic'
 function PanelContent({ panel, fallbackWebsite }: { panel: PanelData; fallbackWebsite: string }) {
   const websiteHref = panel.contact.website || fallbackWebsite
   const websiteUrl = websiteHref?.startsWith('http') ? websiteHref : websiteHref ? `https://${websiteHref}` : ''
+  const hasContact = panel.contact.address || panel.contact.phone || panel.contact.website
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-      {/* א. פרטי החברה */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">פרטי החברה</p>
-        {panel.contact.address && (
-          <div className="flex items-start gap-2 text-sm">
-            <MapPin className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-            <span>{panel.contact.address}</span>
+    <div className="space-y-0 divide-y divide-border">
+      {/* Row 1: פרטי החברה — website | phone | address horizontal */}
+      <div className="px-6 py-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">פרטי החברה</p>
+        {hasContact ? (
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+            {panel.contact.website && (
+              <a
+                href={websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-primary hover:underline"
+                dir="ltr"
+              >
+                <Globe className="h-4 w-4 shrink-0" />
+                {panel.contact.website.replace(/^https?:\/\//, '')}
+              </a>
+            )}
+            {panel.contact.phone && (
+              <div className="flex items-center gap-2 text-sm" dir="ltr">
+                <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span>{panel.contact.phone}</span>
+              </div>
+            )}
+            {panel.contact.address && (
+              <div className="flex items-center gap-2 text-sm">
+                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span>{panel.contact.address}</span>
+              </div>
+            )}
           </div>
-        )}
-        {panel.contact.phone && (
-          <div className="flex items-center gap-2 text-sm" dir="ltr">
-            <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{panel.contact.phone}</span>
-          </div>
-        )}
-        {panel.contact.website && (
-          <div className="flex items-center gap-2 text-sm">
-            <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <a href={websiteUrl} target="_blank" rel="noopener noreferrer"
-               className="text-primary hover:underline truncate" dir="ltr">
-              {panel.contact.website.replace(/^https?:\/\//, '')}
-            </a>
-          </div>
-        )}
-        {!panel.contact.address && !panel.contact.phone && !panel.contact.website && (
+        ) : (
           <p className="text-sm text-muted-foreground">לא נמצאו פרטי קשר</p>
         )}
       </div>
 
-      {/* ב. ניתוח AI */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח AI</p>
+      {/* Row 2: ניתוח AI — full width, light background */}
+      <div className="bg-muted/30 px-6 py-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח AI</p>
         {panel.aiSummary
           ? <p className="text-sm leading-relaxed">{panel.aiSummary}</p>
           : <p className="text-sm text-muted-foreground">לא זמין</p>
         }
       </div>
 
-      {/* ג. ניתוח תנועה + ד. קישור לאתר */}
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח תנועה</p>
-          <p className="text-sm">
-            {panel.monthlyVisits
-              ? <span className="font-semibold text-primary">~{panel.monthlyVisits} ביקורים חודשיים</span>
-              : <span className="text-muted-foreground">נתון לא זמין</span>
-            }
-          </p>
-        </div>
-        {websiteUrl && (
+      {/* Row 3: ניתוח תנועה — badge */}
+      <div className="px-6 py-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח תנועה</p>
+        {panel.monthlyVisits
+          ? (
+            <Badge variant="secondary" className="text-sm font-medium">
+              ~{panel.monthlyVisits} ביקורים חודשיים
+            </Badge>
+          )
+          : <span className="text-sm text-muted-foreground">נתון לא זמין</span>
+        }
+      </div>
+
+      {/* Row 4: בקר באתר — aligned right */}
+      {websiteUrl && (
+        <div className="flex justify-end px-6 py-3">
           <a
             href={websiteUrl}
             target="_blank"
@@ -170,8 +182,8 @@ function PanelContent({ panel, fallbackWebsite }: { panel: PanelData; fallbackWe
             <ExternalLink className="h-4 w-4" />
             בקר באתר
           </a>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -517,16 +529,16 @@ export default function CompetitorsPage() {
                   {expandedId === competitor.id && (
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={7} className="p-0 border-b">
-                        <div className="bg-muted/20 border-t px-5 py-4">
+                        <div className="border-t bg-background rounded-b-md overflow-hidden">
                           {loadingPanel === competitor.id ? (
-                            <div className="flex items-center gap-3 py-4 text-muted-foreground text-sm">
+                            <div className="flex items-center gap-3 px-6 py-5 text-muted-foreground text-sm">
                               <Loader2 className="h-4 w-4 animate-spin" />
                               טוען פרטי מתחרה...
                             </div>
                           ) : panelCache[competitor.id] ? (
                             <PanelContent panel={panelCache[competitor.id]} fallbackWebsite={competitor.website} />
                           ) : (
-                            <p className="text-sm text-muted-foreground py-2">לא ניתן לטעון פרטים</p>
+                            <p className="px-6 py-4 text-sm text-muted-foreground">לא ניתן לטעון פרטים</p>
                           )}
                         </div>
                       </TableCell>
