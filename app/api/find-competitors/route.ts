@@ -1,6 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeWithAI, validateUrl } from '@/lib/ai'
-import { deduplicateByField, extractDomain } from '@/lib/dedup'
+import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -23,26 +23,32 @@ export async function POST() {
 ואתר העסק: ${website}
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
+כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
+
+החזר JSON בלבד במבנה הזה:
+[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
+
+חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
 אל תכלול את החברה עצמה "${companyName}".
-כלול רק יצרנים, מפעלים, או ספקים ישראליים מאותו תחום בדיוק.
 אסור לכלול: רשתות קמעונאיות, פארמקיות, חנויות, סופרמרקטים, מפיצים בלבד, iherb, amazon, eBay, Super-Pharm, סופר-פארם, שופרסל, רמי לוי.
-אם אינך בטוח באתר האינטרנט של חברה — השאר website ריק ("").
-עבור כל מתחרה: פרט את המוצרים/שירותים הספציפיים שלו (לא "ייצור תוספי תזונה" כללי).
-threat_score: מספר בין 10 ל-100 שמייצג רמת איום (100 = מתחרה ישיר גדול).
 
-CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]
-
-[{"name": "", "website": "", "services": "", "threat_score": 75, "type": "ישיר/עקיף"}]`
+CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
     )
 
     steps.ai = {
       ok: true,
       raw: Array.isArray(list) ? list.length : typeof list,
-      names: Array.isArray(list) ? list.map((c: any) => c.name) : [],
+      names: Array.isArray(list) ? list.map((c: any) => `${c.name} → ${c.website || 'NO URL'}`) : [],
     }
 
     // Normalize — analyzeWithAI may return object or array
     let competitors: any[] = Array.isArray(list) ? list : (list as any)?.competitors || []
+
+    // Hard filter: drop any entry without a real http URL
+    competitors = competitors.filter((c: any) =>
+      typeof c.website === 'string' && c.website.startsWith('http')
+    )
+    steps.ai.afterUrlFilter = competitors.length
 
     // Filter out own company
     competitors = competitors.filter((c: any) => {
@@ -51,7 +57,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
-    // Blocklist: known retailers, pharmacy chains, e-commerce — exact names only
+    // Blocklist: known retailers, pharmacy chains, e-commerce
     const RETAIL_BLOCKLIST = [
       'שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופר-פארם', 'super-pharm',
       'amazon', 'ebay', 'iherb', 'aliexpress', 'walgreens', 'boots',
@@ -62,19 +68,22 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()) || site.includes(b.toLowerCase()))
     })
 
-    // Deduplicate by name (domain dedup drops entries with no website)
-    competitors = deduplicateByField(competitors, 'name')
+    // Deduplicate by domain
+    const seenDomains = new Set<string>()
+    competitors = competitors.filter((c: any) => {
+      const domain = extractDomain(c.website)
+      if (!domain || seenDomains.has(domain)) return false
+      seenDomains.add(domain)
+      return true
+    })
 
-    // Validate URLs — blank website if invalid (don't discard the competitor entirely)
+    // Validate URLs — discard competitors whose URL doesn't resolve
     steps.validate = 'starting'
     const withValid = await Promise.all(
-      competitors.map(async (c: any) => ({
-        ...c,
-        website: c.website && await validateUrl(c.website) ? c.website : '',
-      }))
+      competitors.map(async (c: any) => ({ ...c, _valid: await validateUrl(c.website) }))
     )
-    competitors = withValid
-    steps.validate = { ok: true, withWebsite: competitors.filter(c => c.website).length, total: competitors.length }
+    competitors = withValid.filter(c => c._valid).map(({ _valid, ...c }) => c)
+    steps.validate = { ok: true, kept: competitors.length }
 
     steps.db = 'starting'
     await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
@@ -87,9 +96,8 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       competitors.map((c: any) => ({
         name: c.name,
         website: c.website,
-        services: c.services || c.type || '',
+        services: c.services || '',
         pricing: '',
-        // Normalize score: Groq sometimes returns 1-10, convert to 0-100
         threat_score: typeof c.threat_score === 'number'
           ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
           : 70,
