@@ -33,7 +33,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
 [{"name": "", "website": "", "services": "", "threat_score": 0, "type": "ישיר/עקיף"}]`
     )
 
-    steps.ai = { ok: true, raw: Array.isArray(list) ? list.length : typeof list }
+    steps.ai = {
+      ok: true,
+      raw: Array.isArray(list) ? list.length : typeof list,
+      names: Array.isArray(list) ? list.map((c: any) => c.name) : [],
+    }
 
     // Normalize — analyzeWithAI may return object or array
     let competitors: any[] = Array.isArray(list) ? list : (list as any)?.competitors || []
@@ -45,10 +49,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
-    // Blocklist: retailers, chains, pharmacies, supermarkets
-    const RETAIL_BLOCKLIST = ['שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופרמרקט',
-      'רשת', 'חנות', 'super-pharm', 'סופר-פארם', 'super pharm', 'פארמקי', 'pharmacy',
-      'amazon', 'ebay', 'iherb', 'aliexpress', 'walgreens', 'boots']
+    // Blocklist: known retailers, pharmacy chains, e-commerce — exact names only
+    const RETAIL_BLOCKLIST = [
+      'שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופר-פארם', 'super-pharm',
+      'amazon', 'ebay', 'iherb', 'aliexpress', 'walgreens', 'boots',
+    ]
     competitors = competitors.filter((c: any) => {
       const name = (c.name || '').toLowerCase()
       const site = (c.website || '').toLowerCase()
