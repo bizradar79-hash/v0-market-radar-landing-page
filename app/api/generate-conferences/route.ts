@@ -21,6 +21,7 @@ export async function POST() {
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
 מצא 10 כנסים, תערוכות או אירועים מקצועיים רלוונטיים בישראל ב-2026.
 כלול רק אירועים אמיתיים עם תאריך עתידי.
+כלול רק כנסים ואירועים עתידיים — תאריך 2026 בלבד שטרם עברו.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
 [{"name": "", "date": "YYYY-MM-DD", "location": "", "website": "", "description": "", "category": ""}]`
@@ -60,6 +61,10 @@ export async function POST() {
 
     // Filter to 2025+ only
     list = list.filter((c: any) => c.date === null || isRecentYear(c.date || ''))
+
+    // Filter out past events
+    const today = new Date().toISOString().split('T')[0]
+    list = list.filter((c: any) => !c.date || c.date >= today)
 
     // Deduplicate by website
     const seenUrls = new Set<string>()
