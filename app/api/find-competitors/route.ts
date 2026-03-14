@@ -38,7 +38,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
         'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'grok-3-mini',
+        model: 'grok-beta',
         messages: [{ role: 'user', content: prompt }],
       }),
     })
