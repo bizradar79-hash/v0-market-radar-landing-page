@@ -15,8 +15,9 @@ async function fetchNews(businessOverview: string, days: number): Promise<any[]>
   const prompt = `בהתבסס על תחום העסק: ${businessOverview}
 מצא 10 חדשות עסקיות רלוונטיות ${windowLabel} הקשורות לתחום זה בישראל ובעולם.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
+לכל חדשה הוסף שדה region: 'ישראל' אם המקור הוא ישראלי, 'עולם' אם המקור הוא בינלאומי.
 החזר JSON בלבד:
-[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": ""}]`
+[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "region": "ישראל"}]`
 
   const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -98,7 +99,7 @@ export async function POST() {
         title: n.title || '',
         source: n.source || '',
         url: n.url || '',
-        category: '',
+        category: n.region === 'עולם' ? 'עולם' : 'ישראל',
         sentiment: 'neutral',
         summary: n.summary || '',
         company_id: ctx.user.id,

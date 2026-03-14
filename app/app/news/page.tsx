@@ -17,7 +17,7 @@ interface NewsItem {
   summary: string
   source: string
   url: string
-  category: string
+  category: string // stores region: 'ישראל' | 'עולם'
   sentiment: string
   published_at: string
   created_at: string
@@ -49,16 +49,6 @@ function getSentimentBadge(sentiment: string) {
   }
 }
 
-function getCategoryColor(category: string) {
-  const colors: Record<string, string> = {
-    "גיוסים": "bg-blue-100 text-blue-700",
-    "רגולציה": "bg-purple-100 text-purple-700",
-    "שותפויות": "bg-green-100 text-green-700",
-    "השקעות": "bg-yellow-100 text-yellow-700",
-    "מוצרים": "bg-cyan-100 text-cyan-700",
-  }
-  return colors[category] || "bg-gray-100 text-gray-700"
-}
 
 function formatTimeAgo(dateString: string) {
   const date = new Date(dateString)
@@ -157,47 +147,52 @@ export default function NewsPage() {
         </Button>
       </div>
 
-      {/* News Feed */}
-      <div className="space-y-4">
-        {news.map((item) => (
-          <Card key={item.id} className="transition-shadow hover:shadow-md">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <Badge className={getCategoryColor(item.category)}>
-                      {item.category}
-                    </Badge>
-                    {getSentimentBadge(item.sentiment)}
+      {/* News Feed — split by region */}
+      {[
+        { label: 'חדשות מישראל', items: news.filter(n => n.category === 'ישראל') },
+        { label: 'חדשות מהעולם', items: news.filter(n => n.category === 'עולם') },
+      ].map(({ label, items }) =>
+        items.length === 0 ? null : (
+          <div key={label} className="space-y-3">
+            <h2 className="text-lg font-semibold text-foreground border-b pb-2">{label}</h2>
+            {items.map((item) => (
+              <Card key={item.id} className="transition-shadow hover:shadow-md">
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        {getSentimentBadge(item.sentiment)}
+                      </div>
+
+                      <h3 className="mb-2 text-lg font-semibold text-foreground">
+                        {item.title}
+                      </h3>
+
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        {item.summary}
+                      </p>
+
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span className="font-medium">{item.source}</span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatTimeAgo(item.published_at)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <Button variant="ghost" size="icon" className="shrink-0" asChild>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </Button>
                   </div>
-                  
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">
-                    {item.title}
-                  </h3>
-                  
-                  <p className="mb-3 text-sm text-muted-foreground">
-                    {item.summary}
-                  </p>
-                  
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="font-medium">{item.source}</span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatTimeAgo(item.published_at)}
-                    </span>
-                  </div>
-                </div>
-                
-                <Button variant="ghost" size="icon" className="shrink-0" asChild>
-                  <a href={item.url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
+      )}
 
       {news.length === 0 && (
         <Card>
