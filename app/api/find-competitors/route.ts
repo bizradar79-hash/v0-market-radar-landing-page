@@ -1,6 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeWithAI, validateUrl } from '@/lib/ai'
-import { deduplicateByDomain, extractDomain } from '@/lib/dedup'
+import { deduplicateByField, extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -60,8 +60,8 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()) || site.includes(b.toLowerCase()))
     })
 
-    // Deduplicate by domain
-    competitors = deduplicateByDomain(competitors, 'website')
+    // Deduplicate by name (domain dedup drops entries with no website)
+    competitors = deduplicateByField(competitors, 'name')
 
     // Validate URLs — blank website if invalid (don't discard the competitor entirely)
     steps.validate = 'starting'
