@@ -30,6 +30,13 @@ export async function POST() {
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
 
+    // DEBUG: list available models
+    const modelsRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GOOGLE_GENERATIVE_AI_API_KEY}`
+    )
+    const modelsData = await modelsRes.json()
+    steps.available_models = (modelsData.models || []).map((m: any) => m.name)
+
     steps.ai = { status: 'starting' }
 
     const response = await fetch(
