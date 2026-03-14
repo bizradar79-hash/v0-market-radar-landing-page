@@ -5,35 +5,48 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-// DDG Instant Answer API — extract best URL for a company name
-async function findUrlWithDDG(name: string): Promise<string | null> {
+// DDG Instant Answer → Brave organic: find real URL for a competitor name
+async function findCompetitorUrl(name: string): Promise<string | null> {
+  const query = `${name} ישראל`
+
+  // 1. DuckDuckGo — good for Wikipedia-level companies
   try {
-    const query = encodeURIComponent(`${name} ישראל`)
     const res = await fetch(
-      `https://api.duckduckgo.com/?q=${query}&format=json&no_html=1&skip_disambig=1`,
+      `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
       { signal: AbortSignal.timeout(5000) }
     )
-    if (!res.ok) return null
-    const d = await res.json()
+    if (res.ok) {
+      const d = await res.json()
+      const box: any[] = d.Infobox?.content || []
+      const infoWebsite = box.find((c: any) =>
+        ['website', 'אתר', 'url'].some(l => c.label?.toLowerCase().includes(l))
+      )?.value || ''
+      if (infoWebsite?.startsWith('http')) return infoWebsite
+      if (d.AbstractURL?.startsWith('http')) return d.AbstractURL
+      const firstUrl = d.RelatedTopics?.[0]?.FirstURL
+      if (firstUrl?.startsWith('http')) return firstUrl
+    }
+  } catch {}
 
-    // 1. Infobox website field (company's own site — most accurate)
-    const box: any[] = d.Infobox?.content || []
-    const infoWebsite = box.find((c: any) =>
-      ['website', 'אתר', 'url'].some(l => c.label?.toLowerCase().includes(l))
-    )?.value || ''
-    if (infoWebsite?.startsWith('http')) return infoWebsite
-
-    // 2. AbstractURL (usually Wikipedia — confirms existence)
-    if (d.AbstractURL?.startsWith('http')) return d.AbstractURL
-
-    // 3. First related topic URL
-    const firstUrl = d.RelatedTopics?.[0]?.FirstURL
-    if (firstUrl?.startsWith('http')) return firstUrl
-
-    return null
-  } catch {
-    return null
+  // 2. Brave — good for Israeli B2B companies not on Wikipedia
+  if (process.env.BRAVE_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=3`,
+        {
+          headers: { 'X-Subscription-Token': process.env.BRAVE_API_KEY, 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        }
+      )
+      if (res.ok) {
+        const d = await res.json()
+        const url = (d.web?.results || [])[0]?.url
+        if (url?.startsWith('http')) return url
+      }
+    } catch {}
   }
+
+  return null
 }
 
 export async function POST() {
@@ -98,11 +111,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       return true
     })
 
-    // DDG URL lookup — parallel for all competitors
+    // DDG → Brave URL lookup — parallel for all competitors
     steps.ddg = 'starting'
     const withUrls = await Promise.all(
       competitors.map(async (c: any) => {
-        const url = await findUrlWithDDG(c.name)
+        const url = await findCompetitorUrl(c.name)
         return { ...c, website: url || '' }
       })
     )
