@@ -1,5 +1,4 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI } from '@/lib/ai'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
@@ -31,14 +30,29 @@ export async function POST() {
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
 
-    console.log('[find-competitors] PROMPT:\n', prompt)
     steps.ai = 'starting'
-    steps.debug_prompt = prompt
 
-    const list: any[] = await analyzeWithAI(prompt, 'compound-beta')
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    )
+    const data = await response.json()
+    const text = data.candidates[0].content.parts[0].text
+    steps.ai.raw_text = text
 
-    // Normalize — analyzeWithAI may return object or array
-    let competitors: any[] = Array.isArray(list) ? list : (list as any)?.competitors || []
+    // Strip markdown fences if present, then parse JSON
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const start = clean.indexOf('[')
+    const end = clean.lastIndexOf(']')
+    const list = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
+
+    let competitors: any[] = Array.isArray(list) ? list : []
 
     steps.ai = {
       ok: true,
@@ -46,7 +60,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       names: competitors.map((c: any) => `${c.name} → ${c.website || 'NO URL'}`),
     }
 
-    // Keep only entries where Groq provided a real URL
+    // Keep only entries where Gemini provided a real URL
     competitors = competitors.filter((c: any) =>
       typeof c.website === 'string' && c.website.startsWith('http')
     )
