@@ -16,11 +16,20 @@ export async function POST() {
 
     steps.search = 'starting'
     const { primaryKeywords, products, industry } = ctx.companyProfile
-    const results = await multiSearch([
+    // Use business_overview for richer, niche-specific queries
+    const overview = ctx.company?.business_overview || ''
+    const overviewTerms = overview ? overview.split(/[.!?]/)[0].slice(0, 100).trim() : ''
+    const searches: string[] = [
       `${primaryKeywords} מתחרים ישראל`,
       `${products} חברות ישראל ${industry}`,
       `${primaryKeywords} competitors Israel`,
-    ])
+    ]
+    if (overviewTerms) {
+      // Add production-level search to find manufacturers/suppliers, not just resellers
+      searches.push(`"יצרן" OR "מפעל" OR "ספק" ${industry} ישראל`)
+      searches.push(`${overviewTerms} מתחרים ישראל`)
+    }
+    const results = await multiSearch(searches)
     steps.search = { ok: true, count: results.length }
 
     const searchUrls = new Set(results.map(r => r.url))

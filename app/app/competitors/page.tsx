@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -51,6 +51,10 @@ import {
   Globe,
   Smartphone,
   Monitor,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  Phone,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -94,7 +98,83 @@ interface TrafficData {
   data_quality: string | null
 }
 
+interface PanelData {
+  contact: { address: string; phone: string; website: string }
+  aiSummary: string
+  monthlyVisits: string | null
+}
+
 type ModalTab = 'details' | 'ai' | 'traffic'
+
+function PanelContent({ panel, fallbackWebsite }: { panel: PanelData; fallbackWebsite: string }) {
+  const websiteHref = panel.contact.website || fallbackWebsite
+  const websiteUrl = websiteHref?.startsWith('http') ? websiteHref : websiteHref ? `https://${websiteHref}` : ''
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* א. פרטי החברה */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">פרטי החברה</p>
+        {panel.contact.address && (
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+            <span>{panel.contact.address}</span>
+          </div>
+        )}
+        {panel.contact.phone && (
+          <div className="flex items-center gap-2 text-sm" dir="ltr">
+            <Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>{panel.contact.phone}</span>
+          </div>
+        )}
+        {panel.contact.website && (
+          <div className="flex items-center gap-2 text-sm">
+            <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <a href={websiteUrl} target="_blank" rel="noopener noreferrer"
+               className="text-primary hover:underline truncate" dir="ltr">
+              {panel.contact.website.replace(/^https?:\/\//, '')}
+            </a>
+          </div>
+        )}
+        {!panel.contact.address && !panel.contact.phone && !panel.contact.website && (
+          <p className="text-sm text-muted-foreground">לא נמצאו פרטי קשר</p>
+        )}
+      </div>
+
+      {/* ב. ניתוח AI */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח AI</p>
+        {panel.aiSummary
+          ? <p className="text-sm leading-relaxed">{panel.aiSummary}</p>
+          : <p className="text-sm text-muted-foreground">לא זמין</p>
+        }
+      </div>
+
+      {/* ג. ניתוח תנועה + ד. קישור לאתר */}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">ניתוח תנועה</p>
+          <p className="text-sm">
+            {panel.monthlyVisits
+              ? <span className="font-semibold text-primary">~{panel.monthlyVisits} ביקורים חודשיים</span>
+              : <span className="text-muted-foreground">נתון לא זמין</span>
+            }
+          </p>
+        </div>
+        {websiteUrl && (
+          <a
+            href={websiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <ExternalLink className="h-4 w-4" />
+            בקר באתר
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
@@ -107,6 +187,10 @@ export default function CompetitorsPage() {
   const [activeTab, setActiveTab] = useState<ModalTab>('details')
   const [trafficData, setTrafficData] = useState<TrafficData | null>(null)
   const [loadingTraffic, setLoadingTraffic] = useState(false)
+  // Inline expand panel
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [loadingPanel, setLoadingPanel] = useState<string | null>(null)
+  const [panelCache, setPanelCache] = useState<Record<string, PanelData>>({})
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -217,6 +301,34 @@ export default function CompetitorsPage() {
     }
   }
 
+  async function togglePanel(competitor: Competitor) {
+    // Collapse if already open
+    if (expandedId === competitor.id) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(competitor.id)
+    // Return cached data if already fetched
+    if (panelCache[competitor.id]) return
+    // Fetch panel data
+    setLoadingPanel(competitor.id)
+    try {
+      const res = await fetch('/api/competitor-panel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitorName: competitor.name, competitorWebsite: competitor.website }),
+      })
+      const data = await res.json()
+      if (!data.error) {
+        setPanelCache(prev => ({ ...prev, [competitor.id]: data as PanelData }))
+      }
+    } catch {
+      // silent — panel shows empty state
+    } finally {
+      setLoadingPanel(null)
+    }
+  }
+
   const getTrendIcon = (trend: string) => {
     switch (trend) {
       case "up": return <TrendingUp className="h-4 w-4 text-red-600" />
@@ -316,12 +428,26 @@ export default function CompetitorsPage() {
               </TableHeader>
               <TableBody>
                 {competitors.map((competitor) => (
-                  <TableRow key={competitor.id}>
+                  <React.Fragment key={competitor.id}>
+                  <TableRow>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                          <Target className="h-4 w-4 text-primary" />
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => togglePanel(competitor)}
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                            expandedId === competitor.id
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:border-primary/60 hover:text-primary'
+                          }`}
+                          title="פרטים"
+                        >
+                          {loadingPanel === competitor.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : expandedId === competitor.id
+                              ? <ChevronUp className="h-3 w-3" />
+                              : <ChevronDown className="h-3 w-3" />
+                          }
+                        </button>
                         <span className="font-medium">{competitor.name}</span>
                       </div>
                     </TableCell>
@@ -386,6 +512,27 @@ export default function CompetitorsPage() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
+
+                  {/* Expandable detail panel */}
+                  {expandedId === competitor.id && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={7} className="p-0 border-b">
+                        <div className="bg-muted/20 border-t px-5 py-4">
+                          {loadingPanel === competitor.id ? (
+                            <div className="flex items-center gap-3 py-4 text-muted-foreground text-sm">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              טוען פרטי מתחרה...
+                            </div>
+                          ) : panelCache[competitor.id] ? (
+                            <PanelContent panel={panelCache[competitor.id]} fallbackWebsite={competitor.website} />
+                          ) : (
+                            <p className="text-sm text-muted-foreground py-2">לא ניתן לטעון פרטים</p>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>
