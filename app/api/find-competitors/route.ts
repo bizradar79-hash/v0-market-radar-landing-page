@@ -5,50 +5,6 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-// DDG Instant Answer → Brave organic: find real URL for a competitor name
-async function findCompetitorUrl(name: string): Promise<string | null> {
-  const query = `${name} ישראל`
-
-  // 1. DuckDuckGo — good for Wikipedia-level companies
-  try {
-    const res = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-      { signal: AbortSignal.timeout(5000) }
-    )
-    if (res.ok) {
-      const d = await res.json()
-      const box: any[] = d.Infobox?.content || []
-      const infoWebsite = box.find((c: any) =>
-        ['website', 'אתר', 'url'].some(l => c.label?.toLowerCase().includes(l))
-      )?.value || ''
-      if (infoWebsite?.startsWith('http')) return infoWebsite
-      if (d.AbstractURL?.startsWith('http')) return d.AbstractURL
-      const firstUrl = d.RelatedTopics?.[0]?.FirstURL
-      if (firstUrl?.startsWith('http')) return firstUrl
-    }
-  } catch {}
-
-  // 2. Brave — good for Israeli B2B companies not on Wikipedia
-  if (process.env.BRAVE_API_KEY) {
-    try {
-      const res = await fetch(
-        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=3`,
-        {
-          headers: { 'X-Subscription-Token': process.env.BRAVE_API_KEY, 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        }
-      )
-      if (res.ok) {
-        const d = await res.json()
-        const url = (d.web?.results || [])[0]?.url
-        if (url?.startsWith('http')) return url
-      }
-    } catch {}
-  }
-
-  return null
-}
-
 export async function POST() {
   const steps: Record<string, any> = {}
   try {
@@ -67,13 +23,12 @@ export async function POST() {
 ואתר העסק: ${website}
 
 תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
-כלול רק חברות שאתה בטוח שקיימות בישראל.
+כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
+
+חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
 
 החזר JSON בלבד במבנה הזה:
-[{"name": "", "services": "", "threat_score": 0-100, "type": "ישיר/עקיף"}]
-
-אל תכלול את החברה עצמה "${companyName}".
-אסור לכלול: רשתות קמעונאיות, פארמקיות, חנויות, סופרמרקטים, מפיצים בלבד, iherb, amazon, eBay, Super-Pharm, סופר-פארם, שופרסל, רמי לוי.
+[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanation. Start with [ and end with ]`
     )
@@ -84,13 +39,21 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
     steps.ai = {
       ok: true,
       raw: competitors.length,
-      names: competitors.map((c: any) => c.name),
+      names: competitors.map((c: any) => `${c.name} → ${c.website || 'NO URL'}`),
     }
 
-    // Filter out own company
+    // Keep only entries where Groq provided a real URL
     competitors = competitors.filter((c: any) =>
-      !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
+      typeof c.website === 'string' && c.website.startsWith('http')
     )
+    steps.ai.withUrl = competitors.length
+
+    // Filter out own company
+    competitors = competitors.filter((c: any) => {
+      const domain = extractDomain(c.website || '')
+      return domain !== ctx.companyDomain &&
+        !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
+    })
 
     // Blocklist: known retailers, pharmacy chains, e-commerce
     const RETAIL_BLOCKLIST = [
@@ -99,64 +62,30 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
     ]
     competitors = competitors.filter((c: any) => {
       const name = (c.name || '').toLowerCase()
-      return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()))
+      const site = (c.website || '').toLowerCase()
+      return !RETAIL_BLOCKLIST.some(b => name.includes(b.toLowerCase()) || site.includes(b.toLowerCase()))
     })
 
-    // Deduplicate by name
-    const seenNames = new Set<string>()
+    // Deduplicate by domain
+    const seenDomains = new Set<string>()
     competitors = competitors.filter((c: any) => {
-      const key = (c.name || '').toLowerCase().trim()
-      if (!key || seenNames.has(key)) return false
-      seenNames.add(key)
+      const domain = extractDomain(c.website)
+      if (!domain || seenDomains.has(domain)) return false
+      seenDomains.add(domain)
       return true
     })
-
-    // DDG → Brave URL lookup — parallel for all competitors
-    steps.ddg = 'starting'
-    const withUrls = await Promise.all(
-      competitors.map(async (c: any) => {
-        const url = await findCompetitorUrl(c.name)
-        return { ...c, website: url || '' }
-      })
-    )
-
-    const withRealUrls = withUrls.filter(c => c.website)
-    const withoutUrls = withUrls.filter(c => !c.website)
-
-    steps.ddg = {
-      ok: true,
-      withUrl: withRealUrls.length,
-      withoutUrl: withoutUrls.length,
-      found: withRealUrls.map(c => `${c.name} → ${c.website}`),
-    }
-
-    // >= 3 real URLs → use only those (deduped by domain)
-    // < 3 → pad with unverified up to fill minimum of 3
-    let final: any[]
-    if (withRealUrls.length >= 3) {
-      const seenDomains = new Set<string>()
-      final = withRealUrls.filter((c: any) => {
-        const domain = extractDomain(c.website)
-        if (!domain || seenDomains.has(domain)) return false
-        seenDomains.add(domain)
-        return true
-      })
-    } else {
-      const needed = Math.max(0, 3 - withRealUrls.length)
-      final = [...withRealUrls, ...withoutUrls.slice(0, needed)]
-    }
 
     steps.db = 'starting'
     await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
 
-    if (final.length === 0) {
+    if (competitors.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
     }
 
     const { data: saved, error: insertError } = await ctx.supabase.from('competitors').insert(
-      final.map((c: any) => ({
+      competitors.map((c: any) => ({
         name: c.name,
-        website: c.website || '',
+        website: c.website,
         services: c.services || '',
         pricing: '',
         threat_score: typeof c.threat_score === 'number'
