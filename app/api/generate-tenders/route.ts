@@ -20,9 +20,10 @@ export async function POST() {
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
 מצא 10 מכרזים ממשלתיים פתוחים בישראל הרלוונטיים לעסק זה.
 כלול רק מכרזים עם תאריך הגשה עתידי.
+לכל מכרז תן ציון רלוונטיות 0-100 לפי כמה הוא קשור לתחום העסק. כלול רק מכרזים עם ציון 80 ומעלה.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
-[{"title": "", "tender_number": "", "ministry": "", "deadline": "YYYY-MM-DD", "url": "", "description": ""}]`
+[{"title": "", "tender_number": "", "ministry": "", "deadline": "YYYY-MM-DD", "url": "", "description": "", "relevance_score": 0}]`
 
     steps.ai = { status: 'starting' }
     const response = await fetch('https://api.x.ai/v1/responses', {
@@ -57,6 +58,9 @@ export async function POST() {
 
     steps.ai = { ok: true, count: list.length }
 
+    // Filter: relevance_score >= 80
+    list = list.filter((t: any) => (t.relevance_score ?? 100) >= 80)
+
     // Filter: deadline >= today or null
     const today = new Date().toISOString().split('T')[0]
     list = list.filter((t: any) => !t.deadline || t.deadline >= today)
@@ -85,7 +89,7 @@ export async function POST() {
         budget: 'לא צוין',
         description: t.description || '',
         link: t.url || '',
-        relevance_score: 75,
+        relevance_score: typeof t.relevance_score === 'number' ? Math.min(100, t.relevance_score) : 75,
         company_id: ctx.user.id,
       }))
     ).select()
