@@ -56,10 +56,10 @@ export async function POST() {
     const end = clean.lastIndexOf(']')
     let list: any[] = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
 
-    steps.ai = { ok: true, count: list.length, raw_text: text.slice(0, 500) }
+    steps.ai = { ok: true, count: list.length }
 
     // Filter: relevance_score >= 80
-    list = list.filter((t: any) => (t.relevance_score ?? 100) >= 80)
+    list = list.filter((t: any) => (t.relevance_score ?? 0) >= 80)
 
     // Filter: deadline >= today or null
     const today = new Date().toISOString().split('T')[0]
@@ -78,7 +78,7 @@ export async function POST() {
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
     if (list.length === 0) {
-      return NextResponse.json({ success: true, tenders: [], count: 0, steps })
+      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים כרגע', steps })
     }
 
     const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
