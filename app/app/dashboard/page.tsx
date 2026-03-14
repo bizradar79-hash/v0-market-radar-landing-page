@@ -21,6 +21,8 @@ import {
   Loader2,
   RefreshCw,
   Building2,
+  Calendar,
+  Newspaper,
 } from "lucide-react"
 
 interface CompanyInfo {
@@ -36,6 +38,8 @@ interface DashboardData {
   competitorsCount: number
   trendsCount: number
   alertsCount: number
+  conferencesCount: number
+  newsCount: number
   topLeads: Array<{ name: string; score: number; industry: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
   lastAnalyzed: string | null
@@ -66,6 +70,8 @@ export default function AppDashboardPage() {
       { count: competitorsCount },
       { count: trendsCount },
       { count: alertsCount },
+      { count: conferencesCount },
+      { count: newsCount },
       { data: topLeads },
       { data: upcomingTenders },
       { data: companyData },
@@ -75,6 +81,8 @@ export default function AppDashboardPage() {
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
+      supabase.from("conferences").select("*", { count: "exact", head: true }),
+      supabase.from("news").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("name, score, industry").order("score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
       supabase.from("companies").select("name, industry, city, last_analyzed, business_overview").single(),
@@ -86,6 +94,8 @@ export default function AppDashboardPage() {
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
       alertsCount: alertsCount || 0,
+      conferencesCount: conferencesCount || 0,
+      newsCount: newsCount || 0,
       topLeads: topLeads || [],
       upcomingTenders: upcomingTenders || [],
       lastAnalyzed: companyData?.last_analyzed || null,
@@ -164,6 +174,8 @@ export default function AppDashboardPage() {
     { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0 },
     { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0 },
     { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0 },
+    { key: "conferences", label: "כנסים", icon: Calendar, href: "/app/conferences", value: data?.conferencesCount || 0 },
+    { key: "news", label: "חדשות", icon: Newspaper, href: "/app/news", value: data?.newsCount || 0 },
     { key: "alerts", label: "התראות חדשות", icon: Bell, href: "/app/alerts", value: data?.alertsCount || 0 },
   ]
 
