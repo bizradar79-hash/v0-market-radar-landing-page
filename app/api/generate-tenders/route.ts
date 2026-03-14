@@ -21,6 +21,7 @@ export async function POST() {
 מצא 10 מכרזים ממשלתיים פתוחים בישראל הרלוונטיים לעסק זה.
 כלול רק מכרזים עם תאריך הגשה עתידי.
 לכל מכרז תן ציון רלוונטיות 0-100 לפי כמה הוא קשור לתחום העסק.
+לכל מכרז חובה לכלול קישור ישיר לדף המכרז הספציפי (לא דף ראשי של אתר ולא דף חיפוש). אם אין קישור ישיר לדף המכרז — אל תכלול אותו.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
 [{"title": "", "tender_number": "", "ministry": "", "deadline": "YYYY-MM-DD", "url": "", "description": "", "relevance_score": 0}]`
@@ -74,10 +75,30 @@ export async function POST() {
       return true
     })
 
+    // Validate URLs: must return 200 with text/html Content-Type
+    steps.validate = 'starting'
+    const validated = await Promise.all(
+      list.map(async (t: any) => {
+        try {
+          const res = await fetch(t.url, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(5000),
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+          })
+          const ct = res.headers.get('content-type') || ''
+          return res.ok && ct.includes('text/html') ? t : null
+        } catch {
+          return null
+        }
+      })
+    )
+    list = validated.filter(Boolean)
+    steps.validate = { ok: true, kept: list.length }
+
     steps.db = 'starting'
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
-    if (list.length === 0) {
+    if (list.length < 3) {
       return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים כרגע', steps })
     }
 
