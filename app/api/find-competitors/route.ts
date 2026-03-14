@@ -32,24 +32,23 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
 
     steps.ai = { status: 'starting' }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GOOGLE_GENERATIVE_AI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    )
+    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-3-mini',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
     const data = await response.json()
-    steps.ai.gemini_status = response.status
-    steps.ai.gemini_raw = data
-    if (!response.ok || !data.candidates?.[0]) {
-      return NextResponse.json({ error: 'Gemini API error', steps }, { status: 500 })
+    if (!response.ok || !data.choices?.[0]) {
+      steps.ai.error = data
+      return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
     }
-    const text = data.candidates[0].content.parts[0].text
-    steps.ai.raw_text = text
+    const text = data.choices[0].message.content
 
     // Strip markdown fences if present, then parse JSON
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
@@ -65,7 +64,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no code blocks, no explanat
       names: competitors.map((c: any) => `${c.name} → ${c.website || 'NO URL'}`),
     }
 
-    // Keep only entries where Gemini provided a real URL
+    // Keep only entries where xAI provided a real URL
     competitors = competitors.filter((c: any) =>
       typeof c.website === 'string' && c.website.startsWith('http')
     )
