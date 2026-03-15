@@ -7,6 +7,27 @@ function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
+// Known Israeli TLD patterns and tender portal domains
+const IL_DOMAINS = [
+  '.gov.il', '.org.il', '.co.il', '.ac.il', '.net.il', '.muni.il',
+  'mr.gov.il', 'buyingregulations.gov.il', 'tenders.il',
+]
+
+function isIsraeliTenderUrl(url: string): boolean {
+  try {
+    const { hostname, pathname } = new URL(url)
+    // Must be Israeli domain
+    const isIL = IL_DOMAINS.some(d => hostname.endsWith(d)) || hostname.endsWith('.il')
+    if (!isIL) return false
+    // Must have a real path (not just homepage / search root)
+    const path = pathname.replace(/\/$/, '')
+    if (!path || path === '') return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function POST() {
   const steps: Record<string, any> = {}
   try {
@@ -18,10 +39,10 @@ export async function POST() {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 מכרזים ממשלתיים פתוחים בישראל הרלוונטיים לעסק זה.
+מצא 10 מכרזים ממשלתיים פתוחים בישראל בלבד. אל תכלול מכרזים בינלאומיים או מאתרים כמו globaltenders.com.
 כלול רק מכרזים עם תאריך הגשה עתידי.
 לכל מכרז תן ציון רלוונטיות 0-100 לפי כמה הוא קשור לתחום העסק.
-לכל מכרז חובה לכלול קישור ישיר לדף המכרז הספציפי (לא דף ראשי של אתר ולא דף חיפוש).
+לכל מכרז חובה לכלול קישור ישיר לדף המכרז הספציפי (לא דף ראשי של אתר ולא דף חיפוש) — הקישור חייב להיות מדומיין .gov.il, .org.il, .co.il או דומיין ישראלי אחר.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
 [{"title": "", "tender_number": "", "ministry": "", "deadline": "YYYY-MM-DD", "url": "", "description": "", "relevance_score": 0}]`
@@ -65,6 +86,11 @@ export async function POST() {
     // Filter: deadline >= today or null
     const today = new Date().toISOString().split('T')[0]
     list = list.filter((t: any) => !t.deadline || t.deadline >= today)
+
+    // Filter: Israeli domain only + must have a real path (not a homepage/search root)
+    const beforeDomainFilter = list.length
+    list = list.filter((t: any) => isIsraeliTenderUrl(t.url || ''))
+    steps.ai.domainFiltered = beforeDomainFilter - list.length
 
     // Deduplicate by url
     const seenUrls = new Set<string>()
