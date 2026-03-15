@@ -104,7 +104,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     const end = clean.lastIndexOf(']')
     let list: any[] = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
 
-    steps.ai = { ok: true, raw: list.length, titles: list.map((t: any) => t.title) }
+    steps.ai = { ok: true, raw: list.length, rawText: text.slice(0, 600), titles: list.map((t: any) => t.title) }
 
     // 1. Filter: relevance_score >= 75
     list = list.filter((t: any) => (t.relevance_score ?? 0) >= 75)
