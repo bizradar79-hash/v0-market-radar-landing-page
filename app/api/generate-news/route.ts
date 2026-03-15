@@ -14,10 +14,11 @@ async function fetchNews(businessOverview: string, days: number): Promise<any[]>
   const windowLabel = WINDOW_LABELS[days] ?? `מ-${days} הימים האחרונים`
   const prompt = `בהתבסס על תחום העסק: ${businessOverview}
 מצא 10 חדשות עסקיות רלוונטיות ${windowLabel} הקשורות לתחום זה בישראל ובעולם.
-חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
+לכל חדשה תן ציון רלוונטיות 0-100 לפי כמה היא קשורה לתחום העסק הספציפי.
 לכל חדשה הוסף שדה region: 'ישראל' אם המקור הוא ישראלי, 'עולם' אם המקור הוא בינלאומי.
+חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
-[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "region": "ישראל"}]`
+[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "region": "ישראל", "relevance_score": 0}]`
 
   const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -77,6 +78,9 @@ export async function POST() {
     }
 
     steps.ai = { ok: true, count: list.length }
+
+    // Filter: relevance_score >= 70
+    list = list.filter((n: any) => (n.relevance_score ?? 0) >= 70)
 
     // Deduplicate by url
     const seenUrls = new Set<string>()
