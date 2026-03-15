@@ -7,19 +7,18 @@ function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
-// Known Israeli TLD patterns and tender portal domains
-const IL_DOMAINS = [
-  '.gov.il', '.org.il', '.co.il', '.ac.il', '.net.il', '.muni.il',
-  'mr.gov.il', 'buyingregulations.gov.il', 'tenders.il',
-]
-
-function isIsraeliTenderUrl(url: string): boolean {
+function isValidTenderUrl(url: string): boolean {
   try {
     const { hostname, pathname } = new URL(url)
-    // Must be Israeli domain
-    const isIL = IL_DOMAINS.some(d => hostname.endsWith(d)) || hostname.endsWith('.il')
+    // Must be Israeli gov or org domain
+    const isIL = hostname.endsWith('.gov.il') || hostname.endsWith('.org.il') ||
+                 hostname.endsWith('.co.il') || hostname.endsWith('.ac.il') ||
+                 hostname.endsWith('.muni.il')
     if (!isIL) return false
-    // Must have a real path (not just homepage / search root)
+    // Must not be a PDF or Word doc
+    const lower = pathname.toLowerCase()
+    if (lower.endsWith('.pdf') || lower.endsWith('.doc') || lower.endsWith('.docx')) return false
+    // Must have a real path (not just homepage)
     const path = pathname.replace(/\/$/, '')
     if (!path || path === '') return false
     return true
@@ -37,15 +36,42 @@ export async function POST() {
     steps.context = { ok: true, company: ctx.company?.name }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
+    const keywords = (ctx.companyProfile?.keywords || []).join(', ')
+    const industry = ctx.companyProfile?.industry || ''
 
-    const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 מכרזים ממשלתיים פתוחים בישראל בלבד. אל תכלול מכרזים בינלאומיים או מאתרים כמו globaltenders.com.
-כלול רק מכרזים עם תאריך הגשה עתידי.
-לכל מכרז תן ציון רלוונטיות 0-100 לפי כמה הוא קשור לתחום העסק.
-לכל מכרז חובה לכלול קישור ישיר לדף המכרז הספציפי (לא דף ראשי של אתר ולא דף חיפוש) — הקישור חייב להיות מדומיין .gov.il, .org.il, .co.il או דומיין ישראלי אחר.
-חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
+    const today = new Date().toISOString().split('T')[0]
+
+    const prompt = `אתה מומחה למכרזים ממשלתיים בישראל.
+
+פרטי העסק:
+- תיאור: ${businessOverview}
+- מילות מפתח: ${keywords}
+- תחום: ${industry}
+
+חפש מכרזים ממשלתיים פתוחים בישראל שרלוונטיים לעסק זה.
+חפש באתרים: mr.gov.il, gov.il, mof.gov.il, health.gov.il ואתרים ממשלתיים אחרים.
+
+דרישות קריטיות לכל מכרז:
+- תאריך הגשה חייב להיות בעתיד (אחרי ${today})
+- הקישור חייב להיות לדף HTML של המכרז הספציפי — לא PDF, לא דף ראשי
+- מספר מכרז אמיתי (פורמט: XXXX/XXXX או דומה)
+- שם משרד/גוף ממשלתי אמיתי
+
+לכל מכרז תן relevance_score 0-100 לפי רלוונטיות לתחום העסק.
+
 החזר JSON בלבד:
-[{"title": "", "tender_number": "", "ministry": "", "deadline": "YYYY-MM-DD", "url": "", "description": "", "relevance_score": 0}]`
+[{
+  "title": "",
+  "tender_number": "",
+  "ministry": "",
+  "deadline": "YYYY-MM-DD",
+  "publish_date": "YYYY-MM-DD",
+  "url": "",
+  "description": "",
+  "relevance_score": 0
+}]
+
+CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
     steps.ai = { status: 'starting' }
     const response = await fetch('https://api.x.ai/v1/responses', {
@@ -62,9 +88,10 @@ export async function POST() {
     })
     const data = await response.json()
     if (!response.ok || !data.output) {
-      steps.ai.error = data
+      steps.ai = { error: data }
       return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
     }
+
     const text = data.output
       .filter((item: any) => item.type === 'message')
       .flatMap((item: any) => item.content)
@@ -72,27 +99,26 @@ export async function POST() {
       .map((c: any) => c.text)
       .join('')
 
-    // Strip markdown fences, parse JSON array
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const start = clean.indexOf('[')
     const end = clean.lastIndexOf(']')
     let list: any[] = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
 
-    steps.ai = { ok: true, count: list.length }
+    steps.ai = { ok: true, raw: list.length, titles: list.map((t: any) => t.title) }
 
-    // Filter: relevance_score >= 80
-    list = list.filter((t: any) => (t.relevance_score ?? 0) >= 80)
+    // 1. Filter: relevance_score >= 75
+    list = list.filter((t: any) => (t.relevance_score ?? 0) >= 75)
+    steps.afterRelevance = list.length
 
-    // Filter: deadline >= today or null
-    const today = new Date().toISOString().split('T')[0]
-    list = list.filter((t: any) => !t.deadline || t.deadline >= today)
+    // 2. Filter: deadline in the future
+    list = list.filter((t: any) => !t.deadline || t.deadline > today)
+    steps.afterDeadline = list.length
 
-    // Filter: Israeli domain only + must have a real path (not a homepage/search root)
-    const beforeDomainFilter = list.length
-    list = list.filter((t: any) => isIsraeliTenderUrl(t.url || ''))
-    steps.ai.domainFiltered = beforeDomainFilter - list.length
+    // 3. Filter: must be Israeli .gov.il / .org.il HTML page (no PDFs)
+    list = list.filter((t: any) => isValidTenderUrl(t.url || ''))
+    steps.afterUrl = list.length
 
-    // Deduplicate by url
+    // 4. Deduplicate by URL
     const seenUrls = new Set<string>()
     list = list.filter((t: any) => {
       const url = (t.url || '').toLowerCase()
@@ -100,32 +126,19 @@ export async function POST() {
       seenUrls.add(url)
       return true
     })
-
-    // Validate URLs: must return 200 with text/html Content-Type
-    steps.validate = 'starting'
-    const validated = await Promise.all(
-      list.map(async (t: any) => {
-        try {
-          const res = await fetch(t.url, {
-            method: 'HEAD',
-            signal: AbortSignal.timeout(5000),
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-          })
-          const ct = res.headers.get('content-type') || ''
-          return res.ok && ct.includes('text/html') ? t : null
-        } catch {
-          return null
-        }
-      })
-    )
-    list = validated.filter(Boolean)
-    steps.validate = { ok: true, kept: list.length }
+    steps.afterDedup = list.length
 
     steps.db = 'starting'
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
-    if (list.length < 3) {
-      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים כרגע', steps })
+    if (list.length === 0) {
+      return NextResponse.json({
+        success: true,
+        tenders: [],
+        count: 0,
+        message: 'לא נמצאו מכרזים רלוונטיים',
+        steps,
+      })
     }
 
     const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
