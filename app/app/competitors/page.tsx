@@ -94,6 +94,13 @@ export default function CompetitorsPage() {
   const [showModal, setShowModal] = useState(false)
   const [activeTab, setActiveTab] = useState<ModalTab>('details')
 
+  // Add manual competitor dialog
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [addName, setAddName] = useState("")
+  const [addWebsite, setAddWebsite] = useState("")
+  const [addServices, setAddServices] = useState("")
+  const [adding, setAdding] = useState(false)
+
   // Edit dialog state (manual competitors only)
   const [editingCompetitor, setEditingCompetitor] = useState<Competitor | null>(null)
   const [editName, setEditName] = useState("")
@@ -141,6 +148,29 @@ export default function CompetitorsPage() {
     setSelectedCompetitor(competitor)
     setActiveTab(tab)
     setShowModal(true)
+  }
+
+  async function addManualCompetitor() {
+    if (!addName.trim()) return
+    setAdding(true)
+    const { data, error } = await supabase.from("competitors").insert({
+      name: addName.trim(),
+      website: addWebsite.trim(),
+      services: addServices.trim(),
+      pricing: '',
+      threat_score: 70,
+      trend: 'stable',
+      source: 'manual',
+    }).select().single()
+    if (!error && data) {
+      setCompetitors(prev => [data, ...prev])
+      setShowAddDialog(false)
+      setAddName(""); setAddWebsite(""); setAddServices("")
+      toast({ title: "המתחרה נוסף" })
+    } else {
+      toast({ title: "שגיאה בהוספה", description: error?.message, variant: "destructive" })
+    }
+    setAdding(false)
   }
 
   function openEdit(competitor: Competitor) {
@@ -388,6 +418,10 @@ export default function CompetitorsPage() {
                 <Badge variant="secondary">{manualCompetitors.length}</Badge>
               )}
             </CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+              <UserPlus className="ml-2 h-3.5 w-3.5" />
+              הוסף ידנית
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -490,6 +524,36 @@ export default function CompetitorsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Add Manual Competitor Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={(open) => { if (!open) { setShowAddDialog(false); setAddName(""); setAddWebsite(""); setAddServices("") } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>הוסף מתחרה ידנית</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label>שם המתחרה *</Label>
+              <Input value={addName} onChange={e => setAddName(e.target.value)} placeholder="שם החברה" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>אתר אינטרנט</Label>
+              <Input dir="ltr" value={addWebsite} onChange={e => setAddWebsite(e.target.value)} placeholder="https://" className="text-left" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>שירותים</Label>
+              <Input value={addServices} onChange={e => setAddServices(e.target.value)} placeholder="תאר את השירותים..." />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button onClick={addManualCompetitor} disabled={adding || !addName.trim()}>
+                {adding && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                הוסף
+              </Button>
+              <Button variant="outline" onClick={() => setShowAddDialog(false)}>ביטול</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog (manual competitors only) */}
       <Dialog open={!!editingCompetitor} onOpenChange={(open) => { if (!open) setEditingCompetitor(null) }}>

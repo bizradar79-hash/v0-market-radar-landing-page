@@ -149,7 +149,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     steps.db = 'starting'
 
-    // Fetch existing manual competitors so we can preserve and deduplicate them
+    // Try to fetch existing manual competitors (graceful if source column missing)
     const { data: manualComps } = await supabase
       .from('competitors')
       .select('website')
@@ -160,10 +160,14 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     )
     steps.db = { manualKept: manualDomains.size }
 
-    // Delete only auto-discovered competitors — never touch manual ones
-    await supabase.from('competitors').delete()
+    // Delete only auto competitors — fall back to delete-all if source column doesn't exist yet
+    const { error: deleteError } = await supabase.from('competitors').delete()
       .eq('company_id', userId)
       .or('source.eq.auto,source.is.null')
+    if (deleteError) {
+      // source column missing — delete all (pre-migration fallback)
+      await supabase.from('competitors').delete().eq('company_id', userId)
+    }
 
     // Remove new auto entries that would duplicate a manual competitor
     const deduped = mapped.filter((c: any) => {
@@ -175,17 +179,25 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
     }
 
-    const { data: saved, error: insertError } = await supabase.from('competitors').insert(
-      deduped.map((c: any) => ({
-        name: c.name,
-        website: c.website,
-        services: c.services,
-        pricing: '',
-        threat_score: c.threat_score,
-        company_id: userId,
-        source: 'auto',
-      }))
-    ).select()
+    const insertRows = deduped.map((c: any) => ({
+      name: c.name,
+      website: c.website,
+      services: c.services,
+      pricing: '',
+      threat_score: c.threat_score,
+      company_id: userId,
+      source: 'auto',
+    }))
+
+    let { data: saved, error: insertError } = await supabase
+      .from('competitors').insert(insertRows).select()
+
+    // If source column doesn't exist yet, retry without it
+    if (insertError?.code === '42703' || insertError?.message?.includes('source')) {
+      const rowsWithoutSource = insertRows.map(({ source: _s, ...rest }: any) => rest)
+      ;({ data: saved, error: insertError } = await supabase
+        .from('competitors').insert(rowsWithoutSource).select())
+    }
 
     if (insertError) {
       steps.db = { ok: false, error: insertError.message, code: insertError.code }
