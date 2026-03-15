@@ -1,17 +1,13 @@
 import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
-import { NextResponse, after } from 'next/server'
+import { NextResponse } from 'next/server'
 
-export const maxDuration = 60
+export const maxDuration = 120
 
-async function fetchAndSaveRating(
-  competitor: { id: string; name: string; website: string },
-  supabase: any,
-  userId: string,
-) {
+async function fetchGoogleRating(name: string, website: string): Promise<{ rating: number | null; reviewCount: number | null }> {
   try {
-    const prompt = `חפש את הפרטים הבאים על העסק: ${competitor.name}${competitor.website ? ` (אתר: ${competitor.website})` : ''}
+    const prompt = `חפש את הפרטים הבאים על העסק: ${name}${website ? ` (אתר: ${website})` : ''}
 מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
 לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
 החזר JSON בלבד:
@@ -29,10 +25,10 @@ async function fetchAndSaveRating(
         tools: [{ type: 'web_search' }],
       }),
     })
-    if (!res.ok) return
+    if (!res.ok) return { rating: null, reviewCount: null }
 
     const data = await res.json()
-    if (!data.output) return
+    if (!data.output) return { rating: null, reviewCount: null }
 
     const text = data.output
       .filter((item: any) => item.type === 'message')
@@ -44,21 +40,16 @@ async function fetchAndSaveRating(
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const start = clean.indexOf('{')
     const end = clean.lastIndexOf('}')
-    if (start === -1 || end <= start) return
+    if (start === -1 || end <= start) return { rating: null, reviewCount: null }
 
     let parsed: any = {}
-    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch { return }
+    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch { return { rating: null, reviewCount: null } }
 
     const rating = typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null
     const reviewCount = typeof parsed.review_count === 'number' ? parsed.review_count : null
-
-    await supabase
-      .from('competitors')
-      .update({ google_rating: rating, google_review_count: reviewCount })
-      .eq('id', competitor.id)
-      .eq('company_id', userId)
-  } catch (e: any) {
-    console.warn('fetchAndSaveRating failed for', competitor.name, ':', e?.message)
+    return { rating, reviewCount }
+  } catch {
+    return { rating: null, reviewCount: null }
   }
 }
 
@@ -109,7 +100,6 @@ export async function POST(request: Request) {
     let userId: string | null = null
 
     if (ctx) {
-      // Normal path — company profile exists
       businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
       website = ctx.company?.website || ''
       companyName = ctx.company?.name || ''
@@ -118,7 +108,6 @@ export async function POST(request: Request) {
       userId = ctx.user.id
       steps.context = { ok: true, company: ctx.company?.name }
     } else {
-      // Onboarding path — company not yet saved, auth via session/bearer
       const serverClient = await createClient()
       const { data: { user } } = await serverClient.auth.getUser()
       if (!user) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
@@ -172,7 +161,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
-    // Blocklist: known retailers, pharmacy chains, e-commerce
+    // Blocklist
     const RETAIL_BLOCKLIST = [
       'שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופר-פארם', 'super-pharm',
       'amazon', 'ebay', 'iherb', 'aliexpress', 'walgreens', 'boots',
@@ -192,7 +181,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return true
     })
 
-    // Map to response shape
+    // Map to working shape
     const mapped = competitors.map((c: any) => ({
       name: c.name,
       website: c.website,
@@ -204,16 +193,30 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       score_breakdown: c.score_breakdown || '',
       reason: c.services || '',
       similarity: typeof c.threat_score === 'number' ? Math.min(100, c.threat_score) : 70,
+      google_rating: null as number | null,
+      google_review_count: null as number | null,
     }))
 
-    // Skip DB save during onboarding (no company profile yet)
+    // Fetch Google ratings sequentially before saving
+    steps.ratings = { status: 'starting' }
+    for (const comp of mapped) {
+      const { rating, reviewCount } = await fetchGoogleRating(comp.name, comp.website)
+      comp.google_rating = rating
+      comp.google_review_count = reviewCount
+      await new Promise(r => setTimeout(r, 300))
+    }
+    steps.ratings = {
+      ok: true,
+      found: mapped.filter(c => c.google_rating !== null).length,
+    }
+
+    // Skip DB save during onboarding
     if (!saveToDb || !supabase || !userId) {
       return NextResponse.json({ success: true, competitors: mapped, count: mapped.length, steps })
     }
 
     steps.db = 'starting'
 
-    // Try to fetch existing manual competitors (graceful if source column missing)
     const { data: manualComps } = await supabase
       .from('competitors')
       .select('website')
@@ -224,16 +227,13 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     )
     steps.db = { manualKept: manualDomains.size }
 
-    // Delete only auto competitors — fall back to delete-all if source column doesn't exist yet
     const { error: deleteError } = await supabase.from('competitors').delete()
       .eq('company_id', userId)
       .or('source.eq.auto,source.is.null')
     if (deleteError) {
-      // source column missing — delete all (pre-migration fallback)
       await supabase.from('competitors').delete().eq('company_id', userId)
     }
 
-    // Remove new auto entries that would duplicate a manual competitor
     const deduped = mapped.filter((c: any) => {
       const domain = extractDomain(c.website || '')
       return !domain || !manualDomains.has(domain)
@@ -250,6 +250,8 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       pricing: '',
       threat_score: c.threat_score,
       last_activity: c.score_breakdown || '',
+      google_rating: c.google_rating,
+      google_review_count: c.google_review_count,
       company_id: userId,
       source: 'auto',
     }))
@@ -257,11 +259,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     let { data: saved, error: insertError } = await supabase
       .from('competitors').insert(insertRows).select()
 
-    // If source column doesn't exist yet, retry without it
-    if (insertError?.code === '42703' || insertError?.message?.includes('source')) {
-      const rowsWithoutSource = insertRows.map(({ source: _s, ...rest }: any) => rest)
+    // Graceful fallback if columns missing (migration not run)
+    if (insertError?.code === '42703') {
+      const rowsFallback = insertRows.map(({ google_rating: _r, google_review_count: _rc, source: _s, ...rest }: any) => rest)
       ;({ data: saved, error: insertError } = await supabase
-        .from('competitors').insert(rowsWithoutSource).select())
+        .from('competitors').insert(rowsFallback).select())
     }
 
     if (insertError) {
@@ -269,19 +271,6 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
     steps.db = { ok: true, saved: saved?.length }
-
-    // Fetch Google ratings in background after response is sent
-    const savedList = saved || []
-    after(async () => {
-      for (const comp of savedList) {
-        await fetchAndSaveRating(
-          { id: comp.id, name: comp.name, website: comp.website || '' },
-          supabase,
-          userId!,
-        )
-        await new Promise(r => setTimeout(r, 500))
-      }
-    })
 
     return NextResponse.json({ success: true, competitors: saved, count: saved?.length || 0, steps })
   } catch (e: any) {
