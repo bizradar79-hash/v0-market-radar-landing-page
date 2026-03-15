@@ -10,12 +10,36 @@ import { Button } from "@/components/ui/button"
 import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Users, Target, Loader2, Newspaper } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
+interface SwotData {
+  strengths: string[]
+  weaknesses: string[]
+  opportunities: string[]
+  threats: string[]
+}
+
+interface GeoReview {
+  author: string
+  rating: number
+  text: string
+}
+
+interface GeoData {
+  rating: number | null
+  reviewCount: number
+  reviews: GeoReview[]
+  address: string
+  phone: string
+}
+
 interface Company {
   name: string
   industry: string
   website: string
   city: string
   description: string
+  business_overview: string
+  swot: SwotData | null
+  geo_data: GeoData | null
 }
 
 interface Competitor {
@@ -109,6 +133,15 @@ function HighlightLine({ text }: { text?: string }) {
   )
 }
 
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <span className="text-yellow-500 text-sm">
+      {'★'.repeat(Math.round(rating))}{'☆'.repeat(5 - Math.round(rating))}
+      <span className="text-muted-foreground mr-1">{rating.toFixed(1)}</span>
+    </span>
+  )
+}
+
 export default function ReportsPage() {
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [highlights, setHighlights] = useState<Record<string, string>>({})
@@ -156,7 +189,7 @@ export default function ReportsPage() {
       supabase.from("trends").select("name, description, score, direction, category").order("created_at", { ascending: false }),
       supabase.from("news").select("title, source, summary, category, sentiment, published_at").order("published_at", { ascending: false }),
       supabase.from("conferences").select("name, date, location, description, url").gte("date", today).order("date", { ascending: true }),
-      supabase.from("companies").select("name, industry, website, city, description").single(),
+      supabase.from("companies").select("name, industry, website, city, description, business_overview, swot, geo_data").single(),
     ])
 
     const now = new Date()
@@ -179,6 +212,9 @@ export default function ReportsPage() {
         website: company?.website || "",
         city: company?.city || "",
         description: company?.description || "",
+        business_overview: company?.business_overview || "",
+        swot: (company?.swot as SwotData | null) || null,
+        geo_data: (company?.geo_data as GeoData | null) || null,
       },
       highlights: {
         tenders: tendersCount || 0,
@@ -211,6 +247,10 @@ export default function ReportsPage() {
         ? `<p style="font-style:italic;color:#6b7280;margin:0 0 12px;border-right:3px solid #3b82f6;padding-right:10px;">${text}</p>`
         : ''
 
+      const starsHtml = (r: number) => '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r))
+      const swot = reportData.company.swot
+      const geo = reportData.company.geo_data
+
       const printContent = `
         <!DOCTYPE html>
         <html dir="rtl" lang="he">
@@ -222,10 +262,25 @@ export default function ReportsPage() {
             body { font-family: Arial, sans-serif; padding: 30px; direction: rtl; color: #1a1a1a; line-height: 1.5; }
             h1 { color: #1a1a1a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-bottom: 5px; }
             h2 { color: #1e40af; margin-top: 30px; margin-bottom: 12px; border-right: 4px solid #3b82f6; padding-right: 10px; }
+            h3 { color: #374151; font-size: 14px; margin: 14px 0 6px; }
             .header { text-align: center; margin-bottom: 30px; }
             .meta { color: #6b7280; font-size: 13px; }
             .company-profile { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 16px 0; }
             .company-profile p { margin: 4px 0; font-size: 14px; }
+            .overview-block { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.7; margin: 10px 0; }
+            .swot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+            .swot-cell { border-radius: 8px; padding: 12px; font-size: 12px; }
+            .swot-strengths { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            .swot-weaknesses { background: #fef2f2; border: 1px solid #fecaca; }
+            .swot-opportunities { background: #eff6ff; border: 1px solid #bfdbfe; }
+            .swot-threats { background: #fff7ed; border: 1px solid #fed7aa; }
+            .swot-cell strong { display: block; margin-bottom: 6px; font-size: 13px; }
+            .swot-cell li { margin: 3px 0; }
+            .stars { color: #f59e0b; font-size: 16px; }
+            .review-item { border-top: 1px solid #e5e7eb; padding: 8px 0; font-size: 12px; }
+            .review-item:first-child { border-top: none; }
+            .review-author { font-weight: bold; margin-bottom: 2px; }
+            .review-text { color: #6b7280; }
             .grid-4 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin: 16px 0; }
             .stat { background: #f3f4f6; padding: 16px; border-radius: 8px; text-align: center; }
             .stat-value { font-size: 28px; font-weight: bold; color: #3b82f6; }
@@ -252,14 +307,45 @@ export default function ReportsPage() {
             <p class="meta">נוצר: ${reportData.generatedAt}</p>
           </div>
 
-          <h2>פרופיל החברה</h2>
+          <h2>פרופיל עסקי</h2>
           <div class="company-profile">
             <p><strong>שם:</strong> ${reportData.company.name}</p>
             ${reportData.company.industry ? `<p><strong>תעשייה:</strong> ${reportData.company.industry}</p>` : ''}
             ${reportData.company.city ? `<p><strong>עיר:</strong> ${reportData.company.city}</p>` : ''}
             ${reportData.company.website ? `<p><strong>אתר:</strong> ${reportData.company.website}</p>` : ''}
-            ${reportData.company.description ? `<p><strong>תיאור:</strong> ${reportData.company.description}</p>` : ''}
           </div>
+
+          ${reportData.company.business_overview ? `
+            <h3>סקירת העסק</h3>
+            <div class="overview-block">${reportData.company.business_overview}</div>
+          ` : ''}
+
+          ${swot && (swot.strengths?.length || swot.weaknesses?.length || swot.opportunities?.length || swot.threats?.length) ? `
+            <h3>ניתוח SWOT</h3>
+            <div class="swot-grid">
+              ${swot.strengths?.length ? `<div class="swot-cell swot-strengths"><strong>חוזקות</strong><ul>${swot.strengths.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+              ${swot.weaknesses?.length ? `<div class="swot-cell swot-weaknesses"><strong>חולשות</strong><ul>${swot.weaknesses.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+              ${swot.opportunities?.length ? `<div class="swot-cell swot-opportunities"><strong>הזדמנויות</strong><ul>${swot.opportunities.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+              ${swot.threats?.length ? `<div class="swot-cell swot-threats"><strong>איומים</strong><ul>${swot.threats.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
+            </div>
+          ` : ''}
+
+          ${geo?.rating ? `
+            <h3>דירוג וביקורות</h3>
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;">
+              <div style="margin-bottom:10px;">
+                <span class="stars">${starsHtml(geo.rating)}</span>
+                <strong style="margin-right:6px;">${geo.rating.toFixed(1)}</strong>
+                ${geo.reviewCount ? `<span style="color:#6b7280;font-size:12px;">(${geo.reviewCount} ביקורות)</span>` : ''}
+              </div>
+              ${geo.reviews?.length ? [...geo.reviews].sort((a, b) => b.rating - a.rating).slice(0, 3).map(r => `
+                <div class="review-item">
+                  <div class="review-author">${r.author || ''} <span class="stars" style="font-size:12px;">${starsHtml(r.rating)}</span></div>
+                  ${r.text ? `<div class="review-text">${r.text}</div>` : ''}
+                </div>
+              `).join('') : ''}
+            </div>
+          ` : ''}
 
           <h2>סיכום נתונים</h2>
           <div class="grid-4">
@@ -423,6 +509,82 @@ export default function ReportsPage() {
         </CardHeader>
 
         <CardContent className="p-6">
+          {/* פרופיל עסקי */}
+          {(reportData.company.business_overview || reportData.company.swot || reportData.company.geo_data?.rating) && (
+            <div className="mb-8 space-y-4">
+              <h3 className="text-base font-semibold border-b pb-2">פרופיל עסקי</h3>
+
+              {/* סקירת העסק */}
+              {reportData.company.business_overview && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">סקירת העסק</p>
+                  <p className="text-sm leading-relaxed rounded-lg bg-muted/30 border p-3">
+                    {reportData.company.business_overview}
+                  </p>
+                </div>
+              )}
+
+              {/* ניתוח SWOT */}
+              {reportData.company.swot && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">ניתוח SWOT</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    {[
+                      { label: 'חוזקות', key: 'strengths', color: 'bg-green-50 border-green-200 text-green-800' },
+                      { label: 'חולשות', key: 'weaknesses', color: 'bg-red-50 border-red-200 text-red-800' },
+                      { label: 'הזדמנויות', key: 'opportunities', color: 'bg-blue-50 border-blue-200 text-blue-800' },
+                      { label: 'איומים', key: 'threats', color: 'bg-orange-50 border-orange-200 text-orange-800' },
+                    ].map(({ label, key, color }) => {
+                      const items = reportData.company.swot![key as keyof SwotData] as string[]
+                      if (!items?.length) return null
+                      return (
+                        <div key={key} className={`rounded-lg border p-3 ${color}`}>
+                          <p className="font-semibold text-xs mb-1">{label}</p>
+                          <ul className="space-y-0.5">
+                            {items.slice(0, 3).map((item, i) => (
+                              <li key={i} className="text-xs">• {item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* דירוג וביקורות */}
+              {reportData.company.geo_data?.rating && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">דירוג וביקורות</p>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <StarRating rating={reportData.company.geo_data.rating} />
+                      {reportData.company.geo_data.reviewCount > 0 && (
+                        <span className="text-xs text-muted-foreground">({reportData.company.geo_data.reviewCount} ביקורות)</span>
+                      )}
+                    </div>
+                    {reportData.company.geo_data.reviews?.length > 0 && (
+                      <div className="space-y-2">
+                        {[...reportData.company.geo_data.reviews]
+                          .sort((a, b) => b.rating - a.rating)
+                          .slice(0, 3)
+                          .map((r, i) => (
+                            <div key={i} className="text-xs border-t pt-2 first:border-t-0 first:pt-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="font-medium">{r.author}</span>
+                                <StarRating rating={r.rating} />
+                              </div>
+                              {r.text && <p className="text-muted-foreground line-clamp-2">{r.text}</p>}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* KPI highlights */}
           <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
             <div className="rounded-lg bg-primary/10 p-4 text-center">
