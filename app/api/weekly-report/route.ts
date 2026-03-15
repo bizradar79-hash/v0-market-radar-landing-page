@@ -1,86 +1,57 @@
+import { getFullContext } from '@/lib/context'
 import { analyzeWithAI } from '@/lib/ai'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
-    const { companyId } = await request.json()
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const supabase = await createClient()
+    const today = new Date().toISOString().split('T')[0]
 
     const [
       { data: competitors },
-      { data: leads },
       { data: tenders },
       { data: trends },
       { data: news },
-      { data: alerts },
-      { data: company },
+      { data: conferences },
     ] = await Promise.all([
-      supabase.from('competitors').select('*').order('detected_at', { ascending: false }).limit(10),
-      supabase.from('leads').select('*').order('created_at', { ascending: false }).limit(10),
-      supabase.from('tenders').select('*').eq('status', 'פעיל').order('deadline', { ascending: true }).limit(5),
-      supabase.from('trends').select('*').order('score', { ascending: false }).limit(5),
-      supabase.from('news').select('*').order('published_at', { ascending: false }).limit(10),
-      supabase.from('alerts').select('*').eq('is_read', false).order('created_at', { ascending: false }),
-      companyId ? supabase.from('companies').select('*').eq('id', companyId).single() : Promise.resolve({ data: null }),
+      ctx.supabase.from('competitors').select('name, threat_score').order('threat_score', { ascending: false }).limit(10),
+      ctx.supabase.from('tenders').select('title, organization, deadline').order('deadline', { ascending: true }).limit(10),
+      ctx.supabase.from('trends').select('name, direction').order('created_at', { ascending: false }).limit(5),
+      ctx.supabase.from('news').select('title, source').order('published_at', { ascending: false }).limit(5),
+      ctx.supabase.from('conferences').select('name, date, location').gte('date', today).order('date', { ascending: true }).limit(5),
     ])
 
-    const result = await analyzeWithAI(`הכן דוח מודיעין שבועי מקיף על בסיס הנתונים הבאים.
+    const highThreatCount = (competitors || []).filter(c => (c.threat_score || 0) >= 70).length
+    const topTrend = trends?.[0]
+    const topNews = news?.[0]
+    const nextConf = conferences?.[0]
+    const tendersCount = (tenders || []).length
 
-${company ? `פרטי החברה:\n${JSON.stringify(company, null, 2)}\n` : ''}
+    const highlights = await analyzeWithAI(`כתוב משפט סיכום אחד בעברית לכל מודול (10-20 מילים, ישיר ותמציתי).
 
-מתחרים (${competitors?.length || 0}):
-${JSON.stringify(competitors?.slice(0, 5), null, 2)}
+נתונים:
+- מתחרים: ${competitors?.length || 0} סה"כ, ${highThreatCount} בעלי ציון איום >= 70
+- טרנד מוביל: "${topTrend?.name || 'לא נמצא'}" (מומנטום: ${topTrend?.direction || 'לא ידוע'})
+- חדשה ראשונה: "${topNews?.title || 'לא נמצאה'}"
+- כנס קרוב: ${nextConf ? `"${nextConf.name}" בתאריך ${nextConf.date} ב${nextConf.location}` : 'לא נמצאו כנסים קרובים'}
+- מכרזים פתוחים: ${tendersCount}
 
-לידים (${leads?.length || 0}):
-${JSON.stringify(leads?.slice(0, 5), null, 2)}
-
-מכרזים פעילים (${tenders?.length || 0}):
-${JSON.stringify(tenders, null, 2)}
-
-טרנדים (${trends?.length || 0}):
-${JSON.stringify(trends, null, 2)}
-
-חדשות (${news?.length || 0}):
-${JSON.stringify(news?.slice(0, 5), null, 2)}
-
-החזר JSON בפורמט זה בלבד:
+החזר JSON בלבד:
 {
-  "executiveSummary": "תקציר מנהלים - הנקודות החשובות",
-  "competitorUpdates": "סקירת מתחרים",
-  "hotLeads": ["ליד מבטיח 1"],
-  "urgentTenders": ["מכרז דחוף 1"],
-  "marketTrends": "ניתוח טרנדים",
-  "strategicRecommendations": ["המלצה 1", "המלצה 2", "המלצה 3"],
-  "weeklyKPIs": {
-    "leads": ${leads?.length || 0},
-    "competitors": ${competitors?.length || 0},
-    "tenders": ${tenders?.length || 0},
-    "alerts": ${alerts?.length || 0}
-  }
+  "competitors": "...",
+  "trends": "...",
+  "news": "...",
+  "conferences": "...",
+  "tenders": "..."
 }`)
 
-    return NextResponse.json({
-      success: true,
-      report: result,
-      summary: {
-        competitors: competitors?.length || 0,
-        leads: leads?.length || 0,
-        tenders: tenders?.length || 0,
-        trends: trends?.length || 0,
-        news: news?.length || 0,
-        alerts: alerts?.length || 0,
-      },
-      generatedAt: new Date().toISOString(),
-    })
-  } catch (error) {
-    console.error('Error generating weekly report:', error)
-    return NextResponse.json(
-      { success: false, error: 'שגיאה ביצירת הדוח השבועי' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: true, highlights: highlights || {} })
+  } catch (error: any) {
+    console.error('Error generating report highlights:', error)
+    return NextResponse.json({ success: false, error: error?.message }, { status: 500 })
   }
 }

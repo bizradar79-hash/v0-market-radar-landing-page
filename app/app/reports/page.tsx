@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Download, Calendar, FileText, TrendingUp, Users, Target, Loader2 } from "lucide-react"
+import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Users, Target, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Company {
@@ -58,6 +58,7 @@ interface NewsItem {
   summary: string
   category: string
   sentiment: string
+  published_at: string
 }
 
 interface Conference {
@@ -82,8 +83,35 @@ interface ReportData {
   recommendations: string[]
 }
 
+function getMomentumBadge(direction: string) {
+  if (direction === 'עולה' || direction === 'up') {
+    return <Badge className="bg-green-100 text-green-700 gap-1 shrink-0"><TrendingUp className="h-3 w-3" />עולה</Badge>
+  }
+  if (direction === 'יורד' || direction === 'down') {
+    return <Badge className="bg-red-100 text-red-700 gap-1 shrink-0"><TrendingDown className="h-3 w-3" />יורד</Badge>
+  }
+  return <Badge className="bg-yellow-100 text-yellow-700 gap-1 shrink-0"><Minus className="h-3 w-3" />יציב</Badge>
+}
+
+function formatShortDate(dateStr: string) {
+  if (!dateStr) return ''
+  try {
+    return new Date(dateStr).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' })
+  } catch { return dateStr }
+}
+
+function HighlightLine({ text }: { text?: string }) {
+  if (!text) return null
+  return (
+    <p className="mb-3 text-sm italic text-muted-foreground border-r-2 border-primary/40 pr-3">
+      {text}
+    </p>
+  )
+}
+
 export default function ReportsPage() {
   const [reportData, setReportData] = useState<ReportData | null>(null)
+  const [highlights, setHighlights] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const supabase = createClient()
@@ -91,9 +119,20 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchReportData()
+    loadHighlights()
   }, [])
 
+  async function loadHighlights() {
+    try {
+      const res = await fetch('/api/weekly-report', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) setHighlights(data.highlights || {})
+    } catch { /* highlights are optional */ }
+  }
+
   async function fetchReportData() {
+    const today = new Date().toISOString().split('T')[0]
+
     const [
       { count: tendersCount },
       { count: competitorsCount },
@@ -114,9 +153,9 @@ export default function ReportsPage() {
       supabase.from("competitors").select("name, website, services, threat_score, positioning").order("threat_score", { ascending: false }),
       supabase.from("leads").select("name, website, industry, score, reason, source").order("score", { ascending: false }),
       supabase.from("tenders").select("title, organization, deadline, budget, description, relevance_score").order("relevance_score", { ascending: false }),
-      supabase.from("trends").select("name, description, score, direction, category").order("score", { ascending: false }),
-      supabase.from("news").select("title, source, summary, category, sentiment").order("created_at", { ascending: false }),
-      supabase.from("conferences").select("name, date, location, description, url").order("date", { ascending: true }),
+      supabase.from("trends").select("name, description, score, direction, category").order("created_at", { ascending: false }),
+      supabase.from("news").select("title, source, summary, category, sentiment, published_at").order("published_at", { ascending: false }),
+      supabase.from("conferences").select("name, date, location, description, url").gte("date", today).order("date", { ascending: true }),
       supabase.from("companies").select("name, industry, website, city, description").single(),
     ])
 
@@ -162,7 +201,12 @@ export default function ReportsPage() {
     if (!reportData) return
     setGenerating(true)
     try {
-      const directionIcon = (d: string) => d === 'up' ? '↑' : d === 'down' ? '↓' : '→'
+      const directionIcon = (d: string) => (d === 'עולה' || d === 'up') ? '↑' : (d === 'יורד' || d === 'down') ? '↓' : '→'
+      const directionText = (d: string) => (d === 'עולה' || d === 'up') ? 'עולה' : (d === 'יורד' || d === 'down') ? 'יורד' : 'יציב'
+
+      const highlightHtml = (text?: string) => text
+        ? `<p style="font-style:italic;color:#6b7280;margin:0 0 12px;border-right:3px solid #3b82f6;padding-right:10px;">${text}</p>`
+        : ''
 
       const printContent = `
         <!DOCTYPE html>
@@ -175,7 +219,6 @@ export default function ReportsPage() {
             body { font-family: Arial, sans-serif; padding: 30px; direction: rtl; color: #1a1a1a; line-height: 1.5; }
             h1 { color: #1a1a1a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-bottom: 5px; }
             h2 { color: #1e40af; margin-top: 30px; margin-bottom: 12px; border-right: 4px solid #3b82f6; padding-right: 10px; }
-            h3 { color: #374151; margin: 8px 0; }
             .header { text-align: center; margin-bottom: 30px; }
             .meta { color: #6b7280; font-size: 13px; }
             .company-profile { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 16px 0; }
@@ -194,10 +237,9 @@ export default function ReportsPage() {
             .badge-green { background: #dcfce7; color: #166534; }
             .badge-yellow { background: #fef9c3; color: #92400e; }
             .badge-gray { background: #f3f4f6; color: #374151; }
-            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
             .recommendations li { background: #eff6ff; padding: 12px; border-radius: 8px; margin: 8px 0; display: flex; align-items: flex-start; gap: 10px; }
             .rec-num { background: #3b82f6; color: white; min-width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
-            @media print { body { padding: 15px; } h2 { page-break-before: auto; } }
+            @media print { body { padding: 15px; } }
           </style>
         </head>
         <body>
@@ -226,15 +268,59 @@ export default function ReportsPage() {
 
           ${reportData.competitors.length > 0 ? `
             <h2>מתחרים (${reportData.competitors.length})</h2>
+            ${highlightHtml(highlights.competitors)}
             ${reportData.competitors.map(c => `
               <div class="item">
-                <div class="item-title">
-                  ${c.name}
-                  <span class="badge badge-red">איום: ${c.threat_score}</span>
-                  ${c.positioning ? `<span class="badge badge-gray">${c.positioning}</span>` : ''}
-                </div>
+                <div class="item-title">${c.name} <span class="badge badge-red">איום: ${c.threat_score}</span>${c.positioning ? `<span class="badge badge-gray">${c.positioning}</span>` : ''}</div>
                 ${c.services ? `<div class="item-desc">${c.services}</div>` : ''}
                 ${c.website ? `<div class="item-meta">${c.website}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.trends.length > 0 ? `
+            <h2>טרנדים מובילים (${reportData.trends.length})</h2>
+            ${highlightHtml(highlights.trends)}
+            ${reportData.trends.map(t => `
+              <div class="item">
+                <div class="item-title">${directionIcon(t.direction)} ${t.name} <span class="badge ${(t.direction === 'עולה' || t.direction === 'up') ? 'badge-green' : (t.direction === 'יורד' || t.direction === 'down') ? 'badge-red' : 'badge-yellow'}">${directionText(t.direction)}</span>${t.category ? `<span class="badge badge-gray">${t.category}</span>` : ''}</div>
+                ${t.description ? `<div class="item-desc">${t.description}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.news.length > 0 ? `
+            <h2>חדשות אחרונות (${reportData.news.length})</h2>
+            ${highlightHtml(highlights.news)}
+            ${reportData.news.map(n => `
+              <div class="item">
+                <div class="item-title">${n.title} ${n.sentiment === 'positive' ? '<span class="badge badge-green">חיובי</span>' : n.sentiment === 'negative' ? '<span class="badge badge-red">שלילי</span>' : '<span class="badge badge-gray">ניטרלי</span>'}</div>
+                ${n.summary ? `<div class="item-desc">${n.summary}</div>` : ''}
+                <div class="item-meta">${n.source || ''}${n.published_at ? ` | ${formatShortDate(n.published_at)}` : ''}</div>
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.conferences.length > 0 ? `
+            <h2>כנסים קרובים (${reportData.conferences.length})</h2>
+            ${highlightHtml(highlights.conferences)}
+            ${reportData.conferences.map(c => `
+              <div class="item">
+                <div class="item-title">${c.name}</div>
+                <div class="item-desc">${c.date ? `תאריך: ${c.date}` : ''}${c.location ? ` | ${c.location}` : ''}</div>
+                ${c.description ? `<div class="item-meta">${c.description}</div>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${reportData.tenders.length > 0 ? `
+            <h2>מכרזים פתוחים (${reportData.tenders.length})</h2>
+            ${highlightHtml(highlights.tenders)}
+            ${reportData.tenders.map(t => `
+              <div class="item">
+                <div class="item-title">${t.title}${t.relevance_score ? `<span class="badge badge-blue">רלוונטיות: ${t.relevance_score}</span>` : ''}</div>
+                <div class="item-desc">${t.organization || ''}${t.deadline ? ` | דדליין: ${t.deadline}` : ''}${t.budget ? ` | תקציב: ${t.budget}` : ''}</div>
+                ${t.description ? `<div class="item-meta">${t.description}</div>` : ''}
               </div>
             `).join('')}
           ` : ''}
@@ -243,67 +329,9 @@ export default function ReportsPage() {
             <h2>לידים (${reportData.leads.length})</h2>
             ${reportData.leads.map(l => `
               <div class="item">
-                <div class="item-title">
-                  ${l.name}
-                  <span class="badge ${l.score >= 80 ? 'badge-green' : 'badge-yellow'}">ציון: ${l.score}</span>
-                  ${l.industry ? `<span class="badge badge-gray">${l.industry}</span>` : ''}
-                </div>
+                <div class="item-title">${l.name} <span class="badge ${l.score >= 80 ? 'badge-green' : 'badge-yellow'}">ציון: ${l.score}</span>${l.industry ? `<span class="badge badge-gray">${l.industry}</span>` : ''}</div>
                 ${l.reason ? `<div class="item-desc">${l.reason}</div>` : ''}
                 ${l.website ? `<div class="item-meta">${l.website}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.tenders.length > 0 ? `
-            <h2>מכרזים (${reportData.tenders.length})</h2>
-            ${reportData.tenders.map(t => `
-              <div class="item">
-                <div class="item-title">
-                  ${t.title}
-                  ${t.relevance_score ? `<span class="badge badge-blue">רלוונטיות: ${t.relevance_score}</span>` : ''}
-                </div>
-                <div class="item-desc">${t.organization || ''}${t.deadline ? ` | דדליין: ${t.deadline}` : ''}${t.budget ? ` | תקציב: ${t.budget}` : ''}</div>
-                ${t.description ? `<div class="item-meta">${t.description}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.trends.length > 0 ? `
-            <h2>טרנדים (${reportData.trends.length})</h2>
-            ${reportData.trends.map(t => `
-              <div class="item">
-                <div class="item-title">
-                  ${directionIcon(t.direction)} ${t.name}
-                  <span class="badge badge-blue">ציון: ${t.score}</span>
-                  ${t.category ? `<span class="badge badge-gray">${t.category}</span>` : ''}
-                </div>
-                ${t.description ? `<div class="item-desc">${t.description}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.news.length > 0 ? `
-            <h2>חדשות (${reportData.news.length})</h2>
-            ${reportData.news.map(n => `
-              <div class="item">
-                <div class="item-title">
-                  ${n.title}
-                  ${n.sentiment === 'positive' ? '<span class="badge badge-green">חיובי</span>' : n.sentiment === 'negative' ? '<span class="badge badge-red">שלילי</span>' : '<span class="badge badge-gray">ניטרלי</span>'}
-                  ${n.category ? `<span class="badge badge-gray">${n.category}</span>` : ''}
-                </div>
-                ${n.summary ? `<div class="item-desc">${n.summary}</div>` : ''}
-                ${n.source ? `<div class="item-meta">מקור: ${n.source}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.conferences.length > 0 ? `
-            <h2>כנסים ואירועים (${reportData.conferences.length})</h2>
-            ${reportData.conferences.map(c => `
-              <div class="item">
-                <div class="item-title">${c.name}</div>
-                <div class="item-desc">${c.date ? `תאריך: ${c.date}` : ''}${c.location ? ` | ${c.location}` : ''}</div>
-                ${c.description ? `<div class="item-meta">${c.description}</div>` : ''}
               </div>
             `).join('')}
           ` : ''}
@@ -326,10 +354,7 @@ export default function ReportsPage() {
         setTimeout(() => { printWindow.print() }, 300)
       }
 
-      toast({
-        title: "הדוח מוכן",
-        description: "חלון ההדפסה נפתח — בחר 'שמור כ-PDF' להורדה",
-      })
+      toast({ title: "הדוח מוכן", description: "חלון ההדפסה נפתח — בחר 'שמור כ-PDF' להורדה" })
     } catch (error) {
       console.error("Error generating PDF:", error)
       toast({ title: "שגיאה", description: "אירעה שגיאה בעת יצירת הדוח", variant: "destructive" })
@@ -392,7 +417,7 @@ export default function ReportsPage() {
         </CardHeader>
 
         <CardContent className="p-6">
-          {/* Highlights */}
+          {/* KPI highlights */}
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="rounded-lg bg-primary/10 p-4 text-center">
               <FileText className="mx-auto mb-2 h-6 w-6 text-primary" />
@@ -416,10 +441,11 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Competitors preview */}
+          {/* מתחרים עיקריים */}
           {reportData.competitors.length > 0 && (
             <div className="mb-6">
-              <h3 className="mb-3 text-base font-semibold">מתחרים עיקריים</h3>
+              <h3 className="mb-1 text-base font-semibold">מתחרים עיקריים</h3>
+              <HighlightLine text={highlights.competitors} />
               <div className="space-y-2">
                 {reportData.competitors.slice(0, 3).map((c, i) => (
                   <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
@@ -439,7 +465,104 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Leads preview */}
+          {/* טרנדים מובילים */}
+          {reportData.trends.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-1 text-base font-semibold">טרנדים מובילים</h3>
+              <HighlightLine text={highlights.trends} />
+              <div className="space-y-2">
+                {reportData.trends.slice(0, 3).map((t, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{t.name}</p>
+                      {t.category && <p className="text-xs text-muted-foreground">{t.category}</p>}
+                    </div>
+                    {getMomentumBadge(t.direction)}
+                  </div>
+                ))}
+                {reportData.trends.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.trends.length - 3} נוספים בדוח המלא</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* חדשות אחרונות */}
+          {reportData.news.length > 0 && (
+            <div className="mb-6">
+              <h3 className="mb-1 text-base font-semibold">חדשות אחרונות</h3>
+              <HighlightLine text={highlights.news} />
+              <div className="space-y-2">
+                {reportData.news.slice(0, 3).map((n, i) => (
+                  <div key={i} className="rounded-lg border bg-muted/30 p-3">
+                    <p className="font-medium text-sm">{n.title}</p>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      {n.source && <span>{n.source}</span>}
+                      {n.published_at && <span>·  {formatShortDate(n.published_at)}</span>}
+                    </div>
+                  </div>
+                ))}
+                {reportData.news.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.news.length - 3} נוספות בדוח המלא</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* כנסים קרובים */}
+          <div className="mb-6">
+            <h3 className="mb-1 text-base font-semibold">כנסים קרובים</h3>
+            <HighlightLine text={highlights.conferences} />
+            {reportData.conferences.length > 0 ? (
+              <div className="space-y-2">
+                {reportData.conferences.slice(0, 3).map((c, i) => (
+                  <div key={i} className="rounded-lg border bg-muted/30 p-3">
+                    <p className="font-medium text-sm">{c.name}</p>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      {c.date && <span>{formatShortDate(c.date)}</span>}
+                      {c.location && <span>· {c.location}</span>}
+                    </div>
+                  </div>
+                ))}
+                {reportData.conferences.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.conferences.length - 3} נוספים בדוח המלא</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 p-3">לא נמצאו כנסים קרובים</p>
+            )}
+          </div>
+
+          {/* מכרזים פתוחים */}
+          <div className="mb-6">
+            <h3 className="mb-1 text-base font-semibold">מכרזים פתוחים</h3>
+            <HighlightLine text={highlights.tenders} />
+            {reportData.tenders.length > 0 ? (
+              <div className="space-y-2">
+                {reportData.tenders.slice(0, 3).map((t, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{t.title}</p>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        {t.organization && <span>{t.organization}</span>}
+                        {t.deadline && <span>· {t.deadline}</span>}
+                      </div>
+                    </div>
+                    {t.relevance_score > 0 && (
+                      <Badge variant="secondary" className="shrink-0">{t.relevance_score}%</Badge>
+                    )}
+                  </div>
+                ))}
+                {reportData.tenders.length > 3 && (
+                  <p className="text-xs text-muted-foreground text-center">+ {reportData.tenders.length - 3} נוספים בדוח המלא</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 p-3">לא נמצאו מכרזים רלוונטיים</p>
+            )}
+          </div>
+
+          {/* לידים מובילים */}
           {reportData.leads.length > 0 && (
             <div className="mb-6">
               <h3 className="mb-3 text-base font-semibold">לידים מובילים</h3>
@@ -460,7 +583,7 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Recommendations */}
+          {/* המלצות */}
           <div>
             <h3 className="mb-3 text-base font-semibold">המלצות</h3>
             <ul className="space-y-2">
