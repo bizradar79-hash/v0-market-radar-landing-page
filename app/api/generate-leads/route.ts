@@ -14,7 +14,18 @@ export async function POST() {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 לידים פוטנציאליים בישראל — חברות או ארגונים שעשויים להיות לקוחות של עסק זה.
+מצא 10 לידים פוטנציאליים בישראל — חברות או ארגונים שסביר שיזדקקו לשירותי העסק הזה באופן קבוע.
+
+תן עדיפות ל:
+- עסקים בינוניים-קטנים (לא חברות ענק בינלאומיות)
+- חברות שנמצאות בשלב צמיחה ויזדקקו לשירות באופן שוטף
+- ארגונים עם צורך ברור בשירותי העסק
+
+לכל ליד תן ציון 0-100 לפי:
+- 40 נקודות: כמה הצורך בשירות ברור וישיר
+- 30 נקודות: גודל מתאים (עדיף SMB על קורפורייט)
+- 30 נקודות: סבירות שיש תקציב והם יגיבו
+
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
 [{"name": "", "industry": "", "website": "", "reason": "", "contact_email": "", "relevance_score": 0}]`
@@ -51,9 +62,10 @@ export async function POST() {
 
     steps.ai = { ok: true, count: list.length }
 
-    // Filter out own company and entries without a website
+    // Filter: relevance_score >= 75, has website, not own company
     const companyName = (ctx.company?.name || '').toLowerCase().slice(0, 6)
     list = list.filter((l: any) =>
+      (l.relevance_score ?? 0) >= 75 &&
       l.website?.startsWith('http') &&
       !l.name?.toLowerCase().includes(companyName)
     )
