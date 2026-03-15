@@ -154,8 +154,13 @@ export default function CompetitorsPage() {
     setSelectedCompetitor(competitor)
     setActiveTab(tab)
     setShowModal(true)
-    // Lazy-fetch Google rating on first open
-    if (competitor.google_rating == null && !fetchingRating[competitor.id]) {
+  }
+
+  function handleEyeClick(competitor: Competitor) {
+    openModal(competitor, 'details')
+    // Trigger fetch if not already loaded or loading
+    const needsFetch = competitor.google_rating == null && competitor.google_review_count == null
+    if (needsFetch && !fetchingRating[competitor.id]) {
       fetchGoogleRating(competitor)
     }
   }
@@ -169,23 +174,33 @@ export default function CompetitorsPage() {
         body: JSON.stringify({
           competitorId: competitor.id,
           name: competitor.name,
-          website: competitor.website,
+          website: competitor.website || '',
         }),
       })
+      if (!res.ok) {
+        console.error('fetch-competitor-rating failed:', res.status, await res.text())
+        return
+      }
       const result = await res.json()
       if (result.success) {
+        const rating = result.rating ?? null
+        const reviewCount = result.reviewCount ?? null
         setCompetitors(prev => prev.map(c =>
           c.id === competitor.id
-            ? { ...c, google_rating: result.rating, google_review_count: result.reviewCount }
+            ? { ...c, google_rating: rating, google_review_count: reviewCount }
             : c
         ))
         setSelectedCompetitor(prev =>
           prev?.id === competitor.id
-            ? { ...prev, google_rating: result.rating, google_review_count: result.reviewCount }
+            ? { ...prev, google_rating: rating, google_review_count: reviewCount }
             : prev
         )
+      } else {
+        console.error('fetch-competitor-rating error:', result.error)
       }
-    } catch { /* silent */ } finally {
+    } catch (e) {
+      console.error('fetchGoogleRating exception:', e)
+    } finally {
       setFetchingRating(prev => ({ ...prev, [competitor.id]: false }))
     }
   }
@@ -354,11 +369,14 @@ export default function CompetitorsPage() {
               <TableCell>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => openModal(competitor, 'details')}
+                    onClick={() => handleEyeClick(competitor)}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
-                    title="פרטים"
+                    title="פרטים ודירוג גוגל"
                   >
-                    <Eye className="h-3 w-3" />
+                    {fetchingRating[competitor.id]
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Eye className="h-3 w-3" />
+                    }
                   </button>
                   <span className="font-medium">{competitor.name}</span>
                 </div>
