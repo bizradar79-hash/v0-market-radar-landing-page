@@ -34,6 +34,19 @@ const industries = [
   "תחבורה",
   "אנרגיה",
   "מזון ומשקאות",
+  "קמעונאות",
+  "דפוס והפקה",
+  "שיווק ופרסום",
+  "בנייה ותשתיות",
+  "תיירות ואירוח",
+  "בריאות ורפואה",
+  "חקלאות",
+  "לוגיסטיקה",
+  "פארמה",
+  "ביטוח",
+  "פינאנס",
+  "משפטים",
+  "ספורט ופנאי",
   "אחר",
 ]
 
@@ -51,7 +64,7 @@ const modules = [
   { id: "tenders", label: "מכרזים", description: "התראות על מכרזים רלוונטיים" },
   { id: "trends", label: "טרנדים", description: "זיהוי מגמות בשוק" },
   { id: "news", label: "חדשות", description: "חדשות רלוונטיות לעסק" },
-  { id: "growth_signals", label: "אותות צמיחה", description: "זיהוי הזדמנויות צמיחה" },
+  { id: "conferences", label: "כנסים", description: "כנסים ואירועים מקצועיים" },
 ]
 
 const SCAN_STEPS = [
@@ -109,8 +122,12 @@ export default function OnboardingPage() {
     tenders: true,
     trends: true,
     news: true,
-    growth_signals: true,
+    conferences: true,
   })
+
+  // Industry "אחר" free text
+  const [industryCustom, setIndustryCustom] = useState("")
+  const effectiveIndustry = industry === 'אחר' ? industryCustom.trim() : industry
 
   const addCompetitor = () => {
     if (newCompetitorName.trim()) {
@@ -218,7 +235,7 @@ export default function OnboardingPage() {
         id: user.id,
         name: companyName,
         website,
-        industry,
+        industry: effectiveIndustry,
         city,
         size: companySize,
         description,
@@ -298,7 +315,7 @@ export default function OnboardingPage() {
 
   const canProceed = () => {
     if (currentStep === 1) {
-      return companyName.trim() !== "" && industry !== ""
+      return companyName.trim() !== "" && !!effectiveIndustry
     }
     return true
   }
@@ -436,7 +453,7 @@ export default function OnboardingPage() {
                 
                 <div className="space-y-2">
                   <Label htmlFor="industry">תעשייה *</Label>
-                  <Select value={industry} onValueChange={setIndustry}>
+                  <Select value={industry} onValueChange={(v) => { setIndustry(v); if (v !== 'אחר') setIndustryCustom("") }}>
                     <SelectTrigger className="bg-background">
                       <SelectValue placeholder="בחר תעשייה" />
                     </SelectTrigger>
@@ -448,6 +465,14 @@ export default function OnboardingPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {industry === 'אחר' && (
+                    <Input
+                      value={industryCustom}
+                      onChange={(e) => setIndustryCustom(e.target.value)}
+                      placeholder="פרט את תחום העסק..."
+                      className="bg-background mt-2"
+                    />
+                  )}
                 </div>
                 
                 <div className="space-y-2">

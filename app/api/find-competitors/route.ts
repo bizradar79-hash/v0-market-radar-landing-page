@@ -1,20 +1,76 @@
 import { getFullContext } from '@/lib/context'
+import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-export async function POST() {
+async function callXAI(prompt: string): Promise<any[]> {
+  const response = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'grok-4-fast-non-reasoning',
+      input: [{ role: 'user', content: prompt }],
+      tools: [{ type: 'web_search' }],
+    }),
+  })
+  const data = await response.json()
+  if (!response.ok || !data.output) return []
+  const text = data.output
+    .filter((item: any) => item.type === 'message')
+    .flatMap((item: any) => item.content)
+    .filter((c: any) => c.type === 'output_text')
+    .map((c: any) => c.text)
+    .join('')
+  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+  const start = clean.indexOf('[')
+  const end = clean.lastIndexOf(']')
+  if (start === -1 || end <= start) return []
+  try {
+    const list = JSON.parse(clean.slice(start, end + 1))
+    return Array.isArray(list) ? list : []
+  } catch { return [] }
+}
+
+export async function POST(request: Request) {
   const steps: Record<string, any> = {}
   try {
-    steps.context = 'starting'
-    const ctx = await getFullContext()
-    if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
-    steps.context = { ok: true, company: ctx.company?.name }
+    let body: any = {}
+    try { body = await request.json() } catch {}
 
-    const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
-    const website = ctx.company?.website || ''
-    const companyName = ctx.company?.name || ''
+    const ctx = await getFullContext()
+
+    let businessOverview: string
+    let website: string
+    let companyName: string
+    let saveToDb = false
+    let supabase: any = null
+    let userId: string | null = null
+
+    if (ctx) {
+      // Normal path — company profile exists
+      businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
+      website = ctx.company?.website || ''
+      companyName = ctx.company?.name || ''
+      saveToDb = true
+      supabase = ctx.supabase
+      userId = ctx.user.id
+      steps.context = { ok: true, company: ctx.company?.name }
+    } else {
+      // Onboarding path — company not yet saved, auth via session/bearer
+      const serverClient = await createClient()
+      const { data: { user } } = await serverClient.auth.getUser()
+      if (!user) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
+
+      businessOverview = [body.industry, body.description].filter(Boolean).join(' — ')
+      website = body.website || ''
+      companyName = ''
+      steps.context = { ok: true, onboarding: true }
+    }
 
     const prompt = `בהתבסס על הסקירה הבאה של עסק ישראלי: ${businessOverview}
 ואתר העסק: ${website}
@@ -32,38 +88,7 @@ export async function POST() {
 CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
     steps.ai = { status: 'starting' }
-
-    const response = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search' }],
-      }),
-    })
-    const data = await response.json()
-    if (!response.ok || !data.output) {
-      steps.ai.error = data
-      return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
-    }
-    const text = data.output
-      .filter((item: any) => item.type === 'message')
-      .flatMap((item: any) => item.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('')
-
-    // Strip markdown fences if present, then parse JSON
-    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-    const start = clean.indexOf('[')
-    const end = clean.lastIndexOf(']')
-    const list = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
-
-    let competitors: any[] = Array.isArray(list) ? list : []
+    let competitors = await callXAI(prompt)
 
     steps.ai = {
       ok: true,
@@ -80,7 +105,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     // Filter out own company
     competitors = competitors.filter((c: any) => {
       const domain = extractDomain(c.website || '')
-      return domain !== ctx.companyDomain &&
+      return domain !== extractDomain(website) &&
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
@@ -104,23 +129,39 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return true
     })
 
-    steps.db = 'starting'
-    await ctx.supabase.from('competitors').delete().eq('company_id', ctx.user.id)
+    // Map to response shape
+    const mapped = competitors.map((c: any) => ({
+      name: c.name,
+      website: c.website,
+      services: c.services || '',
+      pricing: '',
+      threat_score: typeof c.threat_score === 'number'
+        ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
+        : 70,
+      reason: c.services || '',
+      similarity: typeof c.threat_score === 'number' ? Math.min(100, c.threat_score) : 70,
+    }))
 
-    if (competitors.length === 0) {
+    // Skip DB save during onboarding (no company profile yet)
+    if (!saveToDb || !supabase || !userId) {
+      return NextResponse.json({ success: true, competitors: mapped, count: mapped.length, steps })
+    }
+
+    steps.db = 'starting'
+    await supabase.from('competitors').delete().eq('company_id', userId)
+
+    if (mapped.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
     }
 
-    const { data: saved, error: insertError } = await ctx.supabase.from('competitors').insert(
-      competitors.map((c: any) => ({
+    const { data: saved, error: insertError } = await supabase.from('competitors').insert(
+      mapped.map((c: any) => ({
         name: c.name,
         website: c.website,
-        services: c.services || '',
+        services: c.services,
         pricing: '',
-        threat_score: typeof c.threat_score === 'number'
-          ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
-          : 70,
-        company_id: ctx.user.id,
+        threat_score: c.threat_score,
+        company_id: userId,
       }))
     ).select()
 
