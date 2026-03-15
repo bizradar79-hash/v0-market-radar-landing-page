@@ -153,6 +153,12 @@ export default function CompetitorsPage() {
   async function addManualCompetitor() {
     if (!addName.trim()) return
     setAdding(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      toast({ title: "שגיאת אימות", description: "יש להתחבר מחדש", variant: "destructive" })
+      setAdding(false)
+      return
+    }
     const { data, error } = await supabase.from("competitors").insert({
       name: addName.trim(),
       website: addWebsite.trim(),
@@ -161,6 +167,7 @@ export default function CompetitorsPage() {
       threat_score: 70,
       trend: 'stable',
       source: 'manual',
+      company_id: user.id,
     }).select().single()
     if (!error && data) {
       setCompetitors(prev => [data, ...prev])
