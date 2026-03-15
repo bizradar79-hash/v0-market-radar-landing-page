@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
   Table,
@@ -47,6 +49,9 @@ import {
   XCircle,
   Lightbulb,
   ShieldAlert,
+  Pencil,
+  RefreshCw,
+  UserPlus,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -61,6 +66,7 @@ interface Competitor {
   last_activity: string
   threat_score: number
   trend: string
+  source: string | null
   created_at: string
 }
 
@@ -87,6 +93,14 @@ export default function CompetitorsPage() {
   const [analysis, setAnalysis] = useState<CompetitorAnalysis | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [activeTab, setActiveTab] = useState<ModalTab>('details')
+
+  // Edit dialog state (manual competitors only)
+  const [editingCompetitor, setEditingCompetitor] = useState<Competitor | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editWebsite, setEditWebsite] = useState("")
+  const [editServices, setEditServices] = useState("")
+  const [saving, setSaving] = useState(false)
+
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -98,6 +112,7 @@ export default function CompetitorsPage() {
     const { data, error } = await supabase
       .from("competitors")
       .select("*")
+      .order("source", { ascending: true })   // manual first
       .order("threat_score", { ascending: false })
 
     if (!error && data) setCompetitors(data)
@@ -126,6 +141,34 @@ export default function CompetitorsPage() {
     setSelectedCompetitor(competitor)
     setActiveTab(tab)
     setShowModal(true)
+  }
+
+  function openEdit(competitor: Competitor) {
+    setEditingCompetitor(competitor)
+    setEditName(competitor.name)
+    setEditWebsite(competitor.website)
+    setEditServices(competitor.services)
+  }
+
+  async function saveEdit() {
+    if (!editingCompetitor) return
+    setSaving(true)
+    const { error } = await supabase
+      .from("competitors")
+      .update({ name: editName.trim(), website: editWebsite.trim(), services: editServices.trim() })
+      .eq("id", editingCompetitor.id)
+    if (!error) {
+      setCompetitors(prev => prev.map(c =>
+        c.id === editingCompetitor.id
+          ? { ...c, name: editName.trim(), website: editWebsite.trim(), services: editServices.trim() }
+          : c
+      ))
+      setEditingCompetitor(null)
+      toast({ title: "עודכן בהצלחה" })
+    } else {
+      toast({ title: "שגיאה בשמירה", variant: "destructive" })
+    }
+    setSaving(false)
   }
 
   async function analyzeCompetitor(competitor: Competitor) {
@@ -178,14 +221,6 @@ export default function CompetitorsPage() {
     }
   }
 
-  const getTrendText = (trend: string) => {
-    switch (trend) {
-      case "up": return "עולה"
-      case "down": return "יורד"
-      default: return "יציב"
-    }
-  }
-
   const getThreatColor = (score: number) => {
     if (score >= 80) return "text-red-600"
     if (score >= 60) return "text-yellow-600"
@@ -211,6 +246,103 @@ export default function CompetitorsPage() {
     if (diffDays === 1) return "לפני יום"
     return `לפני ${diffDays} ימים`
   }
+
+  const isManual = (c: Competitor) => c.source === 'manual'
+  const manualCompetitors = competitors.filter(isManual)
+  const autoCompetitors = competitors.filter(c => !isManual(c))
+
+  const CompetitorTable = ({
+    items,
+    showEditAction,
+  }: {
+    items: Competitor[]
+    showEditAction: boolean
+  }) => (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-right">שם</TableHead>
+            <TableHead className="text-right hidden md:table-cell">שירותים</TableHead>
+            <TableHead className="text-right">ציון איום</TableHead>
+            <TableHead className="text-right">מגמה</TableHead>
+            <TableHead className="text-right">פעולות</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((competitor) => (
+            <TableRow key={competitor.id}>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openModal(competitor, 'details')}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
+                    title="פרטים"
+                  >
+                    <Eye className="h-3 w-3" />
+                  </button>
+                  <span className="font-medium">{competitor.name}</span>
+                </div>
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                <span className="text-sm text-muted-foreground">{competitor.services || "לא ידוע"}</span>
+              </TableCell>
+              <TableCell>
+                <div className="w-24 space-y-1">
+                  <span className={`text-sm font-semibold ${getThreatColor(competitor.threat_score)}`}>
+                    {competitor.threat_score}
+                  </span>
+                  <Progress value={competitor.threat_score} className="h-1.5" />
+                </div>
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1.5">
+                  {getTrendIcon(competitor.trend)}
+                </div>
+              </TableCell>
+              <TableCell>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => analyzeCompetitor(competitor)}>
+                      <Brain className="ml-2 h-4 w-4" />
+                      ניתוח AI
+                    </DropdownMenuItem>
+                    {showEditAction && (
+                      <DropdownMenuItem onClick={() => openEdit(competitor)}>
+                        <Pencil className="ml-2 h-4 w-4" />
+                        ערוך
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => openModal(competitor, 'details')}>
+                      <Eye className="ml-2 h-4 w-4" />
+                      צפה בפרטים
+                    </DropdownMenuItem>
+                    {competitor.website && (
+                      <DropdownMenuItem asChild>
+                        <a href={competitor.website.startsWith('http') ? competitor.website : `https://${competitor.website}`} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="ml-2 h-4 w-4" />
+                          פתח אתר
+                        </a>
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => deleteCompetitor(competitor.id)} className="text-red-600">
+                      <Trash2 className="ml-2 h-4 w-4" />
+                      מחק
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
 
   if (loading) {
     return (
@@ -245,94 +377,64 @@ export default function CompetitorsPage() {
         </div>
       </div>
 
-      {/* Comparison Table */}
+      {/* Section 1: Manual competitors */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Target className="h-5 w-5 text-primary" />
-            טבלת השוואה
-          </CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <UserPlus className="h-5 w-5 text-primary" />
+              מתחרים שהוספת
+              {manualCompetitors.length > 0 && (
+                <Badge variant="secondary">{manualCompetitors.length}</Badge>
+              )}
+            </CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-right">שם</TableHead>
-                  <TableHead className="text-right hidden md:table-cell">שירותים</TableHead>
-                  <TableHead className="text-right">ציון איום</TableHead>
-                  <TableHead className="text-right">מגמה</TableHead>
-                  <TableHead className="text-right">פעולות</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {competitors.map((competitor) => (
-                  <TableRow key={competitor.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openModal(competitor, 'details')}
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
-                          title="פרטים"
-                        >
-                          <Eye className="h-3 w-3" />
-                        </button>
-                        <span className="font-medium">{competitor.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <span className="text-sm text-muted-foreground">{competitor.services || "לא ידוע"}</span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="w-24 space-y-1">
-                        <span className={`text-sm font-semibold ${getThreatColor(competitor.threat_score)}`}>
-                          {competitor.threat_score}
-                        </span>
-                        <Progress value={competitor.threat_score} className="h-1.5" />
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1.5">
-                        {getTrendIcon(competitor.trend)}
-                        <span className="text-xs text-muted-foreground">{getTrendText(competitor.trend)}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => analyzeCompetitor(competitor)}>
-                            <Brain className="ml-2 h-4 w-4" />
-                            ניתוח AI
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openModal(competitor, 'details')}>
-                            <Eye className="ml-2 h-4 w-4" />
-                            צפה בפרטים
-                          </DropdownMenuItem>
-                          {competitor.website && (
-                            <DropdownMenuItem asChild>
-                              <a href={competitor.website.startsWith('http') ? competitor.website : `https://${competitor.website}`} target="_blank" rel="noopener noreferrer">
-                                <ExternalLink className="ml-2 h-4 w-4" />
-                                פתח אתר
-                              </a>
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem onClick={() => deleteCompetitor(competitor.id)} className="text-red-600">
-                            <Trash2 className="ml-2 h-4 w-4" />
-                            מחק
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          {manualCompetitors.length > 0 ? (
+            <CompetitorTable items={manualCompetitors} showEditAction={true} />
+          ) : (
+            <div className="px-6 py-8 text-center text-sm text-muted-foreground">
+              עדיין לא הוספת מתחרים ידנית. מתחרים שתוסיף ידנית לא יימחקו בסריקות אוטומטיות.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Section 2: Auto-discovered competitors */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Sparkles className="h-5 w-5 text-primary" />
+              מתחרים שנמצאו אוטומטית
+              {autoCompetitors.length > 0 && (
+                <Badge variant="secondary">{autoCompetitors.length}</Badge>
+              )}
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={discoverCompetitors}
+              disabled={discovering}
+            >
+              {discovering ? (
+                <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="ml-2 h-3.5 w-3.5" />
+              )}
+              רענן
+            </Button>
           </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {autoCompetitors.length > 0 ? (
+            <CompetitorTable items={autoCompetitors} showEditAction={false} />
+          ) : (
+            <div className="px-6 py-8 text-center text-sm text-muted-foreground">
+              לא נמצאו מתחרים אוטומטית. לחץ "רענן" כדי לסרוק.
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -360,6 +462,9 @@ export default function CompetitorsPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{competitor.name}</span>
                       <Badge variant="secondary" className="text-xs">{competitor.services || "לא ידוע"}</Badge>
+                      {isManual(competitor) && (
+                        <Badge variant="outline" className="text-xs border-primary/40 text-primary">ידני</Badge>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground">{competitor.last_activity || "לחץ לניתוח עם AI"}</p>
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -386,19 +491,37 @@ export default function CompetitorsPage() {
         </Card>
       )}
 
-      {competitors.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Target className="h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">לא נמצאו מתחרים במעקב</p>
-            <Button className="mt-4" onClick={discoverCompetitors} disabled={discovering}>
-              <Sparkles className="ml-2 h-4 w-4" />גלה מתחרים עם AI
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {/* Edit Dialog (manual competitors only) */}
+      <Dialog open={!!editingCompetitor} onOpenChange={(open) => { if (!open) setEditingCompetitor(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>ערוך מתחרה</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label>שם</Label>
+              <Input value={editName} onChange={e => setEditName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>אתר</Label>
+              <Input dir="ltr" value={editWebsite} onChange={e => setEditWebsite(e.target.value)} placeholder="https://" className="text-left" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>שירותים</Label>
+              <Input value={editServices} onChange={e => setEditServices(e.target.value)} />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button onClick={saveEdit} disabled={saving || !editName.trim()}>
+                {saving && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                שמור
+              </Button>
+              <Button variant="outline" onClick={() => setEditingCompetitor(null)}>ביטול</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-      {/* Competitor Modal with Tabs */}
+      {/* Competitor Detail / AI Modal */}
       <Dialog open={showModal} onOpenChange={(open) => {
         if (!open) { setShowModal(false); setSelectedCompetitor(null); setAnalysis(null) }
       }}>
@@ -420,7 +543,6 @@ export default function CompetitorsPage() {
                   </div>
                 </DialogTitle>
 
-                {/* Tabs */}
                 <div className="flex gap-0 border-b mt-2">
                   {([
                     { id: 'details' as ModalTab, label: 'פרטים', icon: Eye },
@@ -451,7 +573,6 @@ export default function CompetitorsPage() {
               </DialogHeader>
 
               <div className="mt-4">
-                {/* Details Tab */}
                 {activeTab === 'details' && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -475,6 +596,12 @@ export default function CompetitorsPage() {
                           {selectedCompetitor.threat_score}
                         </p>
                       </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">מקור</p>
+                        <Badge variant="outline" className={isManual(selectedCompetitor) ? "border-primary/40 text-primary" : "border-muted-foreground/40"}>
+                          {isManual(selectedCompetitor) ? "הוסף ידנית" : "נמצא אוטומטית"}
+                        </Badge>
+                      </div>
                     </div>
                     {selectedCompetitor.last_activity && (
                       <div>
@@ -486,6 +613,11 @@ export default function CompetitorsPage() {
                       <Button onClick={() => { setActiveTab('ai'); analyzeCompetitor(selectedCompetitor) }}>
                         <Brain className="ml-2 h-4 w-4" />נתח עם AI
                       </Button>
+                      {isManual(selectedCompetitor) && (
+                        <Button variant="outline" onClick={() => { setShowModal(false); openEdit(selectedCompetitor) }}>
+                          <Pencil className="ml-2 h-4 w-4" />ערוך
+                        </Button>
+                      )}
                       {selectedCompetitor.website && (
                         <Button variant="outline" asChild>
                           <a href={selectedCompetitor.website.startsWith('http') ? selectedCompetitor.website : `https://${selectedCompetitor.website}`} target="_blank" rel="noopener noreferrer">
@@ -500,7 +632,6 @@ export default function CompetitorsPage() {
                   </div>
                 )}
 
-                {/* AI Analysis Tab */}
                 {activeTab === 'ai' && (
                   <div>
                     {analyzing === selectedCompetitor.id ? (
@@ -610,7 +741,6 @@ export default function CompetitorsPage() {
                     )}
                   </div>
                 )}
-
               </div>
             </>
           )}

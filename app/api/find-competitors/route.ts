@@ -148,20 +148,42 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     }
 
     steps.db = 'starting'
-    await supabase.from('competitors').delete().eq('company_id', userId)
 
-    if (mapped.length === 0) {
+    // Fetch existing manual competitors so we can preserve and deduplicate them
+    const { data: manualComps } = await supabase
+      .from('competitors')
+      .select('website')
+      .eq('company_id', userId)
+      .eq('source', 'manual')
+    const manualDomains = new Set(
+      (manualComps || []).map((c: any) => extractDomain(c.website || '')).filter(Boolean)
+    )
+    steps.db = { manualKept: manualDomains.size }
+
+    // Delete only auto-discovered competitors — never touch manual ones
+    await supabase.from('competitors').delete()
+      .eq('company_id', userId)
+      .or('source.eq.auto,source.is.null')
+
+    // Remove new auto entries that would duplicate a manual competitor
+    const deduped = mapped.filter((c: any) => {
+      const domain = extractDomain(c.website || '')
+      return !domain || !manualDomains.has(domain)
+    })
+
+    if (deduped.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
     }
 
     const { data: saved, error: insertError } = await supabase.from('competitors').insert(
-      mapped.map((c: any) => ({
+      deduped.map((c: any) => ({
         name: c.name,
         website: c.website,
         services: c.services,
         pricing: '',
         threat_score: c.threat_score,
         company_id: userId,
+        source: 'auto',
       }))
     ).select()
 

@@ -258,7 +258,7 @@ export default function OnboardingPage() {
         throw companyError
       }
 
-      // Insert manually-added competitors
+      // Insert manually-added competitors — always preserved, never overwritten by AI scan
       if (competitors.length > 0) {
         const competitorRecords = competitors.map(c => ({
           company_id: user.id,
@@ -267,7 +267,8 @@ export default function OnboardingPage() {
           services: industry,
           positioning: "מתחרה ישיר",
           threat_score: Math.floor(Math.random() * 30) + 50,
-          trend: "stable"
+          trend: "stable",
+          source: "manual",
         }))
         await supabase.from("competitors").insert(competitorRecords)
       }
