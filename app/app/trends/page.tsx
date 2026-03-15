@@ -4,10 +4,9 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import { TrendingUp, TrendingDown, Minus, Loader2, Sparkles } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -16,32 +15,34 @@ interface Trend {
   company_id: string
   name: string
   category: string
-  score: number
   direction: string
   description: string
   created_at: string
 }
 
-function getTrendIcon(direction: string) {
-  switch (direction) {
-    case "up":
-      return <TrendingUp className="h-4 w-4 text-green-600" />
-    case "down":
-      return <TrendingDown className="h-4 w-4 text-red-600" />
-    default:
-      return <Minus className="h-4 w-4 text-yellow-600" />
+function getMomentumBadge(direction: string) {
+  if (direction === 'עולה' || direction === 'up') {
+    return (
+      <Badge className="bg-green-100 text-green-700">
+        <TrendingUp className="ml-1 h-3 w-3" />
+        עולה
+      </Badge>
+    )
   }
-}
-
-function getDirectionText(direction: string) {
-  switch (direction) {
-    case "up":
-      return "עולה"
-    case "down":
-      return "יורד"
-    default:
-      return "יציב"
+  if (direction === 'יורד' || direction === 'down') {
+    return (
+      <Badge className="bg-red-100 text-red-700">
+        <TrendingDown className="ml-1 h-3 w-3" />
+        יורד
+      </Badge>
+    )
   }
+  return (
+    <Badge className="bg-yellow-100 text-yellow-700">
+      <Minus className="ml-1 h-3 w-3" />
+      יציב
+    </Badge>
+  )
 }
 
 export default function TrendsPage() {
@@ -59,7 +60,7 @@ export default function TrendsPage() {
     const { data, error } = await supabase
       .from("trends")
       .select("*")
-      .order("score", { ascending: false })
+      .order("created_at", { ascending: false })
 
     if (!error && data) {
       setTrends(data)
@@ -72,17 +73,17 @@ export default function TrendsPage() {
     try {
       const response = await fetch("/api/generate-trends", { method: "POST" })
       const data = await response.json()
-      
+
       if (data.success) {
         await fetchTrends()
         toast({
-          title: "מגמות נוספו!",
-          description: `נמצאו ${data.count || 0} מגמות חדשות`,
+          title: "טרנדים נוספו!",
+          description: `נמצאו ${data.count || 0} טרנדים חדשים`,
         })
       } else {
         toast({
           title: "שגיאה",
-          description: data.error || "לא הצלחנו ליצור מגמות",
+          description: data.error || "לא הצלחנו ליצור טרנדים",
           variant: "destructive",
         })
       }
@@ -90,7 +91,7 @@ export default function TrendsPage() {
       console.error("Error generating trends:", error)
       toast({
         title: "שגיאה",
-        description: "אירעה שגיאה בעת יצירת המגמות",
+        description: "אירעה שגיאה בעת יצירת הטרנדים",
         variant: "destructive",
       })
     } finally {
@@ -106,6 +107,16 @@ export default function TrendsPage() {
     )
   }
 
+  // Group by source (stored in category)
+  const sourceGroups = trends.reduce((acc, t) => {
+    const src = t.category || 'אחר'
+    if (!acc[src]) acc[src] = []
+    acc[src].push(t)
+    return acc
+  }, {} as Record<string, Trend[]>)
+
+  const sources = Object.keys(sourceGroups)
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -118,50 +129,38 @@ export default function TrendsPage() {
           {generating ? (
             <>
               <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-              מנתח מגמות...
+              מנתח טרנדים...
             </>
           ) : (
             <>
               <Sparkles className="ml-2 h-4 w-4" />
-              גלה מגמות עם AI
+              גלה טרנדים עם AI
             </>
           )}
         </Button>
       </div>
 
-      {/* Trend Cards */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {trends.map((trend) => (
-          <Card key={trend.id}>
-            <CardContent className="p-5">
-              <div className="mb-4 flex items-start justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground">{trend.name}</h3>
-                  <Badge variant="secondary" className="mt-1">
-                    {trend.category}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  {getTrendIcon(trend.direction)}
-                  <span className="text-sm text-muted-foreground">
-                    {getDirectionText(trend.direction)}
-                  </span>
-                </div>
-              </div>
-
-              <p className="mb-4 text-sm text-muted-foreground">{trend.description}</p>
-
-              <div className="mb-4">
-                <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">ציון טרנד</span>
-                  <span className="font-semibold text-primary">{trend.score}/100</span>
-                </div>
-                <Progress value={trend.score} className="h-2" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* Trends grouped by source */}
+      {sources.map((source) => (
+        <div key={source} className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground border-b pb-2">{source}</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {sourceGroups[source].map((trend) => (
+              <Card key={trend.id} className="transition-shadow hover:shadow-md">
+                <CardContent className="p-5">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <h3 className="text-base font-semibold text-foreground leading-snug">
+                      {trend.name}
+                    </h3>
+                    {getMomentumBadge(trend.direction)}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{trend.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
 
       {trends.length === 0 && (
         <Card>
@@ -170,7 +169,7 @@ export default function TrendsPage() {
             <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
             <Button className="mt-4" onClick={generateTrends} disabled={generating}>
               <Sparkles className="ml-2 h-4 w-4" />
-              גלה מגמות עם AI
+              גלה טרנדים עם AI
             </Button>
           </CardContent>
         </Card>

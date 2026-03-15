@@ -1,7 +1,4 @@
 import { getFullContext } from '@/lib/context'
-import { analyzeWithAI } from '@/lib/ai'
-import { multiSearch } from '@/lib/search'
-import { deduplicateByField } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -14,54 +11,83 @@ export async function POST() {
     if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
     steps.context = { ok: true, company: ctx.company?.name }
 
-    steps.search = 'starting'
-    const { primaryKeywords, products, industry } = ctx.companyProfile
-    const results = await multiSearch([
-      `טרנדים ${primaryKeywords} ${industry} ישראל 2026`,
-      `${products} מגמות שוק ישראל 2025 2026`,
-      `${industry} growth trends Israel 2026`,
-    ])
-    steps.search = { ok: true, count: results.length }
+    const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 
-    steps.ai = 'starting'
-    const data = await analyzeWithAI(`זהה 10 טרנדים עסקיים מהמידע:
+    const prompt = `בהתבסס על תחום העסק: ${businessOverview}
+מצא 10 טרנדים מובילים מהשבועיים האחרונים הרלוונטיים לתחום זה.
 
-${ctx.context}
+חפש במקורות הבאים:
+1. גוגל טרנד — מילות חיפוש טרנדיות בתחום
+2. רשתות חברתיות — האשטאגים ונושאים ויראליים
+3. מנועי AI ופורומים מקצועיים — נושאים חמים
 
-תוצאות חיפוש:
-${results.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
+לכל טרנד ציין:
+- מקור: גוגל טרנד / רשתות חברתיות / AI ופורומים
+- עוצמת הטרנד: עולה / יציב / יורד
 
-כללים קשיחים:
-- CRITICAL: Use ONLY data from the search results provided. Do NOT invent, hallucinate, or add any trend, statistic, or data that does not appear in the search results. If insufficient real data found, return empty array.
+חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
+החזר JSON בלבד:
+[{"title": "", "description": "", "source": "", "momentum": "עולה/יציב/יורד", "keywords": [], "url": ""}]`
 
-{
-  "trends": [{
-    "name": "שם טרנד קצר",
-    "description": "תיאור 2-3 משפטים",
-    "score": 78,
-    "direction": "up",
-    "category": "קטגוריה"
-  }]
-}`)
-    let list = Array.isArray(data?.trends) ? data.trends : []
+    steps.ai = { status: 'starting' }
+    const response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok || !data.output) {
+      steps.ai.error = data
+      return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
+    }
+    const text = data.output
+      .filter((item: any) => item.type === 'message')
+      .flatMap((item: any) => item.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('')
 
-    // Deduplicate by name
-    list = deduplicateByField(list, 'name')
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const start = clean.indexOf('[')
+    const end = clean.lastIndexOf(']')
+    let list: any[] = start !== -1 && end > start ? JSON.parse(clean.slice(start, end + 1)) : []
 
-    steps.ai = { ok: true, count: list.length, keys: Object.keys(data || {}) }
+    steps.ai = { ok: true, count: list.length }
+
+    // Deduplicate by title
+    const seenTitles = new Set<string>()
+    list = list.filter((t: any) => {
+      const key = (t.title || '').toLowerCase()
+      if (!key || seenTitles.has(key)) return false
+      seenTitles.add(key)
+      return true
+    })
 
     steps.db = 'starting'
     await ctx.supabase.from('trends').delete().eq('company_id', ctx.user.id)
+
+    if (list.length === 0) {
+      return NextResponse.json({ success: true, trends: [], count: 0, steps })
+    }
+
     const { data: saved, error: insertError } = await ctx.supabase.from('trends').insert(
       list.map((t: any) => ({
-        name: t.name,
-        description: t.description,
-        score: t.score,
-        direction: t.direction,
-        category: t.category,
+        name: t.title || '',
+        description: t.description || '',
+        score: 75,
+        direction: t.momentum || 'יציב',
+        category: t.source || '',
         company_id: ctx.user.id,
       }))
     ).select()
+
     if (insertError) {
       steps.db = { ok: false, error: insertError.message, code: insertError.code }
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
