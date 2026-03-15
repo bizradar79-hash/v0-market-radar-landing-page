@@ -226,7 +226,7 @@ export default function ReportsPage() {
             .meta { color: #6b7280; font-size: 13px; }
             .company-profile { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 16px 0; }
             .company-profile p { margin: 4px 0; font-size: 14px; }
-            .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 16px 0; }
+            .grid-4 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin: 16px 0; }
             .stat { background: #f3f4f6; padding: 16px; border-radius: 8px; text-align: center; }
             .stat-value { font-size: 28px; font-weight: bold; color: #3b82f6; }
             .stat-label { color: #6b7280; font-size: 12px; }
@@ -267,6 +267,9 @@ export default function ReportsPage() {
             <div class="stat"><div class="stat-value">${reportData.highlights.competitors}</div><div class="stat-label">מתחרים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.leads}</div><div class="stat-label">לידים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.alerts}</div><div class="stat-label">התראות</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.trends}</div><div class="stat-label">טרנדים</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.news}</div><div class="stat-label">חדשות</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.conferences}</div><div class="stat-label">כנסים</div></div>
           </div>
 
           ${reportData.competitors.length > 0 ? `
