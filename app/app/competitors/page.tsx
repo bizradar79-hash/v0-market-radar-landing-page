@@ -67,6 +67,8 @@ interface Competitor {
   threat_score: number
   trend: string
   source: string | null
+  google_rating: number | null
+  google_review_count: number | null
   created_at: string
 }
 
@@ -110,6 +112,8 @@ export default function CompetitorsPage() {
   const [editThreatScore, setEditThreatScore] = useState("")
   const [saving, setSaving] = useState(false)
 
+  const [fetchingRating, setFetchingRating] = useState<Record<string, boolean>>({})
+
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -150,6 +154,40 @@ export default function CompetitorsPage() {
     setSelectedCompetitor(competitor)
     setActiveTab(tab)
     setShowModal(true)
+    // Lazy-fetch Google rating on first open
+    if (competitor.google_rating == null && !fetchingRating[competitor.id]) {
+      fetchGoogleRating(competitor)
+    }
+  }
+
+  async function fetchGoogleRating(competitor: Competitor) {
+    setFetchingRating(prev => ({ ...prev, [competitor.id]: true }))
+    try {
+      const res = await fetch('/api/fetch-competitor-rating', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          competitorId: competitor.id,
+          name: competitor.name,
+          website: competitor.website,
+        }),
+      })
+      const result = await res.json()
+      if (result.success) {
+        setCompetitors(prev => prev.map(c =>
+          c.id === competitor.id
+            ? { ...c, google_rating: result.rating, google_review_count: result.reviewCount }
+            : c
+        ))
+        setSelectedCompetitor(prev =>
+          prev?.id === competitor.id
+            ? { ...prev, google_rating: result.rating, google_review_count: result.reviewCount }
+            : prev
+        )
+      }
+    } catch { /* silent */ } finally {
+      setFetchingRating(prev => ({ ...prev, [competitor.id]: false }))
+    }
   }
 
   async function addManualCompetitor() {
@@ -303,6 +341,8 @@ export default function CompetitorsPage() {
           <TableRow>
             <TableHead className="text-right">שם</TableHead>
             <TableHead className="text-right hidden md:table-cell">שירותים</TableHead>
+            <TableHead className="text-right hidden lg:table-cell">דירוג גוגל</TableHead>
+            <TableHead className="text-right hidden lg:table-cell">ביקורות</TableHead>
             <TableHead className="text-right">ציון איום</TableHead>
             <TableHead className="text-right">מגמה</TableHead>
             <TableHead className="text-right">פעולות</TableHead>
@@ -325,6 +365,22 @@ export default function CompetitorsPage() {
               </TableCell>
               <TableCell className="hidden md:table-cell">
                 <span className="text-sm text-muted-foreground">{competitor.services || "לא ידוע"}</span>
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                {fetchingRating[competitor.id] ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : competitor.google_rating != null ? (
+                  <span className="text-sm font-medium">⭐ {competitor.google_rating.toFixed(1)}</span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">—</span>
+                )}
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                {competitor.google_review_count != null ? (
+                  <span className="text-sm text-muted-foreground">{competitor.google_review_count.toLocaleString()}</span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell>
                 <div className="w-24 space-y-1">
@@ -682,6 +738,26 @@ export default function CompetitorsPage() {
                         <Badge variant="outline" className={isManual(selectedCompetitor) ? "border-primary/40 text-primary" : "border-muted-foreground/40"}>
                           {isManual(selectedCompetitor) ? "הוסף ידנית" : "נמצא אוטומטית"}
                         </Badge>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">דירוג גוגל</p>
+                        {fetchingRating[selectedCompetitor.id] ? (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">מחפש...</span>
+                          </div>
+                        ) : selectedCompetitor.google_rating != null ? (
+                          <p className="font-medium">
+                            ⭐ {selectedCompetitor.google_rating.toFixed(1)}
+                            {selectedCompetitor.google_review_count != null && (
+                              <span className="text-sm text-muted-foreground font-normal mr-1.5">
+                                ({selectedCompetitor.google_review_count.toLocaleString()} ביקורות)
+                              </span>
+                            )}
+                          </p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">לא נמצא</p>
+                        )}
                       </div>
                     </div>
                     {selectedCompetitor.last_activity && (
