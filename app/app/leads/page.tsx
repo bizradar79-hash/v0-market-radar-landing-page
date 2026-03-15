@@ -253,7 +253,7 @@ export default function LeadsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
-                    <span className="text-sm text-muted-foreground">
+                    <span className="max-w-[250px] whitespace-normal line-clamp-3 text-sm text-muted-foreground block">
                       {lead.reason || "ביקור באתר"}
                     </span>
                   </TableCell>
