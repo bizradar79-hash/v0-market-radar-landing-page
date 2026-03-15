@@ -99,6 +99,7 @@ export default function CompetitorsPage() {
   const [addName, setAddName] = useState("")
   const [addWebsite, setAddWebsite] = useState("")
   const [addServices, setAddServices] = useState("")
+  const [addThreatScore, setAddThreatScore] = useState("")
   const [adding, setAdding] = useState(false)
 
   // Edit dialog state (manual competitors only)
@@ -106,6 +107,7 @@ export default function CompetitorsPage() {
   const [editName, setEditName] = useState("")
   const [editWebsite, setEditWebsite] = useState("")
   const [editServices, setEditServices] = useState("")
+  const [editThreatScore, setEditThreatScore] = useState("")
   const [saving, setSaving] = useState(false)
 
   const supabase = createClient()
@@ -159,12 +161,13 @@ export default function CompetitorsPage() {
       setAdding(false)
       return
     }
+    const scoreVal = parseInt(addThreatScore)
     const { data, error } = await supabase.from("competitors").insert({
       name: addName.trim(),
       website: addWebsite.trim(),
       services: addServices.trim(),
       pricing: '',
-      threat_score: 70,
+      threat_score: !isNaN(scoreVal) ? Math.min(100, Math.max(0, scoreVal)) : null,
       trend: 'stable',
       source: 'manual',
       company_id: user.id,
@@ -172,7 +175,7 @@ export default function CompetitorsPage() {
     if (!error && data) {
       setCompetitors(prev => [data, ...prev])
       setShowAddDialog(false)
-      setAddName(""); setAddWebsite(""); setAddServices("")
+      setAddName(""); setAddWebsite(""); setAddServices(""); setAddThreatScore("")
       toast({ title: "המתחרה נוסף" })
     } else {
       toast({ title: "שגיאה בהוספה", description: error?.message, variant: "destructive" })
@@ -185,20 +188,19 @@ export default function CompetitorsPage() {
     setEditName(competitor.name)
     setEditWebsite(competitor.website)
     setEditServices(competitor.services)
+    setEditThreatScore(competitor.threat_score != null ? String(competitor.threat_score) : '')
   }
 
   async function saveEdit() {
     if (!editingCompetitor) return
     setSaving(true)
-    const { error } = await supabase
-      .from("competitors")
-      .update({ name: editName.trim(), website: editWebsite.trim(), services: editServices.trim() })
-      .eq("id", editingCompetitor.id)
+    const scoreVal = parseInt(editThreatScore)
+    const updates: any = { name: editName.trim(), website: editWebsite.trim(), services: editServices.trim() }
+    if (editThreatScore.trim() !== '') updates.threat_score = Math.min(100, Math.max(0, scoreVal || 0))
+    const { error } = await supabase.from("competitors").update(updates).eq("id", editingCompetitor.id)
     if (!error) {
       setCompetitors(prev => prev.map(c =>
-        c.id === editingCompetitor.id
-          ? { ...c, name: editName.trim(), website: editWebsite.trim(), services: editServices.trim() }
-          : c
+        c.id === editingCompetitor.id ? { ...c, ...updates } : c
       ))
       setEditingCompetitor(null)
       toast({ title: "עודכן בהצלחה" })
@@ -551,6 +553,10 @@ export default function CompetitorsPage() {
               <Label>שירותים</Label>
               <Input value={addServices} onChange={e => setAddServices(e.target.value)} placeholder="תאר את השירותים..." />
             </div>
+            <div className="space-y-1.5">
+              <Label>ציון איום (0-100)</Label>
+              <Input type="number" min="0" max="100" value={addThreatScore} onChange={e => setAddThreatScore(e.target.value)} placeholder="ריק = לא מוגדר" />
+            </div>
             <div className="flex gap-2 pt-2">
               <Button onClick={addManualCompetitor} disabled={adding || !addName.trim()}>
                 {adding && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
@@ -580,6 +586,10 @@ export default function CompetitorsPage() {
             <div className="space-y-1.5">
               <Label>שירותים</Label>
               <Input value={editServices} onChange={e => setEditServices(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>ציון איום (0-100)</Label>
+              <Input type="number" min="0" max="100" value={editThreatScore} onChange={e => setEditThreatScore(e.target.value)} placeholder="ריק = לא מוגדר" />
             </div>
             <div className="flex gap-2 pt-2">
               <Button onClick={saveEdit} disabled={saving || !editName.trim()}>
@@ -675,9 +685,13 @@ export default function CompetitorsPage() {
                       </div>
                     </div>
                     {selectedCompetitor.last_activity && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">פעילות אחרונה</p>
-                        <p>{selectedCompetitor.last_activity}</p>
+                      <div className="col-span-2">
+                        <p className="text-sm text-muted-foreground">
+                          {isManual(selectedCompetitor) ? 'פעילות אחרונה' : 'ניתוח ציון איום'}
+                        </p>
+                        <p className="text-sm mt-1 rounded-lg bg-muted/40 border px-3 py-2">
+                          {selectedCompetitor.last_activity}
+                        </p>
                       </div>
                     )}
                     <div className="flex gap-2 pt-4 border-t">

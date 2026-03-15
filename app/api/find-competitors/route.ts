@@ -80,10 +80,16 @@ export async function POST(request: Request) {
 
 חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
 
+לכל מתחרה תן threat_score 0-100 לפי שלושה קריטריונים:
+- גודל החברה וחלקה בשוק: 0-40 נקודות
+- חפיפה בשירותים/מוצרים: 0-40 נקודות
+- אזור גיאוגרפי משותף בישראל: 0-20 נקודות
+הסבר את הציון בשדה score_breakdown (משפט קצר בעברית).
+
 חפש מתחרים בעברית ובאנגלית. החזר את שמות החברות ותיאור השירותים בעברית.
 
 החזר JSON בלבד במבנה הזה:
-[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף"}]
+[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "score_breakdown": "", "type": "ישיר/עקיף"}]
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
@@ -138,6 +144,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       threat_score: typeof c.threat_score === 'number'
         ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
         : 70,
+      score_breakdown: c.score_breakdown || '',
       reason: c.services || '',
       similarity: typeof c.threat_score === 'number' ? Math.min(100, c.threat_score) : 70,
     }))
@@ -185,6 +192,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       services: c.services,
       pricing: '',
       threat_score: c.threat_score,
+      last_activity: c.score_breakdown || '',
       company_id: userId,
       source: 'auto',
     }))
