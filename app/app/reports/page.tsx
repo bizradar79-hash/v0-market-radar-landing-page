@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Users, Target, Loader2 } from "lucide-react"
+import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Users, Target, Loader2, Newspaper } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Company {
@@ -73,7 +73,7 @@ interface ReportData {
   weekRange: string
   generatedAt: string
   company: Company
-  highlights: { tenders: number; competitors: number; leads: number; alerts: number }
+  highlights: { tenders: number; competitors: number; leads: number; alerts: number; trends: number; news: number; conferences: number }
   competitors: Competitor[]
   leads: Lead[]
   tenders: Tender[]
@@ -185,6 +185,9 @@ export default function ReportsPage() {
         competitors: competitorsCount || 0,
         leads: leadsCount || 0,
         alerts: alertsCount || 0,
+        trends: trends?.length || 0,
+        news: news?.length || 0,
+        conferences: conferences?.length || 0,
       },
       competitors: comps || [],
       leads: leads || [],
@@ -418,7 +421,7 @@ export default function ReportsPage() {
 
         <CardContent className="p-6">
           {/* KPI highlights */}
-          <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
             <div className="rounded-lg bg-primary/10 p-4 text-center">
               <FileText className="mx-auto mb-2 h-6 w-6 text-primary" />
               <p className="text-2xl font-bold">{reportData.highlights.tenders}</p>
@@ -438,6 +441,21 @@ export default function ReportsPage() {
               <TrendingUp className="mx-auto mb-2 h-6 w-6 text-yellow-600" />
               <p className="text-2xl font-bold">{reportData.highlights.alerts}</p>
               <p className="text-sm text-muted-foreground">התראות</p>
+            </div>
+            <div className="rounded-lg bg-orange-100 p-4 text-center">
+              <TrendingUp className="mx-auto mb-2 h-6 w-6 text-orange-500" />
+              <p className="text-2xl font-bold">{reportData.highlights.trends}</p>
+              <p className="text-sm text-muted-foreground">טרנדים</p>
+            </div>
+            <div className="rounded-lg bg-sky-100 p-4 text-center">
+              <Newspaper className="mx-auto mb-2 h-6 w-6 text-sky-600" />
+              <p className="text-2xl font-bold">{reportData.highlights.news}</p>
+              <p className="text-sm text-muted-foreground">חדשות</p>
+            </div>
+            <div className="rounded-lg bg-purple-100 p-4 text-center">
+              <Calendar className="mx-auto mb-2 h-6 w-6 text-purple-600" />
+              <p className="text-2xl font-bold">{reportData.highlights.conferences}</p>
+              <p className="text-sm text-muted-foreground">כנסים</p>
             </div>
           </div>
 
