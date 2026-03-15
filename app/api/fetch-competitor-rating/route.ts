@@ -1,38 +1,23 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
 
-export const maxDuration = 30
+export const maxDuration = 60
 
 export async function POST(request: Request) {
-  const debug: Record<string, any> = {}
   try {
-    debug.step = 'auth'
     const ctx = await getFullContext()
-    if (!ctx) {
-      debug.error = 'getFullContext returned null — not authenticated'
-      return NextResponse.json({ success: false, debug }, { status: 401 })
-    }
-    debug.userId = ctx.user.id
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    debug.step = 'parse-body'
-    const body = await request.json()
-    const { competitorId, name, website } = body
-    debug.input = { competitorId, name, website }
+    const { competitorId, name, website } = await request.json()
+    if (!competitorId || !name) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
-    if (!competitorId || !name) {
-      debug.error = 'Missing competitorId or name'
-      return NextResponse.json({ success: false, debug }, { status: 400 })
-    }
+    const prompt = `חפש את הפרטים הבאים על העסק: ${name}${website ? ` (אתר: ${website})` : ''}
+מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
+לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
+החזר JSON בלבד:
+{"address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
 
-    debug.step = 'xai-call'
-    debug.model = 'grok-4-fast-non-reasoning'
-
-    const prompt = `מצא את הדירוג בגוגל ומספר הביקורות של העסק: ${name}${website ? ` (אתר: ${website})` : ''}
-החזר JSON בלבד: {"rating": 4.5, "review_count": 123}
-אם לא נמצא מידע — החזר {"rating": null, "review_count": null}
-CRITICAL: Output ONLY raw JSON object. No markdown, no explanation.`
-
-    const xaiRes = await fetch('https://api.x.ai/v1/responses', {
+    const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,22 +30,9 @@ CRITICAL: Output ONLY raw JSON object. No markdown, no explanation.`
       }),
     })
 
-    debug.xaiStatus = xaiRes.status
-    debug.xaiOk = xaiRes.ok
-
-    if (!xaiRes.ok) {
-      const errText = await xaiRes.text()
-      debug.xaiError = errText.slice(0, 500)
-      debug.hasXaiKey = !!process.env.XAI_API_KEY
-      return NextResponse.json({ success: false, debug }, { status: 500 })
-    }
-
-    const data = await xaiRes.json()
-    debug.xaiOutputCount = data.output?.length ?? 0
-
-    if (!data.output) {
-      debug.error = 'xAI returned no output field'
-      return NextResponse.json({ success: false, debug }, { status: 500 })
+    const data = await response.json()
+    if (!response.ok || !data.output) {
+      return NextResponse.json({ error: 'xAI error' }, { status: 500 })
     }
 
     const text = data.output
@@ -70,50 +42,29 @@ CRITICAL: Output ONLY raw JSON object. No markdown, no explanation.`
       .map((c: any) => c.text)
       .join('')
 
-    debug.rawText = text.slice(0, 400)
-
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const start = clean.indexOf('{')
     const end = clean.lastIndexOf('}')
-    debug.jsonFound = start !== -1 && end > start
 
-    let rating: number | null = null
-    let reviewCount: number | null = null
-
-    if (debug.jsonFound) {
-      try {
-        const parsed = JSON.parse(clean.slice(start, end + 1))
-        debug.parsed = parsed
-        rating = typeof parsed.rating === 'number' ? Math.min(5, Math.max(0, parsed.rating)) : null
-        reviewCount = typeof parsed.review_count === 'number' ? Math.max(0, Math.round(parsed.review_count)) : null
-      } catch (parseErr: any) {
-        debug.parseError = parseErr.message
-        debug.parseAttempt = clean.slice(start, end + 1).slice(0, 200)
-      }
+    let parsed: any = {}
+    if (start !== -1 && end > start) {
+      try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch {}
     }
 
-    debug.rating = rating
-    debug.reviewCount = reviewCount
+    const rating = typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null
+    const reviewCount = typeof parsed.review_count === 'number' ? parsed.review_count : null
 
-    // Save to DB
-    debug.step = 'db-update'
+    // Save to DB (run migration if columns missing: supabase/add_competitors_source.sql)
     const { error: dbError } = await ctx.supabase
       .from('competitors')
       .update({ google_rating: rating, google_review_count: reviewCount })
       .eq('id', competitorId)
       .eq('company_id', ctx.user.id)
+    if (dbError) console.warn('fetch-competitor-rating DB save failed:', dbError.message, dbError.code)
 
-    if (dbError) {
-      debug.dbError = { message: dbError.message, code: dbError.code }
-      debug.dbNote = 'Migration may not have been run — run supabase/add_competitors_source.sql'
-    } else {
-      debug.dbSaved = true
-    }
-
-    return NextResponse.json({ success: true, rating, reviewCount, debug })
+    return NextResponse.json({ success: true, rating, reviewCount })
   } catch (e: any) {
-    debug.exception = e?.message
-    debug.stack = e?.stack?.split('\n').slice(0, 5)
-    return NextResponse.json({ success: false, debug }, { status: 500 })
+    console.error('fetch-competitor-rating error:', e?.message)
+    return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }
