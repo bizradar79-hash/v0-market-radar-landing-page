@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
-export const maxDuration = 120
+export const maxDuration = 300
 
 async function fetchGoogleRating(name: string, website: string): Promise<{ rating: number | null; reviewCount: number | null }> {
   try {
