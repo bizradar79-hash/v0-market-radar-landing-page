@@ -2,164 +2,78 @@ import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 export async function GET() {
-  const ctx = await getFullContext()
-  if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const companyName = ctx.company?.name || ''
-  const city = ctx.company?.city || ''
-  if (!companyName) {
-    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' })
-  }
-
-  // Try Google Places API first if key exists
-  const placesKey = process.env.GOOGLE_PLACES_API_KEY
-  if (placesKey) {
-    try {
-      const searchQuery = encodeURIComponent(`${companyName} ${city}`)
-      const searchRes = await fetch(
-        `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&language=he&key=${placesKey}`
-      )
-      if (searchRes.ok) {
-        const searchData = await searchRes.json()
-        const place = searchData.results?.[0]
-        if (place) {
-          const detailsRes = await fetch(
-            `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=rating,user_ratings_total,reviews,formatted_address,formatted_phone_number,website&language=he&key=${placesKey}`
-          )
-          if (detailsRes.ok) {
-            const detailsData = await detailsRes.json()
-            const details = detailsData.result || {}
-            const result = {
-              rating: details.rating || place.rating || null,
-              reviewCount: details.user_ratings_total || place.user_ratings_total || 0,
-              address: details.formatted_address || place.formatted_address || '',
-              phone: details.formatted_phone_number || '',
-              website: details.website || '',
-              reviews: (details.reviews || []).map((r: any) => ({
-                author: r.author_name || '',
-                rating: r.rating || 0,
-                text: r.text || '',
-                time: r.relative_time_description || '',
-              })),
-              source: 'google',
-            }
-            // Persist to DB
-            await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
-            return NextResponse.json(result)
-          }
-        }
-      }
-    } catch (e: any) {
-      console.warn('google-places API failed, falling back to Serper:', e?.message)
-    }
-  }
-
-  const emptyResult = { rating: null, reviewCount: 0, reviews: [], address: '', phone: '', website: '' }
-  const searchQuery = `${companyName} ${city}`.trim()
-
-  // Fallback 1: DuckDuckGo Infobox (free, no key)
   try {
-    const ddgRes = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(searchQuery)}&format=json&no_html=1&skip_disambig=1`,
-      { signal: AbortSignal.timeout(5000) }
-    )
-    if (ddgRes.ok) {
-      const d = await ddgRes.json()
-      const box: any[] = d.Infobox?.content || []
-      const get = (...labels: string[]) =>
-        box.find((c: any) => labels.some(l => c.label?.toLowerCase().includes(l)))?.value || ''
-      const address = get('address', 'כתובת', 'headquarters', 'location')
-      const phone = get('phone', 'טלפון', 'telephone')
-      const website = get('website', 'אתר', 'url') || d.AbstractURL || ''
-      if (address || phone || website) {
-        const result = { ...emptyResult, address, phone, website, source: 'duckduckgo' }
-        await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
-        return NextResponse.json(result)
-      }
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const companyName = ctx.company?.name || ''
+    const city = ctx.company?.city || ''
+    if (!companyName) {
+      return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '' })
     }
-  } catch (e: any) {
-    console.warn('google-places DDG fallback error:', e?.message)
-  }
 
-  // Fallback 2: Brave Search (free 2000/month)
-  const braveKey = process.env.BRAVE_API_KEY
-  if (braveKey) {
-    try {
-      const braveRes = await fetch(
-        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}&count=5`,
-        {
-          headers: { 'X-Subscription-Token': braveKey, 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        }
-      )
-      if (braveRes.ok) {
-        const d = await braveRes.json()
-        const top = (d.web?.results || [])[0]
-        if (top?.url) {
-          const result = { ...emptyResult, website: top.url, source: 'brave' }
-          await ctx.supabase.from('companies').update({ geo_data: result }).eq('id', ctx.user.id)
-          return NextResponse.json(result)
-        }
-      }
-    } catch (e: any) {
-      console.warn('google-places Brave fallback error:', e?.message)
-    }
-  }
+    const prompt = `חפש את הפרטים הבאים על העסק: ${companyName} בעיר ${city}
+מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
+לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
+החזר JSON בלבד:
+{"address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
 
-  // Fallback 3: Serper (last resort — returns rating + reviews via Google KG)
-  const serperKey = process.env.SERPER_API_KEY
-  if (!serperKey) {
-    return NextResponse.json(emptyResult)
-  }
-
-  try {
-    const res = await fetch('https://google.serper.dev/search', {
+    const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
-        'X-API-KEY': serperKey,
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
       },
-      body: JSON.stringify({ q: searchQuery, gl: 'il', hl: 'he', num: 5 }),
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
     })
 
-    if (!res.ok) {
-      return NextResponse.json(emptyResult)
+    const data = await response.json()
+    if (!response.ok || !data.output) {
+      return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '' })
     }
 
-    const data = await res.json()
-    const kg = data.knowledgeGraph || {}
-    const local: any = (data.localResults || [])[0] || {}
+    const text = data.output
+      .filter((item: any) => item.type === 'message')
+      .flatMap((item: any) => item.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('')
 
-    const rating: number | null = kg.rating ?? local.rating ?? null
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const start = clean.indexOf('{')
+    const end = clean.lastIndexOf('}')
 
-    let reviewCount = 0
-    if (typeof local.ratingCount === 'number') {
-      reviewCount = local.ratingCount
-    } else if (typeof kg.ratingCount === 'string') {
-      reviewCount = parseInt(kg.ratingCount.replace(/\D/g, '')) || 0
-    } else if (typeof kg.ratingCount === 'number') {
-      reviewCount = kg.ratingCount
+    let parsed: any = {}
+    if (start !== -1 && end > start) {
+      try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch {}
     }
 
-    const address = local.address || kg.attributes?.['כתובת'] || kg.attributes?.['Address'] || ''
-    const phone = local.phone || kg.attributes?.['טלפון'] || kg.attributes?.['Phone'] || ''
-    const website = kg.website || local.website || ''
+    const reviews = [
+      ...(Array.isArray(parsed.top_reviews) ? parsed.top_reviews : []),
+      ...(Array.isArray(parsed.bottom_reviews) ? parsed.bottom_reviews : []),
+    ].map((r: any) => ({
+      author: r.author || '',
+      rating: typeof r.rating === 'number' ? r.rating : 0,
+      text: r.text || '',
+      time: '',
+    }))
 
-    const rawReviews: any[] = Array.isArray(kg.reviews) ? kg.reviews : []
-    const reviews = rawReviews
-      .map((r: any) => ({
-        author: r.author || r.user || r.name || '',
-        rating: Number(r.rating) || 0,
-        text: r.snippet || r.text || r.review || '',
-        time: r.date || r.time || '',
-      }))
-      .filter((r) => r.text || r.author)
+    const result = {
+      address: parsed.address || '',
+      phone: parsed.phone || '',
+      rating: typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null,
+      reviewCount: typeof parsed.review_count === 'number' ? parsed.review_count : reviews.length,
+      reviews,
+      source: 'xai',
+    }
 
-    const result = { rating, reviewCount, reviews, address, phone, website, source: 'serper' }
-
-    // Persist to DB (graceful if geo_data column doesn't exist yet)
     const { error: dbError } = await ctx.supabase
       .from('companies')
       .update({ geo_data: result })
@@ -168,7 +82,7 @@ export async function GET() {
 
     return NextResponse.json(result)
   } catch (e: any) {
-    console.error('google-places serper fallback error:', e?.message)
-    return NextResponse.json(emptyResult)
+    console.error('google-places error:', e?.message)
+    return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '' })
   }
 }
