@@ -3,17 +3,16 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-const WINDOW_LABELS: Record<number, string> = {
-  14: 'מהשבועיים האחרונים',
-  28: 'מהחודש האחרון',
-  42: 'מ-6 השבועות האחרונים',
-  60: 'מחודשיים אחרונים',
-}
+const WINDOWS = [
+  { days: 14,  label: 'מהשבועיים האחרונים' },
+  { days: 30,  label: 'מהחודש האחרון' },
+  { days: 60,  label: 'מחודשיים אחרונים' },
+  { days: 120, label: 'מ-4 חודשים אחרונים' },
+]
 
-async function fetchNews(businessOverview: string, days: number): Promise<any[]> {
-  const windowLabel = WINDOW_LABELS[days] ?? `מ-${days} הימים האחרונים`
+async function fetchNews(businessOverview: string, days: number, label: string): Promise<any[]> {
   const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 חדשות עסקיות רלוונטיות ${windowLabel} הקשורות לתחום זה בישראל ובעולם.
+מצא 10 חדשות עסקיות רלוונטיות ${label} הקשורות לתחום זה בישראל ובעולם.
 לכל חדשה תן ציון רלוונטיות 0-100 לפי כמה היא קשורה לתחום העסק הספציפי.
 לכל חדשה הוסף שדה region: 'ישראל' אם המקור הוא ישראלי, 'עולם' אם המקור הוא בינלאומי.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
@@ -65,22 +64,20 @@ export async function POST() {
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 
-    // Expanding time window — stop when we have >= 10 results
-    const windows = [14, 28, 42, 60]
+    // Expanding time window — stop when filtered results >= 5
     let list: any[] = []
     steps.windows = []
 
-    for (const days of windows) {
-      const results = await fetchNews(businessOverview, days)
-      steps.windows.push({ days, count: results.length })
-      if (results.length >= list.length) list = results
-      if (list.length >= 10) break
+    for (const window of WINDOWS) {
+      const results = await fetchNews(businessOverview, window.days, window.label)
+      const filtered = results.filter((n: any) => (n.relevance_score ?? 0) >= 80)
+      steps.windows.push({ days: window.days, raw: results.length, filtered: filtered.length })
+      if (filtered.length >= 5) { list = filtered; break }
+      // keep best result so far
+      if (filtered.length > list.length) list = filtered
     }
 
     steps.ai = { ok: true, count: list.length }
-
-    // Filter: relevance_score >= 70
-    list = list.filter((n: any) => (n.relevance_score ?? 0) >= 70)
 
     // Deduplicate by url
     const seenUrls = new Set<string>()
