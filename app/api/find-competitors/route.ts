@@ -1,9 +1,66 @@
 import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 
 export const maxDuration = 60
+
+async function fetchAndSaveRating(
+  competitor: { id: string; name: string; website: string },
+  supabase: any,
+  userId: string,
+) {
+  try {
+    const prompt = `חפש את הפרטים הבאים על העסק: ${competitor.name}${competitor.website ? ` (אתר: ${competitor.website})` : ''}
+מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
+לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
+החזר JSON בלבד:
+{"address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
+
+    const res = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
+    })
+    if (!res.ok) return
+
+    const data = await res.json()
+    if (!data.output) return
+
+    const text = data.output
+      .filter((item: any) => item.type === 'message')
+      .flatMap((item: any) => item.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('')
+
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const start = clean.indexOf('{')
+    const end = clean.lastIndexOf('}')
+    if (start === -1 || end <= start) return
+
+    let parsed: any = {}
+    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch { return }
+
+    const rating = typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null
+    const reviewCount = typeof parsed.review_count === 'number' ? parsed.review_count : null
+
+    await supabase
+      .from('competitors')
+      .update({ google_rating: rating, google_review_count: reviewCount })
+      .eq('id', competitor.id)
+      .eq('company_id', userId)
+  } catch (e: any) {
+    console.warn('fetchAndSaveRating failed for', competitor.name, ':', e?.message)
+  }
+}
 
 async function callXAI(prompt: string): Promise<any[]> {
   const response = await fetch('https://api.x.ai/v1/responses', {
@@ -212,6 +269,19 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
     steps.db = { ok: true, saved: saved?.length }
+
+    // Fetch Google ratings in background after response is sent
+    const savedList = saved || []
+    after(async () => {
+      for (const comp of savedList) {
+        await fetchAndSaveRating(
+          { id: comp.id, name: comp.name, website: comp.website || '' },
+          supabase,
+          userId!,
+        )
+        await new Promise(r => setTimeout(r, 500))
+      }
+    })
 
     return NextResponse.json({ success: true, competitors: saved, count: saved?.length || 0, steps })
   } catch (e: any) {
