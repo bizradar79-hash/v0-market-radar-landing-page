@@ -54,6 +54,17 @@ const modules = [
   { id: "growth_signals", label: "אותות צמיחה", description: "זיהוי הזדמנויות צמיחה" },
 ]
 
+const SCAN_STEPS = [
+  { label: 'מנתח פרופיל עסקי...', route: '/api/generate-overview' },
+  { label: 'מייצר ניתוח SWOT...', route: '/api/generate-swot' },
+  { label: 'מגלה מתחרים...', route: '/api/find-competitors' },
+  { label: 'מגלה לידים...', route: '/api/generate-leads' },
+  { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },
+  { label: 'מחפש חדשות...', route: '/api/generate-news' },
+  { label: 'מחפש כנסים...', route: '/api/generate-conferences' },
+  { label: 'מנתח טרנדים...', route: '/api/generate-trends' },
+]
+
 interface Competitor {
   name: string
   website: string
@@ -65,6 +76,8 @@ export default function OnboardingPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isFindingCompetitors, setIsFindingCompetitors] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanStep, setScanStep] = useState(0)
   
   // Step 1 - Company Details
   const [companyName, setCompanyName] = useState("")
@@ -228,7 +241,7 @@ export default function OnboardingPage() {
         throw companyError
       }
 
-      // Step 2: Insert competitors into competitors table
+      // Insert manually-added competitors
       if (competitors.length > 0) {
         const competitorRecords = competitors.map(c => ({
           company_id: user.id,
@@ -242,85 +255,34 @@ export default function OnboardingPage() {
         await supabase.from("competitors").insert(competitorRecords)
       }
 
-      // Step 3: Insert sample leads
+      // Welcome alert
+      await supabase.from("alerts").insert({
+        company_id: user.id,
+        title: "ברוך הבא ל-Market Radar!",
+        message: "החשבון שלך מוכן. התחל לגלות הזדמנויות עסקיות חדשות.",
+        type: "success",
+        is_read: false,
+      })
 
-      const sampleLeads = [
-        {
-          company_id: user.id,
-          name: "סטארטאפ טק בע\"מ",
-          website: "https://startup-tech.co.il",
-          industry: industry,
-          location: "תל אביב",
-          reason: "ביקור באתר והורדת מדריך",
-          score: 85,
-          source: "אתר"
-        },
-        {
-          company_id: user.id,
-          name: "פתרונות דיגיטל",
-          website: "https://digital-solutions.co.il",
-          industry: industry,
-          location: "רמת גן",
-          reason: "אינטראקציה עם תוכן בלינקדאין",
-          score: 72,
-          source: "לינקדאין"
-        },
-        {
-          company_id: user.id,
-          name: "חדשנות ישראל",
-          website: "https://innovation-il.co.il",
-          industry: industry,
-          location: "הרצליה",
-          reason: "הופנה מלקוח קיים",
-          score: 90,
-          source: "המלצה"
+      // Start sequential AI scan
+      const { data: { session } } = await supabase.auth.getSession()
+      const authHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+      }
+
+      setIsSubmitting(false)
+      setIsScanning(true)
+
+      for (let i = 0; i < SCAN_STEPS.length; i++) {
+        setScanStep(i)
+        try {
+          await fetch(SCAN_STEPS[i].route, { method: 'POST', headers: authHeaders })
+        } catch {
+          // ignore errors, continue to next step
         }
-      ]
-      await supabase.from("leads").insert(sampleLeads)
+      }
 
-      // Step 5: Insert sample tenders
-      const sampleTenders = [
-        {
-          company_id: user.id,
-          title: `מכרז למערכת ${industry}`,
-          organization: "משרד החדשנות",
-          deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          budget: "2-5 מיליון ש\"ח",
-          description: `מכרז לפיתוח והטמעת מערכת ${industry} ארגונית`,
-          relevance_score: 95
-        },
-        {
-          company_id: user.id,
-          title: "פיתוח פלטפורמת AI",
-          organization: "רשות החדשנות",
-          deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          budget: "1-3 מיליון ש\"ח",
-          description: "פיתוח פלטפורמת AI לאוטומציה של תהליכים עסקיים",
-          relevance_score: 82
-        }
-      ]
-      await supabase.from("tenders").insert(sampleTenders)
-
-      // Step 6: Insert sample alerts
-      const sampleAlerts = [
-        {
-          company_id: user.id,
-          title: "ברוך הבא ל-Market Radar!",
-          message: "החשבון שלך מוכן. התחל לגלות הזדמנויות עסקיות חדשות.",
-          type: "success",
-          is_read: false
-        },
-        {
-          company_id: user.id,
-          title: "הזדמנות חדשה זוהתה",
-          message: `זוהתה הזדמנות חדשה בשוק ה${industry}`,
-          type: "info",
-          is_read: false
-        }
-      ]
-      await supabase.from("alerts").insert(sampleAlerts)
-
-      console.log("[v0] Onboarding complete, redirecting to dashboard")
       router.push("/app/dashboard")
     } catch (error: unknown) {
       console.error("[v0] Error saving onboarding data:", error)
@@ -412,6 +374,33 @@ export default function OnboardingPage() {
 
         {/* Step Content */}
         <div className="rounded-xl border border-border bg-card p-6 shadow-lg">
+          {isScanning ? (
+            <div className="space-y-6">
+              <div className="text-center">
+                <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
+                <h2 className="mt-4 text-xl font-semibold text-foreground">סורק ומאתחל נתונים...</h2>
+                <p className="mt-1 text-muted-foreground">אנא המתן, זה עשוי לקחת כדקה</p>
+              </div>
+              <div className="space-y-2">
+                {SCAN_STEPS.map((step, i) => (
+                  <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-background p-3">
+                    <div className="shrink-0">
+                      {i < scanStep
+                        ? <Check className="h-5 w-5 text-primary" />
+                        : i === scanStep
+                        ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        : <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30" />
+                      }
+                    </div>
+                    <span className={`text-sm ${i < scanStep ? 'text-muted-foreground' : i === scanStep ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                      ({i + 1}/8) {step.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+          <>
           {/* Step 1 - Company Details */}
           {currentStep === 1 && (
             <div className="space-y-6">
@@ -818,6 +807,8 @@ export default function OnboardingPage() {
               </Button>
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
     </div>
