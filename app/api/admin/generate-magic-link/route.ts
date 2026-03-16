@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
+import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -12,10 +13,28 @@ function getAdminClient() {
   )
 }
 
-// GET /api/admin/generate-magic-link?list=1 — list all users+companies
-export async function GET(request: Request) {
+async function getCallerUser() {
+  const reqHeaders = await headers()
+  const authHeader = reqHeaders.get('authorization')
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7)
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { getAll: () => [], setAll: () => {} },
+        global: { headers: { Authorization: `Bearer ${token}` } } },
+    )
+    const { data } = await supabase.auth.getUser(token)
+    return { user: data?.user, supabase }
+  }
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data } = await supabase.auth.getUser()
+  return { user: data?.user, supabase }
+}
+
+// GET /api/admin/generate-magic-link?list=1 — list all users+companies
+export async function GET() {
+  const { user, supabase } = await getCallerUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: role } = await supabase
@@ -48,8 +67,7 @@ export async function GET(request: Request) {
 
 // POST /api/admin/generate-magic-link — generate impersonation link
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user, supabase } = await getCallerUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: role } = await supabase
