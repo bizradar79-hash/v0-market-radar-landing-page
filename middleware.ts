@@ -39,6 +39,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Protect /app/admin/* — require is_admin = true in user_roles
+  if (user && pathname.startsWith('/app/admin/')) {
+    const { data: role } = await supabase
+      .from('user_roles')
+      .select('is_admin')
+      .eq('user_id', user.id)
+      .single()
+    if (!role?.is_admin) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/app/dashboard'
+      return NextResponse.redirect(url)
+    }
+  }
+
   // Redirect logged-in users away from login/signup
   if (user && (pathname === '/login' || pathname === '/signup')) {
     const url = request.nextUrl.clone()

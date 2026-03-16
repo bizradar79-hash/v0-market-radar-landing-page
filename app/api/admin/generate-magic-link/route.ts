@@ -1,0 +1,79 @@
+import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { NextResponse } from 'next/server'
+
+export const dynamic = 'force-dynamic'
+
+function getAdminClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  )
+}
+
+// GET /api/admin/generate-magic-link?list=1 — list all users+companies
+export async function GET(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { data: role } = await supabase
+    .from('user_roles').select('is_admin').eq('user_id', user.id).single()
+  if (!role?.is_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const admin = getAdminClient()
+
+  // List all auth users
+  const { data: { users }, error } = await admin.auth.admin.listUsers({ perPage: 200 })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Get all companies
+  const { data: companies } = await admin
+    .from('companies')
+    .select('id, name, industry, website, created_at')
+
+  const companiesById = Object.fromEntries((companies || []).map((c: any) => [c.id, c]))
+
+  const list = users.map((u: any) => ({
+    id: u.id,
+    email: u.email,
+    created_at: u.created_at,
+    last_sign_in_at: u.last_sign_in_at,
+    company: companiesById[u.id] || null,
+  }))
+
+  return NextResponse.json({ users: list })
+}
+
+// POST /api/admin/generate-magic-link — generate impersonation link
+export async function POST(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { data: role } = await supabase
+    .from('user_roles').select('is_admin').eq('user_id', user.id).single()
+  if (!role?.is_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { userId } = await request.json()
+  if (!userId) return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
+
+  const admin = getAdminClient()
+
+  // Get target user's email
+  const { data: { user: target }, error: userErr } = await admin.auth.admin.getUserById(userId)
+  if (userErr || !target?.email) {
+    return NextResponse.json({ error: userErr?.message || 'User not found' }, { status: 404 })
+  }
+
+  // Generate magic link (does not send email — link returned in response only)
+  const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
+    type: 'magiclink',
+    email: target.email,
+  })
+  if (linkErr || !link?.properties?.action_link) {
+    return NextResponse.json({ error: linkErr?.message || 'Failed to generate link' }, { status: 500 })
+  }
+
+  return NextResponse.json({ url: link.properties.action_link, email: target.email })
+}
