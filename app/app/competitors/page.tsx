@@ -94,6 +94,8 @@ interface SEORanking {
   query: string
   results: RankingResult[]
   recommendations: string[]
+  isLocal?: boolean
+  scope?: string
   fetchedAt: string
 }
 
@@ -103,6 +105,8 @@ interface GEORanking {
   userMentioned: boolean
   userPosition: number | null
   recommendations: string[]
+  isLocal?: boolean
+  scope?: string
   fetchedAt: string
 }
 
@@ -622,9 +626,14 @@ export default function CompetitorsPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="flex items-center gap-2 text-lg">
+              <CardTitle className="flex items-center gap-2 text-lg flex-wrap">
                 <Search className="h-5 w-5 text-primary" />
                 דירוג SEO
+                {seoRanking?.scope && (
+                  <Badge variant="outline" className={`text-xs font-normal ${seoRanking.isLocal ? 'border-blue-200 text-blue-600 bg-blue-50' : 'border-gray-300 text-gray-500'}`}>
+                    {seoRanking.scope}
+                  </Badge>
+                )}
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע בגוגל לעומת המתחרים</p>
             </div>
@@ -722,9 +731,14 @@ export default function CompetitorsPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="flex items-center gap-2 text-lg">
+              <CardTitle className="flex items-center gap-2 text-lg flex-wrap">
                 <Bot className="h-5 w-5 text-primary" />
                 דירוג GEO
+                {geoRanking?.scope && (
+                  <Badge variant="outline" className={`text-xs font-normal ${geoRanking.isLocal ? 'border-blue-200 text-blue-600 bg-blue-50' : 'border-gray-300 text-gray-500'}`}>
+                    {geoRanking.scope}
+                  </Badge>
+                )}
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע במנועי AI לעומת המתחרים</p>
             </div>

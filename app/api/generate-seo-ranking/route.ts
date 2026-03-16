@@ -7,6 +7,13 @@ function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
 
+function isLocalBusiness(overview: string, city: string, geoArea: string[]): boolean {
+  if (!geoArea || geoArea.length === 0) return false
+  if (geoArea.includes('כל הארץ') || geoArea.length > 2) return false
+  const localKeywords = ['מקומי', 'באזור', 'בעיר', city].filter(Boolean)
+  return geoArea.length <= 1 || localKeywords.some(k => overview.includes(k))
+}
+
 export async function POST() {
   try {
     const ctx = await getFullContext()
@@ -15,13 +22,19 @@ export async function POST() {
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
     const companyDomain = extractDomain(website)
-    const city = ctx.company?.city || 'ישראל'
+    const city = ctx.company?.city || ''
     const industry = ctx.company?.industry || ''
+    const overview = ctx.company?.business_overview || ctx.company?.description || ''
+    const geoArea: string[] = ctx.company?.geographic_area || []
     // Use exact keywords from companies.keywords — same source as competitor search
     const keywords: string[] = ctx.company?.keywords || []
     const keywordString = keywords.slice(0, 5).join(' ')
 
-    const searchQuery = [industry, city, keywordString].filter(Boolean).join(' ')
+    const isLocal = isLocalBusiness(overview, city, geoArea)
+    const scopeLocation = isLocal ? (city || 'ישראל') : 'ישראל'
+    const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : 'חיפוש ארצי'
+
+    const searchQuery = [industry, scopeLocation, keywordString].filter(Boolean).join(' ')
 
     // Known competitor websites for comparison
     const savedCompetitors: any[] = ctx.competitors || []
@@ -32,7 +45,11 @@ export async function POST() {
       ? `\nאתרי מתחרים ידועים לסימון (isKnownCompetitor: true אם ה-URL שייך לאחד מהם):\n${competitorWebsites.join('\n')}`
       : ''
 
-    const prompt = `אתה מומחה SEO ישראלי. השתמש בכלי web_search כדי לחפש בגוגל את השאילתה הבאה ורשום את 10 התוצאות האורגניות הראשונות בדיוק לפי סדרן בדף התוצאות:
+    const localPackNote = isLocal
+      ? `\nשים לב: זהו חיפוש מקומי. כלול גם תוצאות מ-Google Maps / Local Pack אם מופיעות, וסמן אותן ב-title עם "(Google Maps)" בסוף.`
+      : ''
+
+    const prompt = `אתה מומחה SEO ישראלי. השתמש בכלי web_search כדי לחפש בגוגל את השאילתה הבאה ורשום את 10 התוצאות האורגניות הראשונות בדיוק לפי סדרן בדף התוצאות:${localPackNote}
 
 שאילתת חיפוש: "${searchQuery}"
 
@@ -110,6 +127,8 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       query: searchQuery,
       results,
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
+      isLocal,
+      scope,
       fetchedAt: new Date().toISOString(),
     }
 

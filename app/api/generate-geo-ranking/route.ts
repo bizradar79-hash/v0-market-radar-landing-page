@@ -10,14 +10,27 @@ export async function POST() {
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
-    const city = ctx.company?.city || 'ישראל'
+    const city = ctx.company?.city || ''
     const industry = ctx.company?.industry || ''
+    const overview = ctx.company?.business_overview || ctx.company?.description || ''
+    const geoArea: string[] = ctx.company?.geographic_area || []
     // Use exact keywords from companies.keywords — same source as competitor search
     const keywords: string[] = ctx.company?.keywords || []
     const keywordString = keywords.slice(0, 5).join(', ')
 
-    const searchQuery = [industry, city, keywords.slice(0, 5).join(' ')].filter(Boolean).join(' ')
-    const geoQuestion = `מה העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} ב${city} בישראל?`
+    const isLocal = !!(
+      geoArea.length > 0 &&
+      !geoArea.includes('כל הארץ') &&
+      geoArea.length <= 2 &&
+      (geoArea.length === 1 || ['מקומי', 'באזור', 'בעיר', city].filter(Boolean).some(k => overview.includes(k)))
+    )
+    const scopeLocation = isLocal ? (city || 'ישראל') : 'ישראל'
+    const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : 'חיפוש ארצי'
+
+    const searchQuery = [industry, scopeLocation, keywords.slice(0, 5).join(' ')].filter(Boolean).join(' ')
+    const geoQuestion = isLocal
+      ? `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} ב${scopeLocation}?`
+      : `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} בישראל?`
 
     // Known competitors for comparison
     const savedCompetitors: any[] = ctx.competitors || []
@@ -106,6 +119,8 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       userMentioned,
       userPosition,
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
+      isLocal,
+      scope,
       fetchedAt: new Date().toISOString(),
     }
 

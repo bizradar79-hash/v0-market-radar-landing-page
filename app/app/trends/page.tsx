@@ -224,38 +224,6 @@ export default function TrendsPage() {
         </Button>
       </div>
 
-      {/* Market trends grouped by source */}
-      {sources.map((source) => (
-        <div key={source} className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground border-b pb-2">{source}</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {sourceGroups[source].map((trend) => (
-              <Card key={trend.id} className="transition-shadow hover:shadow-md">
-                <CardContent className="p-5">
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <h3 className="text-base font-semibold text-foreground leading-snug">{trend.name}</h3>
-                    {getMomentumBadge(trend.direction)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">{trend.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {trends.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <TrendingUp className="h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
-            <Button className="mt-4" onClick={generateTrends} disabled={generating}>
-              <Sparkles className="ml-2 h-4 w-4" />גלה טרנדים עם AI
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {/* ─── Keyword Trends Section ─── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between border-b pb-2">
@@ -290,7 +258,7 @@ export default function TrendsPage() {
 
         {keywords.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            לא הוגדרו מילות מפתח. לחץ "הוסף מילת מפתח" כדי להתחיל.
+            לא הוגדרו מילות מפתח. לחץ &quot;הוסף מילת מפתח&quot; כדי להתחיל.
           </p>
         )}
 
@@ -374,7 +342,7 @@ export default function TrendsPage() {
                 {/* Empty state when expanded but no data */}
                 {isExpanded && !isLoading && !kwData && (
                   <div className="mt-3 text-center py-4 text-sm text-muted-foreground">
-                    <p>לחץ רענן כדי לטעון טרנדים עבור "{kw}"</p>
+                    <p>לחץ רענן כדי לטעון טרנדים עבור &quot;{kw}&quot;</p>
                   </div>
                 )}
               </CardContent>
@@ -382,6 +350,38 @@ export default function TrendsPage() {
           )
         })}
       </div>
+
+      {/* ─── General Trends Section ─── */}
+      {sources.map((source) => (
+        <div key={source} className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground border-b pb-2">{source}</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {sourceGroups[source].map((trend) => (
+              <Card key={trend.id} className="transition-shadow hover:shadow-md">
+                <CardContent className="p-5">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <h3 className="text-base font-semibold text-foreground leading-snug">{trend.name}</h3>
+                    {getMomentumBadge(trend.direction)}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{trend.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {trends.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <TrendingUp className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
+            <Button className="mt-4" onClick={generateTrends} disabled={generating}>
+              <Sparkles className="ml-2 h-4 w-4" />גלה טרנדים עם AI
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
