@@ -138,7 +138,11 @@ export default function TrendsPage() {
       if (data.success) {
         setKwTrends(prev => ({ ...prev, [kw]: { fetchedAt: new Date().toISOString(), trends: data.trends } }))
         setExpanded(prev => new Set([...prev, kw]))
-        toast({ title: `טרנדים עודכנו: ${kw}` })
+        if (data.saveError) {
+          toast({ title: `טרנדים נטענו אך לא נשמרו`, description: data.saveError, variant: 'destructive' })
+        } else {
+          toast({ title: `טרנדים עודכנו: ${kw}` })
+        }
       } else {
         toast({ title: 'שגיאה', description: data.error, variant: 'destructive' })
       }
@@ -256,10 +260,17 @@ export default function TrendsPage() {
           </div>
         )}
 
-        {keywords.length === 0 && (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            לא הוגדרו מילות מפתח. לחץ &quot;הוסף מילת מפתח&quot; כדי להתחיל.
-          </p>
+        {keywords.length === 0 && !showAddKw && (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed py-10 text-center">
+            <Hash className="h-10 w-10 text-muted-foreground/40" />
+            <div>
+              <p className="font-medium text-foreground">עדיין לא הוגדרו מילות מפתח</p>
+              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח ו-AI יחפש מה טרנדי עכשיו בישראל</p>
+            </div>
+            <Button onClick={() => setShowAddKw(true)}>
+              <Plus className="ml-2 h-4 w-4" />הוסף מילת מפתח
+            </Button>
+          </div>
         )}
 
         {/* Per-keyword expandable cards */}

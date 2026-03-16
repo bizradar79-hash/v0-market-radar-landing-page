@@ -58,13 +58,22 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     const { data: company } = await ctx.supabase
       .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
 
-    const existing = company?.keyword_trends || {}
+    const existing = (company?.keyword_trends && typeof company.keyword_trends === 'object')
+      ? company.keyword_trends
+      : {}
     const updated = {
       ...existing,
       [keyword]: { fetchedAt: new Date().toISOString(), trends },
     }
 
-    await ctx.supabase.from('companies').update({ keyword_trends: updated }).eq('id', ctx.user.id)
+    const { error: saveError } = await ctx.supabase
+      .from('companies').update({ keyword_trends: updated }).eq('id', ctx.user.id)
+
+    if (saveError) {
+      console.error('keyword_trends save error:', saveError.code, saveError.message)
+      // Return trends so UI can still show them, but flag the save failure
+      return NextResponse.json({ success: true, keyword, trends, saveError: saveError.message })
+    }
 
     return NextResponse.json({ success: true, keyword, trends })
   } catch (e: any) {
