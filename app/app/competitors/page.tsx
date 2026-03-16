@@ -49,6 +49,8 @@ import {
   Pencil,
   RefreshCw,
   UserPlus,
+  Search,
+  Bot,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -81,6 +83,30 @@ interface CompetitorAnalysis {
   recommendations: string[]
 }
 
+interface RankingResult {
+  position: number
+  name: string
+  url?: string
+  title?: string
+  isOwn?: boolean
+}
+
+interface SEORanking {
+  query: string
+  results: RankingResult[]
+  recommendations: string[]
+  fetchedAt: string
+}
+
+interface GEORanking {
+  query: string
+  results: RankingResult[]
+  userMentioned: boolean
+  userPosition: number | null
+  recommendations: string[]
+  fetchedAt: string
+}
+
 type ModalTab = 'details' | 'ai'
 
 export default function CompetitorsPage() {
@@ -110,12 +136,17 @@ export default function CompetitorsPage() {
   const [saving, setSaving] = useState(false)
 
   const [fetchingRating, setFetchingRating] = useState<Record<string, boolean>>({})
+  const [seoRanking, setSeoRanking] = useState<SEORanking | null>(null)
+  const [geoRanking, setGeoRanking] = useState<GEORanking | null>(null)
+  const [loadingSeo, setLoadingSeo] = useState(false)
+  const [loadingGeo, setLoadingGeo] = useState(false)
 
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     fetchCompetitors()
+    fetchRankings()
   }, [])
 
   async function fetchCompetitors() {
@@ -127,6 +158,51 @@ export default function CompetitorsPage() {
 
     if (!error && data) setCompetitors(data)
     setLoading(false)
+  }
+
+  async function fetchRankings() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase
+      .from('companies').select('seo_ranking, geo_ranking').eq('id', user.id).single()
+    if (data?.seo_ranking?.fetchedAt) setSeoRanking(data.seo_ranking as SEORanking)
+    if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
+  }
+
+  async function refreshSeo() {
+    setLoadingSeo(true)
+    try {
+      const res = await fetch('/api/generate-seo-ranking', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setSeoRanking(data as SEORanking)
+        toast({ title: "דירוג SEO עודכן" })
+      } else {
+        toast({ title: "שגיאה בטעינת SEO", description: data.error, variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", variant: "destructive" })
+    } finally {
+      setLoadingSeo(false)
+    }
+  }
+
+  async function refreshGeo() {
+    setLoadingGeo(true)
+    try {
+      const res = await fetch('/api/generate-geo-ranking', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setGeoRanking(data as GEORanking)
+        toast({ title: "דירוג GEO עודכן" })
+      } else {
+        toast({ title: "שגיאה בטעינת GEO", description: data.error, variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", variant: "destructive" })
+    } finally {
+      setLoadingGeo(false)
+    }
   }
 
   async function discoverCompetitors() {
@@ -604,6 +680,183 @@ export default function CompetitorsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* SEO Ranking Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Search className="h-5 w-5 text-primary" />
+                דירוג SEO
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע בגוגל לעומת המתחרים</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={refreshSeo} disabled={loadingSeo}>
+              {loadingSeo ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
+              רענן
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loadingSeo ? (
+            <div className="flex items-center justify-center py-10 gap-3 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">בודק דירוגי SEO...</span>
+            </div>
+          ) : seoRanking ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Search className="h-3 w-3" />
+                <span>חיפוש: <span className="font-medium text-foreground">{seoRanking.query}</span></span>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-right w-16">מיקום</TableHead>
+                      <TableHead className="text-right">שם</TableHead>
+                      <TableHead className="text-right hidden md:table-cell">כותרת</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {seoRanking.results.map((r, i) => (
+                      <TableRow key={i} className={r.isOwn ? "bg-primary/5 border-primary/20" : ""}>
+                        <TableCell>
+                          <span className={`font-bold text-lg ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>
+                            #{r.position}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
+                            {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                          </div>
+                          {r.url && (
+                            <a href={r.url} target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5 truncate max-w-[200px]">
+                              <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                              {r.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40)}
+                            </a>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <span className="text-sm text-muted-foreground">{r.title || '—'}</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!seoRanking.results.some(r => r.isOwn) && (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center py-3">
+                          <Badge variant="outline" className="text-muted-foreground">העסק שלי לא מופיע ב-10 הראשונים</Badge>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              {seoRanking.recommendations.length > 0 && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+                  <h4 className="text-sm font-semibold flex items-center gap-2 text-primary">
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    המלצות לשיפור SEO
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {seoRanking.recommendations.map((rec, i) => (
+                      <li key={i} className="text-sm flex items-start gap-2">
+                        <span className="font-bold text-primary shrink-0">{i + 1}.</span>{rec}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">עודכן: {new Date(seoRanking.fetchedAt).toLocaleDateString('he-IL')}</p>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              לחץ "רענן" כדי לבדוק היכן העסק שלך מופיע בתוצאות גוגל לעומת המתחרים
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* GEO Ranking Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Bot className="h-5 w-5 text-primary" />
+                דירוג GEO
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע במנועי AI לעומת המתחרים</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={refreshGeo} disabled={loadingGeo}>
+              {loadingGeo ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
+              רענן
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loadingGeo ? (
+            <div className="flex items-center justify-center py-10 gap-3 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">שואל מנוע AI...</span>
+            </div>
+          ) : geoRanking ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Bot className="h-3 w-3" />
+                <span>שאלה: <span className="font-medium text-foreground">{geoRanking.query}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                {geoRanking.userMentioned ? (
+                  <Badge className="bg-green-100 text-green-700 border-green-200">
+                    <CheckCircle2 className="h-3 w-3 ml-1" />
+                    העסק שלי מוזכר במיקום #{geoRanking.userPosition}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    <XCircle className="h-3 w-3 ml-1" />
+                    העסק שלי לא מוזכר
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-2">
+                {geoRanking.results.map((r, i) => (
+                  <div key={i} className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${r.isOwn ? "border-primary/30 bg-primary/5" : "border-border"}`}>
+                    <span className={`font-bold w-6 text-center ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>
+                      #{r.position}
+                    </span>
+                    <span className={`flex-1 text-sm font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
+                    {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                  </div>
+                ))}
+              </div>
+              {geoRanking.recommendations.length > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-2">
+                  <h4 className="text-sm font-semibold flex items-center gap-2 text-blue-700">
+                    <Lightbulb className="h-3.5 w-3.5" />
+                    המלצות לשיפור נוכחות AI
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {geoRanking.recommendations.map((rec, i) => (
+                      <li key={i} className="text-sm flex items-start gap-2 text-blue-800">
+                        <span className="font-bold shrink-0">{i + 1}.</span>{rec}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">עודכן: {new Date(geoRanking.fetchedAt).toLocaleDateString('he-IL')}</p>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              לחץ "רענן" כדי לבדוק האם העסק שלך מוזכר כשמנועי AI נשאלים על תחומך
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Add Manual Competitor Dialog */}
       <Dialog open={showAddDialog} onOpenChange={(open) => { if (!open) { setShowAddDialog(false); setAddName(""); setAddWebsite(""); setAddServices("") } }}>
