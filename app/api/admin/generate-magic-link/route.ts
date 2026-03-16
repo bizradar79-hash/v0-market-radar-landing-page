@@ -89,6 +89,9 @@ export async function POST(request: Request) {
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
     type: 'magiclink',
     email: target.email,
+    options: {
+      redirectTo: 'https://v0-market-radar-landing-page.vercel.app/app/dashboard',
+    },
   })
   if (linkErr || !link?.properties?.action_link) {
     return NextResponse.json({ error: linkErr?.message || 'Failed to generate link' }, { status: 500 })
