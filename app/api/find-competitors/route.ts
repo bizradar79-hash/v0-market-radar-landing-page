@@ -161,6 +161,22 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
         !c.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
     })
 
+    // User blacklist — names deleted by user in previous scans
+    if (saveToDb && userId && supabase) {
+      const { data: companyRow } = await supabase
+        .from('companies').select('competitors_blacklist').eq('id', userId).single()
+      const userBlacklist: string[] = companyRow?.competitors_blacklist || []
+      if (userBlacklist.length > 0) {
+        competitors = competitors.filter((c: any) => {
+          const name = (c.name || '').toLowerCase()
+          return !userBlacklist.some(b =>
+            name === b.toLowerCase() || name.includes(b.toLowerCase()) || b.toLowerCase().includes(name)
+          )
+        })
+        steps.blacklistFiltered = { removed: userBlacklist.length, remaining: competitors.length }
+      }
+    }
+
     // Blocklist
     const RETAIL_BLOCKLIST = [
       'שופרסל', 'רמי לוי', 'יינות ביתן', 'ויקטורי', 'סופר-פארם', 'super-pharm',
@@ -181,18 +197,18 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return true
     })
 
-    // Map to working shape
+    // Map to working shape — base threat_score capped at 70, bonus added after rating fetch
     const mapped = competitors.map((c: any) => ({
       name: c.name,
       website: c.website,
       services: c.services || '',
       pricing: '',
       threat_score: typeof c.threat_score === 'number'
-        ? (c.threat_score <= 10 ? c.threat_score * 10 : Math.min(100, c.threat_score))
-        : 70,
+        ? (c.threat_score <= 10 ? Math.min(70, c.threat_score * 10) : Math.min(70, c.threat_score))
+        : 50,
       score_breakdown: c.score_breakdown || '',
       reason: c.services || '',
-      similarity: typeof c.threat_score === 'number' ? Math.min(100, c.threat_score) : 70,
+      similarity: typeof c.threat_score === 'number' ? Math.min(70, c.threat_score) : 50,
       google_rating: null as number | null,
       google_review_count: null as number | null,
     }))
@@ -211,6 +227,21 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     steps.ratings = {
       ok: true,
       found: mapped.filter(c => c.google_rating !== null).length,
+    }
+
+    // Apply Google rating + review count bonus on top of base score
+    for (const comp of mapped) {
+      let bonus = 0
+      if (comp.google_rating != null) {
+        if (comp.google_rating >= 4.5) bonus += 20
+        else if (comp.google_rating >= 4.0) bonus += 15
+        else if (comp.google_rating >= 3.5) bonus += 10
+      }
+      if (comp.google_review_count != null) {
+        if (comp.google_review_count > 500) bonus += 10
+        else if (comp.google_review_count >= 100) bonus += 5
+      }
+      comp.threat_score = Math.min(100, comp.threat_score + bonus)
     }
 
     // Skip DB save during onboarding

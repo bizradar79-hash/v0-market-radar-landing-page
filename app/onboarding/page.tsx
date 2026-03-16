@@ -81,6 +81,7 @@ const SCAN_STEPS = [
 interface Competitor {
   name: string
   website: string
+  threatScore?: number
 }
 
 export default function OnboardingPage() {
@@ -104,6 +105,7 @@ export default function OnboardingPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [newCompetitorName, setNewCompetitorName] = useState("")
   const [newCompetitorWebsite, setNewCompetitorWebsite] = useState("")
+  const [newCompetitorThreatScore, setNewCompetitorThreatScore] = useState("")
   const [aiCompetitors, setAiCompetitors] = useState<Array<{ name: string; website: string; reason: string; similarity: number; selected: boolean }>>([])
   const [competitorError, setCompetitorError] = useState<string | null>(null)
   
@@ -131,9 +133,15 @@ export default function OnboardingPage() {
 
   const addCompetitor = () => {
     if (newCompetitorName.trim()) {
-      setCompetitors([...competitors, { name: newCompetitorName.trim(), website: newCompetitorWebsite.trim() }])
+      const scoreVal = parseInt(newCompetitorThreatScore)
+      setCompetitors([...competitors, {
+        name: newCompetitorName.trim(),
+        website: newCompetitorWebsite.trim(),
+        threatScore: !isNaN(scoreVal) ? Math.min(100, Math.max(0, scoreVal)) : undefined,
+      }])
       setNewCompetitorName("")
       setNewCompetitorWebsite("")
+      setNewCompetitorThreatScore("")
     }
   }
 
@@ -266,7 +274,7 @@ export default function OnboardingPage() {
           website: c.website,
           services: industry,
           positioning: "מתחרה ישיר",
-          threat_score: Math.floor(Math.random() * 30) + 50,
+          threat_score: c.threatScore != null ? c.threatScore : Math.floor(Math.random() * 30) + 50,
           trend: "stable",
           source: "manual",
         }))
@@ -619,6 +627,17 @@ export default function OnboardingPage() {
                     onChange={(e) => setNewCompetitorWebsite(e.target.value)}
                     placeholder="https://competitor.com"
                     className="bg-card text-left"
+                  />
+                </div>
+                <div className="w-24 shrink-0">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={newCompetitorThreatScore}
+                    onChange={(e) => setNewCompetitorThreatScore(e.target.value)}
+                    placeholder="ציון"
+                    className="bg-card"
                   />
                 </div>
                 <Button type="button" onClick={addCompetitor} disabled={!newCompetitorName.trim()}>

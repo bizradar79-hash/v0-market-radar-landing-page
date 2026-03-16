@@ -54,15 +54,29 @@ export async function POST(request: Request) {
     const rating = typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null
     const reviewCount = typeof parsed.review_count === 'number' ? parsed.review_count : null
 
-    // Save to DB (run migration if columns missing: supabase/add_competitors_source.sql)
+    // Recalculate threat score with rating bonus (current DB score is the base)
+    const updates: Record<string, any> = { google_rating: rating, google_review_count: reviewCount }
+    if (rating !== null) {
+      const { data: comp } = await ctx.supabase
+        .from('competitors').select('threat_score').eq('id', competitorId).eq('company_id', ctx.user.id).single()
+      if (comp?.threat_score != null) {
+        let bonus = 0
+        if (rating >= 4.5) bonus += 20
+        else if (rating >= 4.0) bonus += 15
+        else if (rating >= 3.5) bonus += 10
+        if (reviewCount != null) {
+          if (reviewCount > 500) bonus += 10
+          else if (reviewCount >= 100) bonus += 5
+        }
+        updates.threat_score = Math.min(100, comp.threat_score + bonus)
+      }
+    }
+
     const { error: dbError } = await ctx.supabase
-      .from('competitors')
-      .update({ google_rating: rating, google_review_count: reviewCount })
-      .eq('id', competitorId)
-      .eq('company_id', ctx.user.id)
+      .from('competitors').update(updates).eq('id', competitorId).eq('company_id', ctx.user.id)
     if (dbError) console.warn('fetch-competitor-rating DB save failed:', dbError.message, dbError.code)
 
-    return NextResponse.json({ success: true, rating, reviewCount })
+    return NextResponse.json({ success: true, rating, reviewCount, threat_score: updates.threat_score ?? null })
   } catch (e: any) {
     console.error('fetch-competitor-rating error:', e?.message)
     return NextResponse.json({ error: e?.message }, { status: 500 })

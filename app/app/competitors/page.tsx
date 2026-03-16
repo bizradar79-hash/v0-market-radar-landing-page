@@ -32,9 +32,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   Target,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   Clock,
   AlertTriangle,
   Loader2,
@@ -185,16 +182,15 @@ export default function CompetitorsPage() {
       if (result.success) {
         const rating = result.rating ?? null
         const reviewCount = result.reviewCount ?? null
-        setCompetitors(prev => prev.map(c =>
-          c.id === competitor.id
-            ? { ...c, google_rating: rating, google_review_count: reviewCount }
-            : c
-        ))
-        setSelectedCompetitor(prev =>
-          prev?.id === competitor.id
-            ? { ...prev, google_rating: rating, google_review_count: reviewCount }
-            : prev
-        )
+        const newScore = result.threat_score ?? null
+        const update = (c: Competitor) => ({
+          ...c,
+          google_rating: rating,
+          google_review_count: reviewCount,
+          ...(newScore !== null ? { threat_score: newScore } : {}),
+        })
+        setCompetitors(prev => prev.map(c => c.id === competitor.id ? update(c) : c))
+        setSelectedCompetitor(prev => prev?.id === competitor.id ? update(prev) : prev)
       } else {
         console.error('fetch-competitor-rating error:', result.error)
       }
@@ -296,20 +292,27 @@ export default function CompetitorsPage() {
   }
 
   async function deleteCompetitor(id: string) {
+    const competitor = competitors.find(c => c.id === id)
     const { error } = await supabase.from("competitors").delete().eq("id", id)
     if (!error) {
+      // Add name to blacklist so it won't reappear in auto-scans
+      if (competitor) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: company } = await supabase
+            .from('companies').select('competitors_blacklist').eq('id', user.id).single()
+          const current: string[] = company?.competitors_blacklist || []
+          if (!current.includes(competitor.name)) {
+            await supabase.from('companies')
+              .update({ competitors_blacklist: [...current, competitor.name] })
+              .eq('id', user.id)
+          }
+        }
+      }
       setCompetitors(competitors.filter(c => c.id !== id))
       setSelectedCompetitor(null)
       setShowModal(false)
       toast({ title: "המתחרה נמחק" })
-    }
-  }
-
-  const getTrendIcon = (trend: string) => {
-    switch (trend) {
-      case "up": return <TrendingUp className="h-4 w-4 text-red-600" />
-      case "down": return <TrendingDown className="h-4 w-4 text-green-600" />
-      default: return <Minus className="h-4 w-4 text-yellow-600" />
     }
   }
 
@@ -359,7 +362,6 @@ export default function CompetitorsPage() {
             <TableHead className="text-right hidden lg:table-cell">דירוג גוגל</TableHead>
             <TableHead className="text-right hidden lg:table-cell">ביקורות</TableHead>
             <TableHead className="text-right">ציון איום</TableHead>
-            <TableHead className="text-right">מגמה</TableHead>
             <TableHead className="text-right">פעולות</TableHead>
           </TableRow>
         </TableHeader>
@@ -406,11 +408,6 @@ export default function CompetitorsPage() {
                     {competitor.threat_score}
                   </span>
                   <Progress value={competitor.threat_score} className="h-1.5" />
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-1.5">
-                  {getTrendIcon(competitor.trend)}
                 </div>
               </TableCell>
               <TableCell>
@@ -598,7 +595,7 @@ export default function CompetitorsPage() {
                     {analyzing === competitor.id ? (
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     ) : (
-                      <>{getTrendIcon(competitor.trend)}<Brain className="h-4 w-4 text-muted-foreground" /></>
+                      <Brain className="h-4 w-4 text-muted-foreground" />
                     )}
                   </div>
                 </div>
