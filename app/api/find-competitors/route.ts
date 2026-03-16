@@ -95,6 +95,7 @@ export async function POST(request: Request) {
     let businessOverview: string
     let website: string
     let companyName: string
+    let keywords: string
     let saveToDb = false
     let supabase: any = null
     let userId: string | null = null
@@ -103,6 +104,7 @@ export async function POST(request: Request) {
       businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
       website = ctx.company?.website || ''
       companyName = ctx.company?.name || ''
+      keywords = (ctx.company?.keywords || []).join(', ')
       saveToDb = true
       supabase = ctx.supabase
       userId = ctx.user.id
@@ -115,27 +117,31 @@ export async function POST(request: Request) {
       businessOverview = [body.industry, body.description].filter(Boolean).join(' — ')
       website = body.website || ''
       companyName = ''
+      keywords = ''
       steps.context = { ok: true, onboarding: true }
     }
 
-    const prompt = `בהתבסס על הסקירה הבאה של עסק ישראלי: ${businessOverview}
-ואתר העסק: ${website}
+    const prompt = `אתה מומחה לשוק הישראלי עם גישה לאינטרנט.
 
-תן לי רשימה של 10 מתחרים ישירים ועקיפים בישראל הרלוונטיים לסוג העסק הזה.
+פרטי העסק:
+- סקירה: ${businessOverview}
+- אתר: ${website}
+- מילות מפתח: ${keywords}
+
+שלב 1 — זהה את הנישה הספציפית ביותר של העסק (לדוגמה: לא "תוספי תזונה" אלא "ייצור תוספי תזונה נוזליים במותג פרטי").
+
+שלב 2 — חפש באינטרנט מתחרים ישירים לנישה הספציפית הזו בישראל. תן עדיפות ל:
+- חברות שעושות בדיוק את אותו סוג עסק (לא רק תחום כללי)
+- חברות עם אותו מודל עסקי (B2B, B2C, יצרן, קמעונאי וכו')
+- חברות באותו אזור גיאוגרפי אם רלוונטי
+
+תן לי 8 מתחרים ישירים ועקיפים.
 כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
+חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 4 חברות אמיתיות עם אתרים מאשר 8 ללא אתרים.
+חפש בעברית ובאנגלית. החזר את שמות החברות ותיאור השירותים בעברית.
 
-חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 5 חברות אמיתיות עם אתרים מאשר 10 חברות ללא אתרים.
-
-לכל מתחרה תן threat_score 0-100 לפי שלושה קריטריונים:
-- גודל החברה וחלקה בשוק: 0-40 נקודות
-- חפיפה בשירותים/מוצרים: 0-40 נקודות
-- אזור גיאוגרפי משותף בישראל: 0-20 נקודות
-הסבר את הציון בשדה score_breakdown (משפט קצר בעברית).
-
-חפש מתחרים בעברית ובאנגלית. החזר את שמות החברות ותיאור השירותים בעברית.
-
-החזר JSON בלבד במבנה הזה:
-[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "score_breakdown": "", "type": "ישיר/עקיף"}]
+החזר JSON בלבד:
+[{"name": "", "services": "", "website": "https://...", "threat_score": 0-100, "type": "ישיר/עקיף", "niche_match": "למה הם מתחרים ספציפיים"}]
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
@@ -197,6 +203,9 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return true
     })
 
+    // Cap at 8
+    competitors = competitors.slice(0, 8)
+
     // Map to working shape — base threat_score capped at 70, bonus added after rating fetch
     const mapped = competitors.map((c: any) => ({
       name: c.name,
@@ -206,7 +215,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       threat_score: typeof c.threat_score === 'number'
         ? (c.threat_score <= 10 ? Math.min(70, c.threat_score * 10) : Math.min(70, c.threat_score))
         : 50,
-      score_breakdown: c.score_breakdown || '',
+      score_breakdown: c.niche_match || c.score_breakdown || '',
       reason: c.services || '',
       similarity: typeof c.threat_score === 'number' ? Math.min(70, c.threat_score) : 50,
       google_rating: null as number | null,
