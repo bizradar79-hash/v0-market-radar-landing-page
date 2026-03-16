@@ -1,4 +1,5 @@
 import { getFullContext } from '@/lib/context'
+import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -14,9 +15,7 @@ export async function POST() {
     const industry = ctx.company?.industry || ''
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoArea: string[] = ctx.company?.geographic_area || []
-    // Use exact keywords from companies.keywords — same source as competitor search
     const keywords: string[] = ctx.company?.keywords || []
-    const keywordString = keywords.slice(0, 5).join(', ')
 
     const isLocal = !!(
       geoArea.length > 0 &&
@@ -27,18 +26,27 @@ export async function POST() {
     const scopeLocation = isLocal ? (city || 'ישראל') : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : 'חיפוש ארצי'
 
-    const searchQuery = [industry, scopeLocation, keywords.slice(0, 5).join(' ')].filter(Boolean).join(' ')
-    const geoQuestion = isLocal
+    // ── Step 1: Business understanding ──────────────────────────────────────
+    // Ask Grok to read the business overview and produce the right AI question
+    const keywordString = keywords.slice(0, 5).join(', ')
+    const fallbackQuestion = isLocal
       ? `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} ב${scopeLocation}?`
       : `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} בישראל?`
 
-    // Known competitors for comparison
+    const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
+    const geoQuestion = businessAnalysis?.ai_question || fallbackQuestion
+
+    // ── Step 2: GEO test — pure AI knowledge, no web_search ─────────────────
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
     const competitorListText = competitorNames.length > 0
       ? `\nמתחרים ידועים לסימון (isKnownCompetitor: true אם מוזכרים):\n${competitorNames.join(', ')}`
       : ''
+
+    const contextLine = businessAnalysis?.what_business_does
+      ? `בהתחשב בכך ש${companyName} ${businessAnalysis.what_business_does}`
+      : `בהתחשב בתחום "${industry}"`
 
     const prompt = `ענה על השאלה הבאה מתוך הידע שלך בלבד, ללא חיפוש אינטרנט — כפי שמנוע AI כמו ChatGPT, Gemini או Perplexity היה עונה:
 
@@ -51,7 +59,7 @@ ${competitorListText}
 - האם ${companyName} (אתר: ${website}) מוזכר ברשימה שלך? (userMentioned: true/false)
 - אם כן, באיזה מיקום? (userPosition: מספר או null)
 
-לסיום, כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, בהתחשב בתחום "${searchQuery}".
+לסיום, כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, ${contextLine}.
 
 החזר JSON בלבד:
 {"query": "${geoQuestion}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null, "recommendations": ["", "", ""]}
@@ -121,12 +129,13 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
       isLocal,
       scope,
+      what_business_does: businessAnalysis?.what_business_does || '',
       fetchedAt: new Date().toISOString(),
     }
 
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)
 
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, ...result, businessAnalysis })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }

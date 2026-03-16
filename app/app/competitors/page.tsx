@@ -96,6 +96,7 @@ interface SEORanking {
   recommendations: string[]
   isLocal?: boolean
   scope?: string
+  what_business_does?: string
   fetchedAt: string
 }
 
@@ -107,6 +108,7 @@ interface GEORanking {
   recommendations: string[]
   isLocal?: boolean
   scope?: string
+  what_business_does?: string
   fetchedAt: string
 }
 
@@ -651,9 +653,14 @@ export default function CompetitorsPage() {
             </div>
           ) : seoRanking ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Search className="h-3 w-3" />
-                <span>חיפוש: <span className="font-medium text-foreground">{seoRanking.query}</span></span>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Search className="h-3 w-3 shrink-0" />
+                  <span>חיפוש: <span className="font-medium text-foreground">{seoRanking.query}</span></span>
+                </div>
+                {seoRanking.what_business_does && (
+                  <p className="text-xs text-muted-foreground pr-5">AI הבין: {seoRanking.what_business_does}</p>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <Table>
@@ -756,9 +763,14 @@ export default function CompetitorsPage() {
             </div>
           ) : geoRanking ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Bot className="h-3 w-3" />
-                <span>שאלה: <span className="font-medium text-foreground">{geoRanking.query}</span></span>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Bot className="h-3 w-3 shrink-0" />
+                  <span>שאלה: <span className="font-medium text-foreground">{geoRanking.query}</span></span>
+                </div>
+                {geoRanking.what_business_does && (
+                  <p className="text-xs text-muted-foreground pr-5">AI הבין: {geoRanking.what_business_does}</p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {geoRanking.userMentioned ? (

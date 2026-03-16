@@ -1,4 +1,5 @@
 import { getFullContext } from '@/lib/context'
+import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -26,17 +27,19 @@ export async function POST() {
     const industry = ctx.company?.industry || ''
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoArea: string[] = ctx.company?.geographic_area || []
-    // Use exact keywords from companies.keywords — same source as competitor search
     const keywords: string[] = ctx.company?.keywords || []
-    const keywordString = keywords.slice(0, 5).join(' ')
 
     const isLocal = isLocalBusiness(overview, city, geoArea)
     const scopeLocation = isLocal ? (city || 'ישראל') : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : 'חיפוש ארצי'
 
-    const searchQuery = [industry, scopeLocation, keywordString].filter(Boolean).join(' ')
+    // ── Step 1: Business understanding ──────────────────────────────────────
+    // Ask Grok to read the business overview and produce an optimal search query
+    const fallbackQuery = [industry, scopeLocation, keywords.slice(0, 3).join(' ')].filter(Boolean).join(' ')
+    const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
+    const searchQuery = businessAnalysis?.google_query || fallbackQuery
 
-    // Known competitor websites for comparison
+    // ── Step 2: SEO search ───────────────────────────────────────────────────
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorWebsites = savedCompetitors
       .map((c: any) => c.website).filter(Boolean).slice(0, 10)
@@ -129,12 +132,13 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
       isLocal,
       scope,
+      what_business_does: businessAnalysis?.what_business_does || '',
       fetchedAt: new Date().toISOString(),
     }
 
     await ctx.supabase.from('companies').update({ seo_ranking: result }).eq('id', ctx.user.id)
 
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, ...result, businessAnalysis })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
