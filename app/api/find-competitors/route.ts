@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
 
-export const maxDuration = 300
+export const maxDuration = 60
 
 async function fetchGoogleRating(name: string, website: string): Promise<{ rating: number | null; reviewCount: number | null }> {
   try {
@@ -197,14 +197,17 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       google_review_count: null as number | null,
     }))
 
-    // Fetch Google ratings sequentially before saving
+    // Fetch all Google ratings in parallel before saving
     steps.ratings = { status: 'starting' }
-    for (const comp of mapped) {
-      const { rating, reviewCount } = await fetchGoogleRating(comp.name, comp.website)
-      comp.google_rating = rating
-      comp.google_review_count = reviewCount
-      await new Promise(r => setTimeout(r, 300))
-    }
+    await Promise.all(
+      mapped.map(async (comp) => {
+        try {
+          const { rating, reviewCount } = await fetchGoogleRating(comp.name, comp.website)
+          comp.google_rating = rating
+          comp.google_review_count = reviewCount
+        } catch { /* keep null */ }
+      })
+    )
     steps.ratings = {
       ok: true,
       found: mapped.filter(c => c.google_rating !== null).length,
