@@ -97,5 +97,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: linkErr?.message || 'Failed to generate link' }, { status: 500 })
   }
 
-  return NextResponse.json({ url: link.properties.action_link, email: target.email })
+  // Force the correct production redirect_to — Supabase may use its "Site URL" setting
+  // which could point to a stale preview deployment. Override it directly in the URL.
+  const actionUrl = new URL(link.properties.action_link)
+  actionUrl.searchParams.set('redirect_to', 'https://v0-market-radar-landing-page.vercel.app/app/dashboard')
+
+  return NextResponse.json({ url: actionUrl.toString(), email: target.email })
 }
