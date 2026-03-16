@@ -87,6 +87,7 @@ interface RankingResult {
   url?: string
   title?: string
   isOwn?: boolean
+  isKnownCompetitor?: boolean
 }
 
 interface SEORanking {
@@ -663,9 +664,10 @@ export default function CompetitorsPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className={`font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
                             {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                            {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
                           </div>
                           {r.url && (
                             <a href={r.url} target="_blank" rel="noopener noreferrer"
@@ -765,6 +767,7 @@ export default function CompetitorsPage() {
                     </span>
                     <span className={`flex-1 text-sm font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
                     {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                    {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
                   </div>
                 ))}
               </div>

@@ -3,6 +3,10 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
+function extractDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+}
+
 export async function POST() {
   try {
     const ctx = await getFullContext()
@@ -10,31 +14,48 @@ export async function POST() {
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
+    const companyDomain = extractDomain(website)
     const city = ctx.company?.city || 'ישראל'
-    const industry = ctx.companyProfile?.industry || ''
-    const primaryKeywords = ctx.companyProfile?.primaryKeywords || ''
+    const industry = ctx.company?.industry || ''
+    // Use exact keywords from companies.keywords — same source as competitor search
+    const keywords: string[] = ctx.company?.keywords || []
+    const keywordString = keywords.slice(0, 5).join(' ')
 
-    const searchQuery = [industry, city, primaryKeywords].filter(Boolean).join(' ')
+    const searchQuery = [industry, city, keywordString].filter(Boolean).join(' ')
 
-    const prompt = `אתה מומחה SEO ישראלי. חפש בגוגל את השאילתה הבאה ורשום את 10 התוצאות האורגניות הראשונות בדיוק לפי הסדר שבו הן מופיעות:
+    // Known competitor websites for comparison
+    const savedCompetitors: any[] = ctx.competitors || []
+    const competitorWebsites = savedCompetitors
+      .map((c: any) => c.website).filter(Boolean).slice(0, 10)
+
+    const competitorListText = competitorWebsites.length > 0
+      ? `\nאתרי מתחרים ידועים לסימון (isKnownCompetitor: true אם ה-URL שייך לאחד מהם):\n${competitorWebsites.join('\n')}`
+      : ''
+
+    const prompt = `אתה מומחה SEO ישראלי. השתמש בכלי web_search כדי לחפש בגוגל את השאילתה הבאה ורשום את 10 התוצאות האורגניות הראשונות בדיוק לפי סדרן בדף התוצאות:
 
 שאילתת חיפוש: "${searchQuery}"
 
 פרטי העסק שלנו:
 - שם: ${companyName}
 - אתר: ${website}
+- דומיין: ${companyDomain}
+${competitorListText}
 
-לכל תוצאה ציין:
+CRITICAL: דווח אך ורק על URLs שמופיעים בפועל בתוצאות החיפוש שקיבלת מ-web_search. אסור לבדות URLs או כותרות שלא ראית בתוצאות האמיתיות.
+
+לכל תוצאת חיפוש אמיתית ציין:
 - position: מיקום (1-10)
 - name: שם העסק או הדף
-- url: כתובת ה-URL המלאה
+- url: ה-URL המדויק שמופיע בגוגל
 - title: כותרת הדף כפי שמופיעה בגוגל
-- isOwn: true רק אם זה האתר ${website} שלנו, אחרת false
+- isOwn: true רק אם הדומיין של ה-URL מכיל "${companyDomain}", אחרת false
+- isKnownCompetitor: true אם ה-URL שייך לאחד מאתרי המתחרים הידועים, אחרת false
 
-אחרי הרשימה תן 3 המלצות ספציפיות ומעשיות לשיפור דירוג SEO של ${companyName} בהתבסס על התוצאות שמצאת.
+לאחר הרשימה, כתוב 3 המלצות ספציפיות לשיפור דירוג SEO של ${companyName} בהתבסס על התוצאות שמצאת.
 
 החזר JSON בלבד:
-{"query": "", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false}], "recommendations": ["", "", ""]}
+{"query": "${searchQuery}", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false, "isKnownCompetitor": false}], "recommendations": ["", "", ""]}
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
@@ -75,9 +96,19 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
     }
 
+    // Post-process: enforce isOwn and isKnownCompetitor by domain matching
+    const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+    const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
+
+    results.forEach((r: any) => {
+      const rDomain = extractDomain(r.url || '')
+      r.isOwn = companyDomain ? rDomain === companyDomain || rDomain.includes(companyDomain) : false
+      r.isKnownCompetitor = competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
+    })
+
     const result = {
-      query: parsed.query || searchQuery,
-      results: Array.isArray(parsed.results) ? parsed.results.slice(0, 10) : [],
+      query: searchQuery,
+      results,
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
       fetchedAt: new Date().toISOString(),
     }

@@ -11,29 +11,41 @@ export async function POST() {
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
     const city = ctx.company?.city || 'ישראל'
-    const industry = ctx.companyProfile?.industry || ''
+    const industry = ctx.company?.industry || ''
+    // Use exact keywords from companies.keywords — same source as competitor search
+    const keywords: string[] = ctx.company?.keywords || []
+    const keywordString = keywords.slice(0, 5).join(', ')
 
-    const geoQuestion = `מה העסקים המובילים בתחום ${industry} ב${city} בישראל?`
+    const searchQuery = [industry, city, keywords.slice(0, 5).join(' ')].filter(Boolean).join(' ')
+    const geoQuestion = `מה העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} ב${city} בישראל?`
 
-    // GEO test: ask WITHOUT web_search to get pure AI knowledge response
-    const prompt = `ענה על השאלה הבאה כפי שהיית עונה למשתמש רגיל, מתוך הידע שלך בלבד (ללא חיפוש אינטרנט):
+    // Known competitors for comparison
+    const savedCompetitors: any[] = ctx.competitors || []
+    const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
+
+    const competitorListText = competitorNames.length > 0
+      ? `\nמתחרים ידועים לסימון (isKnownCompetitor: true אם מוזכרים):\n${competitorNames.join(', ')}`
+      : ''
+
+    const prompt = `ענה על השאלה הבאה מתוך הידע שלך בלבד, ללא חיפוש אינטרנט — כפי שמנוע AI כמו ChatGPT, Gemini או Perplexity היה עונה:
 
 "${geoQuestion}"
 
-תן רשימה של עד 10 עסקים שאתה מכיר בתחום זה, לפי סדר החשיבות שלהם בשוק.
+תן רשימה של עד 10 עסקים שאתה מכיר בתחום זה, לפי סדר חשיבותם בשוק.
+${competitorListText}
 
 לאחר הרשימה, ציין:
 - האם ${companyName} (אתר: ${website}) מוזכר ברשימה שלך? (userMentioned: true/false)
 - אם כן, באיזה מיקום? (userPosition: מספר או null)
 
-לסיום, כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי בינה מלאכותית כמו ChatGPT, Grok, Gemini ו-Perplexity.
+לסיום, כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, בהתחשב בתחום "${searchQuery}".
 
 החזר JSON בלבד:
-{"query": "", "results": [{"position": 1, "name": "", "isOwn": false}], "userMentioned": false, "userPosition": null, "recommendations": ["", "", ""]}
+{"query": "${geoQuestion}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null, "recommendations": ["", "", ""]}
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
-    // No web_search tool — pure AI knowledge for true GEO test
+    // No web_search — pure AI knowledge for true GEO test
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
@@ -70,19 +82,27 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
     }
 
-    // Detect own company in results by name match
-    const results: any[] = Array.isArray(parsed.results) ? parsed.results : []
+    // Post-process: enforce isOwn and isKnownCompetitor by name matching
+    const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+    const companyNameLower = companyName.toLowerCase()
+
     results.forEach((r: any) => {
-      if (!r.isOwn && companyName) {
-        r.isOwn = r.name?.toLowerCase().includes(companyName.toLowerCase().slice(0, 6))
-      }
+      const rName = (r.name || '').toLowerCase()
+      r.isOwn = companyNameLower.length >= 3 && (
+        rName.includes(companyNameLower) || companyNameLower.includes(rName)
+      )
+      r.isKnownCompetitor = !r.isOwn && competitorNames.some(n => {
+        const nLower = n.toLowerCase()
+        return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
+      })
     })
+
     const userMentioned = parsed.userMentioned === true || results.some((r: any) => r.isOwn)
     const userPosition = parsed.userPosition ?? (results.find((r: any) => r.isOwn)?.position ?? null)
 
     const result = {
-      query: parsed.query || geoQuestion,
-      results: results.slice(0, 10),
+      query: geoQuestion,
+      results,
       userMentioned,
       userPosition,
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
