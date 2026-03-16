@@ -32,15 +32,15 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Protect /app/* routes — redirect to login if not authenticated
-  if (!user && pathname.startsWith('/app/')) {
+  // Protect /app/* and /admin/* routes — redirect to login if not authenticated
+  if (!user && (pathname.startsWith('/app/') || pathname.startsWith('/admin/'))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // Protect /app/admin/* — require is_admin = true in user_roles
-  if (user && pathname.startsWith('/app/admin/')) {
+  // Protect /admin/* — require is_admin = true in user_roles
+  if (user && pathname.startsWith('/admin/')) {
     const { data: role } = await supabase
       .from('user_roles')
       .select('is_admin')
