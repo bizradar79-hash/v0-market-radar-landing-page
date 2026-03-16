@@ -3,21 +3,29 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-const WINDOWS = [
-  { days: 14,  label: 'מהשבועיים האחרונים' },
-  { days: 30,  label: 'מהחודש האחרון' },
-  { days: 60,  label: 'מחודשיים אחרונים' },
-  { days: 120, label: 'מ-4 חודשים אחרונים' },
-]
+function toDateStr(d: Date): string {
+  return d.toISOString().split('T')[0] // YYYY-MM-DD
+}
 
-async function fetchNews(businessOverview: string, days: number, label: string): Promise<any[]> {
+function cutoffDate(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+}
+
+async function fetchNews(businessOverview: string, days: number): Promise<any[]> {
+  const cutoff = cutoffDate(days)
+  const cutoffStr = toDateStr(cutoff)
+  const todayStr = toDateStr(new Date())
+
   const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 חדשות עסקיות רלוונטיות ${label} הקשורות לתחום זה בישראל ובעולם.
-לכל חדשה תן ציון רלוונטיות 0-100 לפי כמה היא קשורה לתחום העסק הספציפי.
-לכל חדשה הוסף שדה region: 'ישראל' אם המקור הוא ישראלי, 'עולם' אם המקור הוא בינלאומי.
-חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
+מצא 10 חדשות רלוונטיות מ-${days} הימים האחרונים בלבד (מתאריך ${cutoffStr} עד היום ${todayStr}).
+כלול חדשות מישראל ומהעולם.
+דחה כל חדשה שפורסמה לפני ${cutoffStr}.
+
+לכל חדשה תן relevance_score 0-100 ו-region: 'ישראל' או 'עולם'.
 החזר JSON בלבד:
-[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "region": "ישראל", "relevance_score": 0}]`
+[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "relevance_score": 0, "region": "ישראל/עולם"}]
+
+CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
   const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -54,6 +62,16 @@ async function fetchNews(businessOverview: string, days: number, label: string):
   }
 }
 
+function filterNews(raw: any[], days: number): any[] {
+  const cutoff = cutoffDate(days)
+  return raw.filter((n: any) => {
+    if ((n.relevance_score ?? 0) < 80) return false
+    if (!n.date) return false
+    const published = new Date(n.date)
+    return !isNaN(published.getTime()) && published >= cutoff
+  })
+}
+
 export async function POST() {
   const steps: Record<string, any> = {}
   try {
@@ -64,17 +82,17 @@ export async function POST() {
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 
-    // Expanding time window — stop when filtered results >= 5
-    let list: any[] = []
-    steps.windows = []
+    // Step 1 — 30 days
+    const raw30 = await fetchNews(businessOverview, 30)
+    let list = filterNews(raw30, 30)
+    steps.window30 = { raw: raw30.length, filtered: list.length }
 
-    for (const window of WINDOWS) {
-      const results = await fetchNews(businessOverview, window.days, window.label)
-      const filtered = results.filter((n: any) => (n.relevance_score ?? 0) >= 80)
-      steps.windows.push({ days: window.days, raw: results.length, filtered: filtered.length })
-      if (filtered.length >= 5) { list = filtered; break }
-      // keep best result so far
-      if (filtered.length > list.length) list = filtered
+    // Step 2 — expand to 60 days if fewer than 5 results
+    if (list.length < 5) {
+      const raw60 = await fetchNews(businessOverview, 60)
+      const list60 = filterNews(raw60, 60)
+      steps.window60 = { raw: raw60.length, filtered: list60.length }
+      if (list60.length > list.length) list = list60
     }
 
     steps.ai = { ok: true, count: list.length }
