@@ -32,10 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   Target,
-  Clock,
   AlertTriangle,
   Loader2,
-  Activity,
   Sparkles,
   MoreHorizontal,
   Eye,
@@ -407,16 +405,6 @@ export default function CompetitorsPage() {
     }
   }
 
-  const formatTimeAgo = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60))
-    if (diffHours < 1) return "לפני פחות משעה"
-    if (diffHours < 24) return `לפני ${diffHours} שעות`
-    const diffDays = Math.floor(diffHours / 24)
-    if (diffDays === 1) return "לפני יום"
-    return `לפני ${diffDays} ימים`
-  }
 
   const isManual = (c: Competitor) => c.source === 'manual'
   const manualCompetitors = competitors.filter(isManual)
@@ -627,59 +615,6 @@ export default function CompetitorsPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* Activity Feed */}
-      {competitors.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Activity className="h-5 w-5 text-primary" />
-              פעילות אחרונה של מתחרים
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {competitors.slice(0, 5).map((competitor) => (
-                <div
-                  key={competitor.id}
-                  className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50 cursor-pointer"
-                  onClick={() => analyzeCompetitor(competitor)}
-                >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Activity className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{competitor.name}</span>
-                      <Badge variant="secondary" className="text-xs">{competitor.services || "לא ידוע"}</Badge>
-                      {isManual(competitor) && (
-                        <Badge variant="outline" className="text-xs border-primary/40 text-primary">ידני</Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground">{competitor.last_activity || "לחץ לניתוח עם AI"}</p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {formatTimeAgo(competitor.created_at)}
-                      </span>
-                      <Badge variant="outline" className={competitor.threat_score >= 80 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"}>
-                        איום: {competitor.threat_score}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {analyzing === competitor.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    ) : (
-                      <Brain className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* SEO Ranking Section */}
       <Card>
