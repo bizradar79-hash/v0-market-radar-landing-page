@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       { data: marketTrends },
     ] = await Promise.all([
       ctx.supabase.from('companies')
-        .select('keyword_trends, seo_ranking, geo_ranking, weekly_actions')
+        .select('keyword_trends, seo_ranking, geo_ranking, weekly_actions, niche_opportunities')
         .eq('id', ctx.user.id).single(),
       ctx.supabase.from('tenders')
         .select('title, organization, deadline, link, description')
@@ -243,7 +243,16 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
         })),
       }))
 
-    const payload = { fetchedAt: now.toISOString(), opportunities }
+    // Tag new scan results as auto-generated
+    const autoNiches = opportunities.map(n => ({ ...n, source: 'auto' }))
+
+    // Preserve manual niches (user-added via market analysis) — never overwrite them
+    const existingData = companyRow?.niche_opportunities as { opportunities: any[] } | null
+    const manualNiches = (existingData?.opportunities || []).filter(
+      (n: any) => n.source === 'manual' || n.source === 'market_analysis'
+    )
+
+    const payload = { fetchedAt: now.toISOString(), opportunities: [...autoNiches, ...manualNiches] }
 
     const { error: saveError } = await ctx.supabase
       .from('companies').update({ niche_opportunities: payload }).eq('id', ctx.user.id)
