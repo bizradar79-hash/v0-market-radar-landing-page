@@ -59,15 +59,24 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
   async function handleSave() {
     setSaving(true)
     try {
-      await fetch('/api/save-market-analysis', {
+      await fetch('/api/ai-opportunities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysis }),
+        body: JSON.stringify({
+          title: analysis.query,
+          description: analysis.summary,
+          source_type: 'market_analysis',
+          revenue_potential_score: metrics.revenuePotentialScore,
+          estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
+          estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
+          market_demand_score: analysis.demandScore,
+          competition_score: analysis.competitionScore,
+        }),
       })
       setSaved(true)
       onSaved?.()
     } catch {
-      // silent — auto-save already happened in analyze-market
+      // silent
     } finally {
       setSaving(false)
     }
@@ -273,7 +282,7 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
           {saving
             ? <Loader2 className="h-4 w-4 animate-spin ml-2" />
             : <Bookmark className="h-4 w-4 ml-2" />}
-          {saved ? "נשמר ✓" : "שמור כהזדמנות"}
+          {saved ? "נשמר ✓" : "⭐ שמור להזדמנויות"}
         </Button>
         <Button
           variant="outline"

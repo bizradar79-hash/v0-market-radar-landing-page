@@ -48,7 +48,7 @@ const getNavItems = (counts: NavCounts) => [
   { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
   { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
   { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
-  { href: "/app/leads", label: "לידים", icon: Users, badge: counts.leads || undefined },
+  { href: "/app/leads", label: "מרכז הזדמנויות ⭐", icon: Users, badge: counts.leads || undefined },
   { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
   { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
   { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
