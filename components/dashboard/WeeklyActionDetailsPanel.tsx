@@ -1,9 +1,10 @@
 "use client"
 
+import Link from "next/link"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, ChevronLeft } from "lucide-react"
-import type { WeeklyAction } from "@/types/weekly-actions"
+import { CheckCircle2, ExternalLink, ArrowLeft } from "lucide-react"
+import type { WeeklyAction, ActionSignal } from "@/types/weekly-actions"
 
 const priorityColor: Record<string, string> = {
   גבוהה: "bg-red-100 text-red-700 border-red-200",
@@ -27,6 +28,26 @@ const categoryColor: Record<string, string> = {
   כללי: "bg-gray-100 text-gray-700 border-gray-200",
 }
 
+const signalIcon: Record<ActionSignal['type'], string> = {
+  trend:      "📈",
+  competitor: "🏢",
+  tender:     "📋",
+  news:       "📰",
+  lead:       "👤",
+  conference: "🎤",
+  keyword:    "🔍",
+}
+
+const signalBorderColor: Record<ActionSignal['type'], string> = {
+  trend:      "border-blue-300",
+  competitor: "border-red-300",
+  tender:     "border-purple-300",
+  news:       "border-slate-300",
+  lead:       "border-teal-300",
+  conference: "border-indigo-300",
+  keyword:    "border-blue-300",
+}
+
 interface Props {
   action: WeeklyAction | null
   open: boolean
@@ -35,6 +56,8 @@ interface Props {
 
 export default function WeeklyActionDetailsPanel({ action, open, onClose }: Props) {
   if (!action) return null
+
+  const hasSignals = action.signals && action.signals.length > 0
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -58,11 +81,23 @@ export default function WeeklyActionDetailsPanel({ action, open, onClose }: Prop
         </SheetHeader>
 
         <div className="space-y-6 text-right">
-          {/* Why this week */}
-          <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
-            <p className="text-xs font-semibold text-amber-700 mb-1">למה דווקא השבוע?</p>
-            <p className="text-sm text-amber-800">{action.why_this_week}</p>
-          </div>
+          {/* Signals — why this week with verifiable links */}
+          {hasSignals ? (
+            <div>
+              <p className="text-xs font-semibold text-amber-700 mb-3">למה דווקא השבוע?</p>
+              <div className="space-y-2">
+                {action.signals.map((signal, i) => (
+                  <SignalCard key={i} signal={signal} />
+                ))}
+              </div>
+            </div>
+          ) : action.why_this_week ? (
+            /* Fallback for cached data without signals */
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
+              <p className="text-xs font-semibold text-amber-700 mb-1">למה דווקא השבוע?</p>
+              <p className="text-sm text-amber-800">{action.why_this_week}</p>
+            </div>
+          ) : null}
 
           {/* Details */}
           {action.details && (
@@ -102,5 +137,44 @@ export default function WeeklyActionDetailsPanel({ action, open, onClose }: Prop
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+function SignalCard({ signal }: { signal: ActionSignal }) {
+  const icon = signalIcon[signal.type] || "📌"
+  const border = signalBorderColor[signal.type] || "border-gray-300"
+
+  return (
+    <div className={`rounded-lg border-r-4 border border-border bg-muted/30 p-3 ${border}`}>
+      <div className="flex items-start gap-2">
+        <span className="text-base shrink-0 mt-0.5">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold leading-tight">{signal.label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{signal.description}</p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {signal.sourceRoute && (
+              <Link
+                href={signal.sourceRoute}
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                צפה במערכת
+                <ArrowLeft className="h-3 w-3" />
+              </Link>
+            )}
+            {signal.externalUrl && (
+              <a
+                href={signal.externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+              >
+                מקור חיצוני
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

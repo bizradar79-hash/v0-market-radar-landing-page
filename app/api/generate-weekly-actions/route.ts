@@ -10,7 +10,6 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Check cache — only regenerate if force=true or stale
     const { force } = await request.json().catch(() => ({ force: false }))
 
     if (!force) {
@@ -26,7 +25,51 @@ export async function POST(request: Request) {
       }
     }
 
-    // Build a rich context for Grok
+    // Load all real data in parallel
+    const [
+      { data: companyRow },
+      { data: tenders },
+      { data: news },
+      { data: leads },
+      { data: conferences },
+    ] = await Promise.all([
+      ctx.supabase.from('companies').select('keyword_trends').eq('id', ctx.user.id).single(),
+      ctx.supabase.from('tenders').select('title, organization, deadline, link, description').eq('company_id', ctx.user.id).order('deadline', { ascending: true }).limit(10),
+      ctx.supabase.from('news').select('title, source, url, summary, category, published_at').eq('company_id', ctx.user.id).order('published_at', { ascending: false }).limit(10),
+      ctx.supabase.from('leads').select('name, industry, location, score').eq('company_id', ctx.user.id).order('score', { ascending: false }).limit(8),
+      ctx.supabase.from('conferences').select('name, date, location, url, description').eq('company_id', ctx.user.id).order('date', { ascending: true }).limit(5),
+    ])
+
+    // Flatten keyword trends into a readable list
+    const kwTrends = companyRow?.keyword_trends as Record<string, any> | null
+    const trendLines: string[] = []
+    if (kwTrends) {
+      for (const [kw, kwData] of Object.entries(kwTrends)) {
+        const phrases: any[] = kwData?.israel || kwData?.trends || []
+        for (const p of phrases.slice(0, 3)) {
+          if (p.phrase) trendLines.push(`"${p.phrase}" (${p.trend || ''}) — ${p.reason || ''}`)
+        }
+      }
+    }
+
+    const competitorNames = ctx.competitors?.map((c: any) => c.name).filter(Boolean) || []
+
+    const tenderLines = (tenders || []).map((t: any) =>
+      `"${t.title}" | ${t.organization || ''} | דדליין: ${t.deadline ? new Date(t.deadline).toLocaleDateString('he-IL') : '?'}${t.link ? ` | ${t.link}` : ''}`
+    )
+
+    const newsLines = (news || []).map((n: any) =>
+      `"${n.title}" | ${n.source || ''} | ${n.published_at ? n.published_at.split('T')[0] : '?'}${n.url ? ` | ${n.url}` : ''}`
+    )
+
+    const leadLines = (leads || []).map((l: any) =>
+      `"${l.name}" | ${l.industry || ''} | ${l.location || ''} | ציון ${l.score || 0}`
+    )
+
+    const conferenceLines = (conferences || []).map((c: any) =>
+      `"${c.name}" | ${c.date ? new Date(c.date).toLocaleDateString('he-IL') : '?'} | ${c.location || ''}${c.url ? ` | ${c.url}` : ''}`
+    )
+
     const company = ctx.company
     const profile = ctx.companyProfile || ''
     const now = new Date()
@@ -36,19 +79,42 @@ export async function POST(request: Request) {
 
 פרטי העסק:
 ${profile}
+תחום: ${company?.industry || ''} | עיר: ${company?.city || ''}
 
-המידע הזמין במערכת שלנו:
-- תחום: ${company?.industry || ''}
-- עיר: ${company?.city || ''}
-- מתחרים: ${ctx.competitors?.map((c: any) => c.name).join(', ') || 'אין'}
+=== נתונים עדכניים מהמערכת ===
 
-המשימה שלך: בהתבסס על הפרופיל העסקי ועל מה שקורה בשוק הישראלי השבוע, הכן 5-7 פעולות קונקרטיות שהעסק הזה צריך לעשות השבוע.
+## מתחרים (${competitorNames.length}):
+${competitorNames.length > 0 ? competitorNames.join(', ') : 'אין נתונים'}
 
-כל פעולה צריכה להיות:
-- ספציפית ומעשית (לא כלליות כמו "שפר שיווק")
-- רלוונטית לתחום ולגודל העסק
-- ברת-ביצוע תוך שבוע אחד
-- מדורגת לפי עדיפות
+## טרנדים עולים בתחום (${trendLines.length}):
+${trendLines.length > 0 ? trendLines.join('\n') : 'אין נתונים'}
+
+## מכרזים פתוחים (${tenderLines.length}):
+${tenderLines.length > 0 ? tenderLines.join('\n') : 'אין מכרזים'}
+
+## חדשות אחרונות (${newsLines.length}):
+${newsLines.length > 0 ? newsLines.join('\n') : 'אין חדשות'}
+
+## לידים פוטנציאליים (${leadLines.length}):
+${leadLines.length > 0 ? leadLines.join('\n') : 'אין לידים'}
+
+## כנסים קרובים (${conferenceLines.length}):
+${conferenceLines.length > 0 ? conferenceLines.join('\n') : 'אין כנסים'}
+
+=== המשימה ===
+
+הכן 5-7 פעולות קונקרטיות שהעסק צריך לעשות השבוע.
+כל פעולה חייבת להתבסס על נתון ספציפי מהנתונים לעיל (טרנד, מתחרה, מכרז, חדשה, ליד, כנס).
+אל תמציא נתונים שלא הופיעו למעלה.
+
+בשדה "signals" — ציין אילו פריטים ספציפיים מהמערכת הובילו להמלצה (שם הטרנד/מתחרה/מכרז/חדשה).
+- עבור טרנד → sourceRoute: "/app/trends"
+- עבור מתחרה → sourceRoute: "/app/competitors"
+- עבור מכרז → sourceRoute: "/app/tenders" ואם יש לינק חיצוני → externalUrl
+- עבור חדשה → sourceRoute: "/app/news" ואם יש URL → externalUrl
+- עבור ליד → sourceRoute: "/app/leads"
+- עבור כנס → sourceRoute: "/app/conferences" ואם יש URL → externalUrl
+- עבור מילת מפתח/טרנד → sourceRoute: "/app/trends"
 
 החזר JSON בלבד:
 [{
@@ -60,7 +126,15 @@ ${profile}
   "summary": "הסבר קצר 1-2 משפטים",
   "details": "תיאור מפורט של הפעולה",
   "steps": ["שלב 1", "שלב 2", "שלב 3"],
-  "why_this_week": "למה דווקא השבוע זה חשוב",
+  "signals": [
+    {
+      "type": "trend|competitor|tender|news|lead|conference|keyword",
+      "label": "טרנד: שם ספציפי מהנתונים",
+      "description": "משפט אחד למה זה רלוונטי עכשיו",
+      "sourceRoute": "/app/trends",
+      "externalUrl": "https://... (אם קיים בנתונים, אחרת השמט)"
+    }
+  ],
   "expected_outcome": "מה תצפה לקבל כתוצאה"
 }]
 
@@ -75,7 +149,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       body: JSON.stringify({
         model: 'grok-4-fast-non-reasoning',
         input: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search' }],
+        // No web_search — actions must be grounded in the data we provide
       }),
     })
 
@@ -106,8 +180,12 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       return NextResponse.json({ error: 'JSON parse failed', raw: clean.slice(0, 500) }, { status: 500 })
     }
 
-    // Ensure IDs are strings
-    actions = actions.map((a, i) => ({ ...a, id: String(a.id || i + 1) }))
+    // Normalize: ensure IDs are strings, signals is always an array
+    actions = actions.map((a, i) => ({
+      ...a,
+      id: String(a.id || i + 1),
+      signals: Array.isArray(a.signals) ? a.signals : [],
+    }))
 
     const payload = { fetchedAt: now.toISOString(), actions }
 
