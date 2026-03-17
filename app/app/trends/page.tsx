@@ -31,8 +31,15 @@ interface KwTrend {
   trend_data: { week: string; value: number }[]
 }
 
+interface KwData {
+  fetchedAt: string
+  trends?: KwTrend[]  // backward-compat (old records without israel/world)
+  israel?: KwTrend[]
+  world?: KwTrend[]
+}
+
 interface KwTrendsMap {
-  [keyword: string]: { fetchedAt: string; trends: KwTrend[] }
+  [keyword: string]: KwData
 }
 
 function getMomentumBadge(direction: string) {
@@ -81,6 +88,7 @@ export default function TrendsPage() {
   const [showAddKw, setShowAddKw] = useState(false)
   const [newKw, setNewKw] = useState('')
   const [addingKw, setAddingKw] = useState(false)
+  const [activeTab, setActiveTab] = useState<Record<string, 'israel' | 'world'>>({})
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -136,7 +144,12 @@ export default function TrendsPage() {
       })
       const data = await res.json()
       if (data.success) {
-        setKwTrends(prev => ({ ...prev, [kw]: { fetchedAt: new Date().toISOString(), trends: data.trends } }))
+        setKwTrends(prev => ({ ...prev, [kw]: {
+          fetchedAt: new Date().toISOString(),
+          trends: data.trends,
+          israel: data.israel,
+          world: data.world,
+        } }))
         setExpanded(prev => new Set([...prev, kw]))
         if (data.saveError) {
           toast({ title: `טרנדים נטענו אך לא נשמרו`, description: data.saveError, variant: 'destructive' })
@@ -279,6 +292,13 @@ export default function TrendsPage() {
           const isExpanded = expanded.has(kw)
           const isLoading = !!loadingKw[kw]
 
+          // Resolve trend lists — support both old format (trends) and new (israel/world)
+          const israelTrends = kwData?.israel || kwData?.trends || []
+          const worldTrends = kwData?.world || []
+          const hasWorld = worldTrends.length > 0
+          const tab = activeTab[kw] || 'israel'
+          const displayTrends = tab === 'world' ? worldTrends : israelTrends
+
           return (
             <Card key={kw}>
               <CardContent className="p-4">
@@ -292,7 +312,7 @@ export default function TrendsPage() {
                     <span className="font-medium">{kw}</span>
                     {kwData && (
                       <span className="text-xs text-muted-foreground">
-                        {kwData.trends.length} טרנדים
+                        {israelTrends.length} טרנדים
                       </span>
                     )}
                     <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -323,28 +343,57 @@ export default function TrendsPage() {
                 {isLoading && (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>מחפש טרנדים בשבוע האחרון...</span>
+                    <span>מחפש טרנדים בישראל ובעולם...</span>
                   </div>
                 )}
 
                 {/* Expanded trends list */}
                 {isExpanded && !isLoading && kwData && (
-                  <div className="mt-4 space-y-2">
-                    {kwData.trends.map((t, i) => (
-                      <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-sm">{t.phrase}</span>
-                            {getMomentumBadge(t.trend)}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{t.reason}</p>
-                        </div>
-                        {t.trend_data?.length >= 2 && (
-                          <Sparkline data={t.trend_data} trend={t.trend} />
-                        )}
+                  <div className="mt-3">
+                    {/* Israel / World tabs — only shown when world data exists */}
+                    {hasWorld && (
+                      <div className="flex border-b mb-3">
+                        <button
+                          onClick={() => setActiveTab(prev => ({ ...prev, [kw]: 'israel' }))}
+                          className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                            tab === 'israel'
+                              ? 'border-primary text-primary'
+                              : 'border-transparent text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          🇮🇱 ישראל
+                        </button>
+                        <button
+                          onClick={() => setActiveTab(prev => ({ ...prev, [kw]: 'world' }))}
+                          className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+                            tab === 'world'
+                              ? 'border-primary text-primary'
+                              : 'border-transparent text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          🌍 עולם
+                        </button>
                       </div>
-                    ))}
-                    <p className="text-xs text-muted-foreground pt-1">
+                    )}
+
+                    <div className="space-y-2">
+                      {displayTrends.map((t, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm">{t.phrase}</span>
+                              {getMomentumBadge(t.trend)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{t.reason}</p>
+                          </div>
+                          {t.trend_data?.length >= 2 && (
+                            <Sparkline data={t.trend_data} trend={t.trend} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground pt-2">
                       עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
                     </p>
                   </div>
