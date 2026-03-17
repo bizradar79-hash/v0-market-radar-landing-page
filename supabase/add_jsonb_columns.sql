@@ -6,4 +6,5 @@ ALTER TABLE companies
   ADD COLUMN IF NOT EXISTS seo_ranking           JSONB,
   ADD COLUMN IF NOT EXISTS geo_ranking           JSONB,
   ADD COLUMN IF NOT EXISTS competitors_blacklist TEXT[] DEFAULT '{}',
-  ADD COLUMN IF NOT EXISTS weekly_actions        JSONB;
+  ADD COLUMN IF NOT EXISTS weekly_actions        JSONB,
+  ADD COLUMN IF NOT EXISTS niche_opportunities   JSONB;

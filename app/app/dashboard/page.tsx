@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
+import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
 import {
   TrendingUp,
   Target,
@@ -257,6 +258,9 @@ export default function AppDashboardPage() {
 
       {/* Weekly Actions */}
       <WeeklyActionsBlock />
+
+      {/* Niche Discovery */}
+      <NicheDiscoveryBlock />
 
       {/* AI exhaustion banner */}
       {bothExhausted && (
