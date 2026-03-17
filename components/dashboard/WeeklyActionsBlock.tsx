@@ -9,6 +9,7 @@ import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
 import { revenueInputFromWeeklyAction } from "@/lib/revenue-adapters"
+import SaveOpportunityButton from "@/components/opportunities/SaveOpportunityButton"
 
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: WeeklyActionsData | null = null
@@ -201,31 +202,6 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
   const prioClass = priorityColor[action.priority] || ""
   const isHigh = action.priority === 'גבוהה'
   const metrics = calculateRevenueMetrics(revenueInputFromWeeklyAction(action))
-  const [saved, setSaved] = useState(false)
-
-  async function handleSave(e: React.MouseEvent) {
-    e.stopPropagation()
-    if (saved) return
-    setSaved(true)
-    try {
-      await fetch('/api/ai-opportunities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: action.title,
-          description: action.summary,
-          source_type: 'weekly',
-          revenue_potential_score: metrics.revenuePotentialScore,
-          estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
-          estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
-          market_demand_score: Math.round(metrics.revenuePotentialScore * 0.8),
-          competition_score: 50,
-        }),
-      })
-    } catch {
-      setSaved(false)
-    }
-  }
 
   return (
     <button
@@ -257,13 +233,21 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
         <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saved}
-        className={`mt-1 text-xs px-2 py-1 rounded border transition-colors w-fit ${saved ? 'border-green-300 text-green-600 bg-green-50 cursor-default' : 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'}`}
-      >
-        {saved ? '✓ נשמר' : '⭐ שמור'}
-      </button>
+      <div onClick={e => e.stopPropagation()} className="mt-1">
+        <SaveOpportunityButton
+          sourceType="weekly_action"
+          sourceId={action.id}
+          data={{
+            title: action.title,
+            summary: action.summary,
+            revenue_potential_score: metrics.revenuePotentialScore,
+            estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
+            estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
+            confidence_score: metrics.confidenceScore,
+          }}
+          size="sm"
+        />
+      </div>
 
       <div className="mt-1 flex items-center justify-end gap-1 text-xs text-primary">
         <span>לפרטים</span>

@@ -52,6 +52,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import AIOpportunityCard, { type AIOpportunity } from "@/components/opportunities/AIOpportunityCard"
+import type { SavedOpportunity } from "@/types/saved-opportunity"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,10 @@ interface Lead {
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function OpportunitiesPage() {
+  // Saved Opportunities state
+  const [savedOpps, setSavedOpps] = useState<SavedOpportunity[]>([])
+  const [savedLoading, setSavedLoading] = useState(true)
+
   // AI Opportunities state
   const [opportunities, setOpportunities] = useState<AIOpportunity[]>([])
   const [oppLoading, setOppLoading] = useState(true)
@@ -107,6 +112,36 @@ export default function OpportunitiesPage() {
 
   const supabase = createClient()
   const { toast } = useToast()
+
+  // ── Saved Opportunities fetch ────────────────────────────────────────────
+
+  const fetchSavedOpps = useCallback(async () => {
+    try {
+      const res = await fetch('/api/saved-opportunities')
+      const json = await res.json()
+      if (json.opportunities) setSavedOpps(json.opportunities)
+    } catch {
+      // silent
+    } finally {
+      setSavedLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchSavedOpps() }, [fetchSavedOpps])
+
+  function handleSavedDelete(id: string) {
+    setSavedOpps(prev => prev.filter(o => o.id !== id))
+    fetch(`/api/saved-opportunities/${id}`, { method: 'DELETE' }).catch(() => {})
+  }
+
+  function handleSavedNotes(id: string, notes: string) {
+    setSavedOpps(prev => prev.map(o => o.id === id ? { ...o, user_notes: notes } : o))
+    fetch(`/api/saved-opportunities/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_notes: notes }),
+    }).catch(() => {})
+  }
 
   // ── AI Opportunities fetch + refresh ────────────────────────────────────
 
@@ -248,6 +283,14 @@ export default function OpportunitiesPage() {
           כל ההזדמנויות שזוהו על ידי AI — ניהול, מעקב וניצול
         </p>
       </div>
+
+      {/* ── הזדמנויות שמורות ────────────────────────────────────────────── */}
+      <SavedOpportunitiesSection
+        items={savedOpps}
+        loading={savedLoading}
+        onDelete={handleSavedDelete}
+        onNotesSave={handleSavedNotes}
+      />
 
       {/* ── PART 3: Summary Bar ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -580,5 +623,152 @@ export default function OpportunitiesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// ── SavedOpportunitiesSection ─────────────────────────────────────────────
+
+const sourceLabel: Record<string, string> = {
+  weekly_action:   'שבועי 🚀',
+  niche:           'נישה 🔍',
+  market_analysis: 'ניתוח שוק 📊',
+}
+
+const sourceBadgeColor: Record<string, string> = {
+  weekly_action:   'bg-yellow-100 text-yellow-700 border-yellow-200',
+  niche:           'bg-blue-100 text-blue-700 border-blue-200',
+  market_analysis: 'bg-teal-100 text-teal-700 border-teal-200',
+}
+
+function formatSavedDate(iso: string): string {
+  const d = new Date(iso)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}.${mm}.${yyyy}`
+}
+
+function scoreBarColor(score: number): string {
+  if (score >= 75) return 'bg-orange-500'
+  if (score >= 50) return 'bg-green-500'
+  if (score >= 25) return 'bg-blue-500'
+  return 'bg-gray-400'
+}
+
+interface SavedSectionProps {
+  items: SavedOpportunity[]
+  loading: boolean
+  onDelete: (id: string) => void
+  onNotesSave: (id: string, notes: string) => void
+}
+
+function SavedOpportunitiesSection({ items, loading, onDelete, onNotesSave }: SavedSectionProps) {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">הזדמנויות שמורות</h2>
+
+      {loading ? (
+        <div className="flex items-center gap-2 py-6 text-muted-foreground justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">טוען...</span>
+        </div>
+      ) : items.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-10 text-center gap-3">
+            <Star className="h-9 w-9 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">טרם שמרת הזדמנויות.</p>
+            <Link href="/app/dashboard">
+              <Button variant="outline" size="sm">גלה הזדמנויות בדשבורד ←</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {items.map(opp => (
+            <SavedOpportunityRow key={opp.id} opp={opp} onDelete={onDelete} onNotesSave={onNotesSave} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SavedOpportunityRow({
+  opp, onDelete, onNotesSave,
+}: {
+  opp: SavedOpportunity
+  onDelete: (id: string) => void
+  onNotesSave: (id: string, notes: string) => void
+}) {
+  const [notes, setNotes] = useState(opp.user_notes || '')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  function handleNotesBlur() {
+    if (notes !== opp.user_notes) onNotesSave(opp.id, notes)
+  }
+
+  return (
+    <Card className="border-border hover:shadow-sm transition-shadow">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3 flex-wrap">
+          {/* Source badge */}
+          <Badge variant="outline" className={`text-xs shrink-0 ${sourceBadgeColor[opp.source_type] || ''}`}>
+            {sourceLabel[opp.source_type] || opp.source_type}
+          </Badge>
+
+          {/* Title + meta + notes */}
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-semibold text-sm">{opp.title}</p>
+              <Badge variant="outline" className="text-xs text-muted-foreground">{opp.status}</Badge>
+              <span className="text-xs text-muted-foreground">נשמר: {formatSavedDate(opp.saved_at)}</span>
+            </div>
+
+            {opp.revenue_potential_score > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground w-20 shrink-0">פוטנציאל</span>
+                <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${scoreBarColor(opp.revenue_potential_score)}`}
+                    style={{ width: `${Math.min(100, opp.revenue_potential_score)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-medium w-6 text-right">{opp.revenue_potential_score}</span>
+              </div>
+            )}
+
+            {(opp.estimated_revenue_min > 0 || opp.estimated_revenue_max > 0) && (
+              <p className="text-xs text-muted-foreground">
+                ₪{opp.estimated_revenue_min.toLocaleString()} – ₪{opp.estimated_revenue_max.toLocaleString()} / חודש
+              </p>
+            )}
+
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              onBlur={handleNotesBlur}
+              placeholder="הוסף הערה..."
+              rows={1}
+              className="w-full text-xs rounded border border-border bg-muted/30 px-2 py-1 text-right resize-none focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-muted-foreground/50"
+              dir="rtl"
+            />
+          </div>
+
+          {/* Delete */}
+          <div className="shrink-0">
+            {confirmDelete ? (
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => onDelete(opp.id)} className="text-xs text-red-600 hover:text-red-700 font-medium">מחק</button>
+                <button onClick={() => setConfirmDelete(false)} className="text-xs text-muted-foreground hover:text-foreground">ביטול</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDelete(true)} className="text-muted-foreground hover:text-red-500 transition-colors p-1" title="מחק">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -4,11 +4,12 @@ import { useState } from "react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, ExternalLink, Loader2, Bookmark, Plus } from "lucide-react"
+import { ArrowLeft, ExternalLink, Loader2, Plus } from "lucide-react"
 import type { MarketAnalysis, AnalysisSignal } from "@/types/market-analysis"
 import type { NicheOpportunity } from "@/types/niche-opportunity"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
 import { revenueInputFromMarketAnalysis } from "@/lib/revenue-adapters"
+import SaveOpportunityButton from "@/components/opportunities/SaveOpportunityButton"
 
 const revenueLevelColor: Record<string, string> = {
   'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
@@ -48,39 +49,11 @@ interface Props {
 }
 
 export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [addingNiche, setAddingNiche] = useState(false)
   const [nicheAdded, setNicheAdded] = useState(false)
   const [explExpanded, setExplExpanded] = useState(false)
 
   const metrics = calculateRevenueMetrics(revenueInputFromMarketAnalysis(analysis))
-
-  async function handleSave() {
-    setSaving(true)
-    try {
-      await fetch('/api/ai-opportunities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: analysis.query,
-          description: analysis.summary,
-          source_type: 'market_analysis',
-          revenue_potential_score: metrics.revenuePotentialScore,
-          estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
-          estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
-          market_demand_score: analysis.demandScore,
-          competition_score: analysis.competitionScore,
-        }),
-      })
-      setSaved(true)
-      onSaved?.()
-    } catch {
-      // silent
-    } finally {
-      setSaving(false)
-    }
-  }
 
   async function handleAddNiche() {
     setAddingNiche(true)
@@ -274,16 +247,24 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
 
       {/* Action buttons */}
       <div className="flex gap-2 pt-2 border-t">
-        <Button
-          className="flex-1 bg-emerald-600 hover:bg-emerald-700"
-          onClick={handleSave}
-          disabled={saving || saved}
-        >
-          {saving
-            ? <Loader2 className="h-4 w-4 animate-spin ml-2" />
-            : <Bookmark className="h-4 w-4 ml-2" />}
-          {saved ? "נשמר ✓" : "⭐ שמור להזדמנויות"}
-        </Button>
+        <div className="flex-1">
+          <SaveOpportunityButton
+            sourceType="market_analysis"
+            sourceId={analysis.id}
+            data={{
+              title: analysis.query,
+              summary: analysis.summary,
+              description: analysis.summary,
+              revenue_potential_score: metrics.revenuePotentialScore,
+              estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
+              estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
+              confidence_score: metrics.confidenceScore,
+              market_region: analysis.region ?? '',
+              industry_tag: analysis.category ?? '',
+            }}
+            size="default"
+          />
+        </div>
         <Button
           variant="outline"
           className="flex-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
