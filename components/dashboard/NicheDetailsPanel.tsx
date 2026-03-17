@@ -1,11 +1,21 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CheckCircle2, ExternalLink, ArrowLeft, Bookmark, BookmarkCheck } from "lucide-react"
 import type { NicheOpportunity, NicheStatus, NicheSignal } from "@/types/niche-opportunity"
+import { calculateRevenueMetrics } from "@/lib/revenue-engine"
+import { revenueInputFromNiche } from "@/lib/revenue-adapters"
+
+const revenueLevelColor: Record<string, string> = {
+  'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
+  'בינוני':  'bg-blue-100 text-blue-700 border-blue-200',
+  'גבוה':    'bg-green-100 text-green-700 border-green-200',
+  'חם מאוד': 'bg-orange-100 text-orange-700 border-orange-200',
+}
 
 const demandColor: Record<string, string> = {
   עולה: "bg-green-100 text-green-700 border-green-200",
@@ -46,10 +56,13 @@ interface Props {
 }
 
 export default function NicheDetailsPanel({ niche, open, status, onClose, onStatusChange }: Props) {
+  const [explExpanded, setExplExpanded] = useState(false)
+
   if (!niche) return null
 
   const isTracking = status === 'tracking'
   const demandArrow = niche.demandTrend === 'עולה' ? '↑' : niche.demandTrend === 'יורד' ? '↓' : '→'
+  const metrics = calculateRevenueMetrics(revenueInputFromNiche(niche))
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -105,6 +118,56 @@ export default function NicheDetailsPanel({ niche, open, status, onClose, onStat
             <Badge variant="outline" className={competitionColor[niche.competitionLevel] || ""}>
               תחרות {niche.competitionLevel}
             </Badge>
+          </div>
+
+          {/* Revenue Intelligence */}
+          <div className="rounded-lg border bg-gradient-to-br from-orange-50/40 to-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-orange-700">פוטנציאל הכנסה 💰</p>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}>
+                {metrics.revenueLevel}
+              </span>
+            </div>
+            <div className="mb-3">
+              <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                <span>ציון פוטנציאל הכנסה</span>
+                <span className="font-semibold text-orange-600">{metrics.revenuePotentialScore}</span>
+              </div>
+              <div className="h-2 rounded-full bg-orange-100 overflow-hidden">
+                <div className="h-full rounded-full bg-orange-500 transition-all" style={{ width: `${metrics.revenuePotentialScore}%` }} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <p className="text-muted-foreground">הכנסה חודשית משוערת</p>
+                <p className="font-semibold">₪{metrics.estimatedMonthlyRevenueMin.toLocaleString()} – ₪{metrics.estimatedMonthlyRevenueMax.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">זמן לעסקה ראשונה</p>
+                <p className="font-semibold">{metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} ימים</p>
+              </div>
+            </div>
+            {metrics.explanation.length > 0 && (
+              <div className="mt-3 border-t pt-3">
+                <button
+                  className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                  onClick={() => setExplExpanded(e => !e)}
+                >
+                  {explExpanded ? 'הסתר פירוט ↑' : 'הצג פירוט ↓'}
+                </button>
+                {explExpanded && (
+                  <ul className="mt-2 space-y-1">
+                    {metrics.explanation.map((line, i) => (
+                      <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                        <span className="text-orange-400 shrink-0">·</span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground/60 mt-2">הערכה מבוססת על נתוני שוק אמיתיים וסיגנלים שנאספו במערכת</p>
           </div>
 
           {/* Why fits your business */}

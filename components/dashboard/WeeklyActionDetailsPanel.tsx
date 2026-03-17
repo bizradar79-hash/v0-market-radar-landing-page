@@ -1,10 +1,20 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, ExternalLink, ArrowLeft } from "lucide-react"
 import type { WeeklyAction, ActionSignal } from "@/types/weekly-actions"
+import { calculateRevenueMetrics } from "@/lib/revenue-engine"
+import { revenueInputFromWeeklyAction } from "@/lib/revenue-adapters"
+
+const revenueLevelColor: Record<string, string> = {
+  'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
+  'בינוני':  'bg-blue-100 text-blue-700 border-blue-200',
+  'גבוה':    'bg-green-100 text-green-700 border-green-200',
+  'חם מאוד': 'bg-orange-100 text-orange-700 border-orange-200',
+}
 
 const priorityColor: Record<string, string> = {
   גבוהה: "bg-red-100 text-red-700 border-red-200",
@@ -55,9 +65,12 @@ interface Props {
 }
 
 export default function WeeklyActionDetailsPanel({ action, open, onClose }: Props) {
+  const [explExpanded, setExplExpanded] = useState(false)
+
   if (!action) return null
 
   const hasSignals = action.signals && action.signals.length > 0
+  const metrics = calculateRevenueMetrics(revenueInputFromWeeklyAction(action))
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -134,6 +147,48 @@ export default function WeeklyActionDetailsPanel({ action, open, onClose }: Prop
               <p className="text-sm text-green-800">{action.expected_outcome}</p>
             </div>
           )}
+
+          {/* Revenue Impact */}
+          <div className="rounded-lg border bg-gradient-to-br from-orange-50/40 to-white p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-orange-700">השפעת הכנסה 💰</p>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}>
+                {metrics.revenueLevel}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs mb-2">
+              <div>
+                <p className="text-muted-foreground">הכנסה חודשית משוערת</p>
+                <p className="font-semibold">₪{metrics.estimatedMonthlyRevenueMin.toLocaleString()} – ₪{metrics.estimatedMonthlyRevenueMax.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">הסתברות סגירה</p>
+                <p className="font-semibold">{metrics.closeProbability}%</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">זמן לעסקה ראשונה: {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} ימים</p>
+            {metrics.explanation.length > 0 && (
+              <div className="border-t pt-3">
+                <button
+                  className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                  onClick={() => setExplExpanded(e => !e)}
+                >
+                  {explExpanded ? 'הסתר פירוט ↑' : 'הצג פירוט ↓'}
+                </button>
+                {explExpanded && (
+                  <ul className="mt-2 space-y-1">
+                    {metrics.explanation.map((line, i) => (
+                      <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                        <span className="text-orange-400 shrink-0">·</span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground/60 mt-2">הערכה מבוססת על נתוני שוק אמיתיים וסיגנלים שנאספו במערכת</p>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

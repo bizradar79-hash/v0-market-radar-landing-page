@@ -7,6 +7,15 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, ExternalLink, Loader2, Bookmark, Plus } from "lucide-react"
 import type { MarketAnalysis, AnalysisSignal } from "@/types/market-analysis"
 import type { NicheOpportunity } from "@/types/niche-opportunity"
+import { calculateRevenueMetrics } from "@/lib/revenue-engine"
+import { revenueInputFromMarketAnalysis } from "@/lib/revenue-adapters"
+
+const revenueLevelColor: Record<string, string> = {
+  'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
+  'בינוני':  'bg-blue-100 text-blue-700 border-blue-200',
+  'גבוה':    'bg-green-100 text-green-700 border-green-200',
+  'חם מאוד': 'bg-orange-100 text-orange-700 border-orange-200',
+}
 
 const momentumColor: Record<string, string> = {
   עולה: "bg-green-100 text-green-700 border-green-200",
@@ -43,6 +52,9 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
   const [saved, setSaved] = useState(false)
   const [addingNiche, setAddingNiche] = useState(false)
   const [nicheAdded, setNicheAdded] = useState(false)
+  const [explExpanded, setExplExpanded] = useState(false)
+
+  const metrics = calculateRevenueMetrics(revenueInputFromMarketAnalysis(analysis))
 
   async function handleSave() {
     setSaving(true)
@@ -118,6 +130,64 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
         <ScoreBar label="ביקוש" value={analysis.demandScore} color="blue" />
         <ScoreBar label="תחרות" value={analysis.competitionScore} color="red" />
         <ScoreBar label="פוטנציאל כניסה" value={analysis.gapScore} color="green" />
+      </div>
+
+      {/* Revenue Intelligence Card */}
+      <div className="rounded-lg border bg-gradient-to-br from-orange-50/40 to-white p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold">פוטנציאל הכנסה 💰</p>
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}>
+            {metrics.revenueLevel}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+          <div>
+            <p className="text-muted-foreground">הכנסה חודשית משוערת</p>
+            <p className="font-semibold text-sm">₪{metrics.estimatedMonthlyRevenueMin.toLocaleString()} – ₪{metrics.estimatedMonthlyRevenueMax.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">גודל עסקה ממוצע</p>
+            <p className="font-semibold text-sm">₪{metrics.avgDealSize.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">הסתברות סגירה</p>
+            <p className="font-semibold">{metrics.closeProbability}%</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">זמן לעסקה ראשונה</p>
+            <p className="font-semibold">{metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} ימים</p>
+          </div>
+        </div>
+        <div className="mb-1">
+          <div className="flex justify-between text-xs text-muted-foreground mb-1">
+            <span>ביטחון הניתוח</span>
+            <span className="font-medium">{metrics.confidenceScore}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-orange-100 overflow-hidden">
+            <div className="h-full rounded-full bg-orange-400 transition-all" style={{ width: `${metrics.confidenceScore}%` }} />
+          </div>
+        </div>
+        {metrics.explanation.length > 0 && (
+          <div className="mt-3 border-t pt-3">
+            <button
+              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+              onClick={() => setExplExpanded(e => !e)}
+            >
+              {explExpanded ? 'הסתר פירוט ↑' : 'הצג פירוט ↓'}
+            </button>
+            {explExpanded && (
+              <ul className="mt-2 space-y-1">
+                {metrics.explanation.map((line, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="text-orange-400 shrink-0">·</span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground/60 mt-2">הערכה מבוססת על נתוני שוק אמיתיים וסיגנלים שנאספו במערכת</p>
       </div>
 
       {/* Momentum + Lead potential */}

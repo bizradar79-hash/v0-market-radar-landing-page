@@ -7,9 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar } from "lucide-react"
 import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
+import { calculateRevenueMetrics } from "@/lib/revenue-engine"
+import { revenueInputFromWeeklyAction } from "@/lib/revenue-adapters"
 
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: WeeklyActionsData | null = null
+
+const revenueLevelColor: Record<string, string> = {
+  'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
+  'בינוני':  'bg-blue-100 text-blue-700 border-blue-200',
+  'גבוה':    'bg-green-100 text-green-700 border-green-200',
+  'חם מאוד': 'bg-orange-100 text-orange-700 border-orange-200',
+}
 
 const priorityColor: Record<string, string> = {
   גבוהה: "bg-red-100 text-red-700 border-red-200",
@@ -191,6 +200,7 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
   const icon = categoryIcon[action.category] || "✅"
   const prioClass = priorityColor[action.priority] || ""
   const isHigh = action.priority === 'גבוהה'
+  const metrics = calculateRevenueMetrics(revenueInputFromWeeklyAction(action))
 
   return (
     <button
@@ -212,7 +222,17 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
       <p className="text-sm font-semibold leading-tight mb-1.5 line-clamp-2">{action.title}</p>
       <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{action.summary}</p>
 
-      <div className="mt-3 flex items-center justify-end gap-1 text-xs text-primary">
+      <div className="flex items-center gap-2 mt-2">
+        <Badge
+          variant="outline"
+          className={`text-xs ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}
+        >
+          💰 {metrics.revenueLevel}
+        </Badge>
+        <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
+      </div>
+
+      <div className="mt-2 flex items-center justify-end gap-1 text-xs text-primary">
         <span>לפרטים</span>
         <ChevronLeft className="h-3 w-3" />
       </div>

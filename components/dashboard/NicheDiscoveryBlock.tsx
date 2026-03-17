@@ -7,9 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Search, Calendar, Bookmark, BookmarkCheck, Eye } from "lucide-react"
 import NicheDetailsPanel from "./NicheDetailsPanel"
 import type { NicheOpportunity, NicheOpportunityData, NicheStatus } from "@/types/niche-opportunity"
+import { calculateRevenueMetrics } from "@/lib/revenue-engine"
+import { revenueInputFromNiche } from "@/lib/revenue-adapters"
 
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: NicheOpportunityData | null = null
+
+const revenueLevelColor: Record<string, string> = {
+  'נמוך':    'bg-gray-100 text-gray-600 border-gray-200',
+  'בינוני':  'bg-blue-100 text-blue-700 border-blue-200',
+  'גבוה':    'bg-green-100 text-green-700 border-green-200',
+  'חם מאוד': 'bg-orange-100 text-orange-700 border-orange-200',
+}
 
 const demandColor: Record<string, string> = {
   עולה: "bg-green-100 text-green-700 border-green-200",
@@ -227,6 +236,7 @@ interface CardProps {
 function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: CardProps) {
   const isTracking = status === 'tracking'
   const demandArrow = niche.demandTrend === 'עולה' ? '↑' : niche.demandTrend === 'יורד' ? '↓' : '→'
+  const metrics = calculateRevenueMetrics(revenueInputFromNiche(niche))
 
   return (
     <div className={`relative rounded-lg border bg-white p-4 flex flex-col gap-3 transition-all hover:shadow-md hover:scale-[1.01] cursor-pointer ${isTracking ? 'border-blue-300 ring-1 ring-blue-100' : 'border-border hover:border-blue-300'}`}>
@@ -279,6 +289,17 @@ function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: Card
             style={{ width: `${Math.min(100, niche.opportunityScore)}%` }}
           />
         </div>
+      </div>
+
+      {/* Revenue level + confidence */}
+      <div className="flex items-center gap-2">
+        <Badge
+          variant="outline"
+          className={`text-xs ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}
+        >
+          💰 {metrics.revenueLevel}
+        </Badge>
+        <span className="text-xs text-muted-foreground">ביטחון: {metrics.confidenceScore}%</span>
       </div>
 
       {/* Lead potential */}
