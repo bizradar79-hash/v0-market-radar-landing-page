@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
 async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world'): Promise<any[]> {
   const geoText = region === 'israel'
     ? `בישראל. חפש מה אנשים מחפשים יותר בגוגל, מה עולה ברשתות חברתיות, מה מדוברים בפורומים ישראליים`
@@ -58,8 +60,32 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { keyword } = await request.json()
+    const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
+    const body = await request.json().catch(() => ({}))
+    const keyword = body.keyword
+    const force = forceQuery || body.force === true
+
     if (!keyword) return NextResponse.json({ error: 'Missing keyword' }, { status: 400 })
+
+    // Per-keyword cache check
+    if (!force) {
+      const { data: company } = await ctx.supabase
+        .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
+      const existing = company?.keyword_trends as Record<string, any> | null
+      const kwData = existing?.[keyword]
+      if (kwData?.fetchedAt) {
+        const age = Date.now() - new Date(kwData.fetchedAt).getTime()
+        if (age < CACHE_MS) {
+          console.log(`[generate-keyword-trends] cache hit for "${keyword}", age:`, Math.round(age / 3600000), 'h')
+          return NextResponse.json({
+            success: true, keyword, cached: true,
+            trends: kwData.israel || kwData.trends || [],
+            israel: kwData.israel || kwData.trends || [],
+            world: kwData.world || [],
+          })
+        }
+      }
+    }
 
     // Run Israel and World searches in parallel
     const [israelTrends, worldTrends] = await Promise.all([

@@ -8,6 +8,9 @@ import { Loader2, RefreshCw, Search, Calendar, Bookmark, BookmarkCheck, Eye } fr
 import NicheDetailsPanel from "./NicheDetailsPanel"
 import type { NicheOpportunity, NicheOpportunityData, NicheStatus } from "@/types/niche-opportunity"
 
+// Module-level cache: survives navigation remounts, cleared only on explicit refresh
+let _cache: NicheOpportunityData | null = null
+
 const demandColor: Record<string, string> = {
   עולה: "bg-green-100 text-green-700 border-green-200",
   יציב: "bg-gray-100 text-gray-600 border-gray-200",
@@ -20,34 +23,41 @@ const competitionColor: Record<string, string> = {
   גבוהה: "bg-red-100 text-red-700 border-red-200",
 }
 
-function formatAge(fetchedAt: string): string {
-  const ms = Date.now() - new Date(fetchedAt).getTime()
-  const h = Math.floor(ms / 3600000)
-  if (h < 1) return "לפני פחות משעה"
-  if (h < 24) return `לפני ${h} שעות`
-  return `לפני ${Math.floor(h / 24)} ימים`
+function formatDate(fetchedAt: string): string {
+  const d = new Date(fetchedAt)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `עודכן: ${dd}.${mm}.${yyyy}`
 }
 
 export default function NicheDiscoveryBlock() {
-  const [data, setData] = useState<NicheOpportunityData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<NicheOpportunityData | null>(_cache)
+  const [loading, setLoading] = useState(_cache === null)
   const [refreshing, setRefreshing] = useState(false)
   const [selectedNiche, setSelectedNiche] = useState<NicheOpportunity | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [statusOverrides, setStatusOverrides] = useState<Record<string, NicheStatus>>({})
 
   const fetchOpportunities = useCallback(async (force = false) => {
-    if (force) setRefreshing(true)
-    else setLoading(true)
+    if (force) {
+      _cache = null
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     try {
-      const res = await fetch('/api/generate-niche-opportunities', {
+      const url = force ? '/api/generate-niche-opportunities?force=true' : '/api/generate-niche-opportunities'
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify({}),
       })
       const json = await res.json()
       if (json.opportunities) {
-        setData({ fetchedAt: json.fetchedAt, opportunities: json.opportunities })
+        const next = { fetchedAt: json.fetchedAt, opportunities: json.opportunities }
+        _cache = next
+        setData(next)
       }
     } catch {
       // silent
@@ -57,7 +67,10 @@ export default function NicheDiscoveryBlock() {
     }
   }, [])
 
-  useEffect(() => { fetchOpportunities(false) }, [fetchOpportunities])
+  useEffect(() => {
+    if (_cache !== null) return // already loaded — skip API call
+    fetchOpportunities(false)
+  }, [fetchOpportunities])
 
   function getEffectiveStatus(niche: NicheOpportunity): NicheStatus {
     return statusOverrides[niche.id] ?? niche.status
@@ -160,7 +173,7 @@ export default function NicheDiscoveryBlock() {
               {data.fetchedAt && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {formatAge(data.fetchedAt)}
+                  {formatDate(data.fetchedAt)}
                 </span>
               )}
               <Button

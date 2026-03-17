@@ -3,13 +3,29 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-export async function POST() {
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+export async function POST(request: Request) {
   const steps: Record<string, any> = {}
   try {
     steps.context = 'starting'
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
     steps.context = { ok: true, company: ctx.company?.name }
+
+    const force = new URL(request.url).searchParams.get('force') === 'true'
+    if (!force) {
+      const { data: latest } = await ctx.supabase
+        .from('trends').select('created_at').eq('company_id', ctx.user.id)
+        .order('created_at', { ascending: false }).limit(1).single()
+      if (latest?.created_at) {
+        const age = Date.now() - new Date(latest.created_at).getTime()
+        if (age < CACHE_MS) {
+          console.log('[generate-trends] cache hit, age:', Math.round(age / 3600000), 'h')
+          return NextResponse.json({ success: true, cached: true })
+        }
+      }
+    }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
 

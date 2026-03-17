@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
 function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
@@ -15,10 +17,24 @@ function isLocalBusiness(overview: string, city: string, geoArea: string[]): boo
   return geoArea.length <= 1 || localKeywords.some(k => overview.includes(k))
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const force = new URL(request.url).searchParams.get('force') === 'true'
+    if (!force) {
+      const { data: company } = await ctx.supabase
+        .from('companies').select('seo_ranking').eq('id', ctx.user.id).single()
+      const cached = company?.seo_ranking as { fetchedAt?: string } | null
+      if (cached?.fetchedAt) {
+        const age = Date.now() - new Date(cached.fetchedAt).getTime()
+        if (age < CACHE_MS) {
+          console.log('[generate-seo-ranking] cache hit, age:', Math.round(age / 3600000), 'h')
+          return NextResponse.json({ success: true, ...cached, cached: true })
+        }
+      }
+    }
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''

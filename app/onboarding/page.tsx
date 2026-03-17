@@ -309,6 +309,9 @@ export default function OnboardingPage() {
         }
       }
 
+      // TODO: trigger initial scan after onboarding — call generate-trends, generate-leads,
+      // generate-tenders, generate-conferences, generate-news in sequence so first dashboard load
+      // shows real data instead of empty state (all routes now support ?force=true)
       router.push("/app/dashboard")
     } catch (error: unknown) {
       console.error("[v0] Error saving onboarding data:", error)

@@ -4,10 +4,26 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-export async function POST() {
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const force = new URL(request.url).searchParams.get('force') === 'true'
+    if (!force) {
+      const { data: company } = await ctx.supabase
+        .from('companies').select('geo_ranking').eq('id', ctx.user.id).single()
+      const cached = company?.geo_ranking as { fetchedAt?: string } | null
+      if (cached?.fetchedAt) {
+        const age = Date.now() - new Date(cached.fetchedAt).getTime()
+        if (age < CACHE_MS) {
+          console.log('[generate-geo-ranking] cache hit, age:', Math.round(age / 3600000), 'h')
+          return NextResponse.json({ success: true, ...cached, cached: true })
+        }
+      }
+    }
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''

@@ -3,14 +3,17 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { force } = await request.json().catch(() => ({ force: false }))
+    // Force: query param takes precedence, body is checked as fallback
+    const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
+    const body = await request.json().catch(() => ({}))
+    const force = forceQuery || body.force === true
 
     if (!force) {
       const { data: company } = await ctx.supabase
@@ -19,7 +22,7 @@ export async function POST(request: Request) {
       const cached = company?.weekly_actions as { fetchedAt: string; actions: any[] } | null
       if (cached?.fetchedAt && cached.actions?.length > 0) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
-        if (age < CACHE_TTL_MS) {
+        if (age < CACHE_MS) {
           return NextResponse.json({ success: true, ...cached, cached: true })
         }
       }

@@ -8,6 +8,9 @@ import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar } from "lucide-react"
 import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
 
+// Module-level cache: survives navigation remounts, cleared only on explicit refresh
+let _cache: WeeklyActionsData | null = null
+
 const priorityColor: Record<string, string> = {
   גבוהה: "bg-red-100 text-red-700 border-red-200",
   בינונית: "bg-yellow-100 text-yellow-700 border-yellow-200",
@@ -24,34 +27,40 @@ const categoryIcon: Record<string, string> = {
   כללי: "✅",
 }
 
-function formatAge(fetchedAt: string): string {
-  const ms = Date.now() - new Date(fetchedAt).getTime()
-  const h = Math.floor(ms / 3600000)
-  if (h < 1) return "לפני פחות משעה"
-  if (h < 24) return `לפני ${h} שעות`
-  const d = Math.floor(h / 24)
-  return `לפני ${d} ימים`
+function formatDate(fetchedAt: string): string {
+  const d = new Date(fetchedAt)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `עודכן: ${dd}.${mm}.${yyyy}`
 }
 
 export default function WeeklyActionsBlock() {
-  const [data, setData] = useState<WeeklyActionsData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<WeeklyActionsData | null>(_cache)
+  const [loading, setLoading] = useState(_cache === null)
   const [refreshing, setRefreshing] = useState(false)
   const [selectedAction, setSelectedAction] = useState<WeeklyAction | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
 
   const fetchActions = useCallback(async (force = false) => {
-    if (force) setRefreshing(true)
-    else setLoading(true)
+    if (force) {
+      _cache = null
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
     try {
-      const res = await fetch('/api/generate-weekly-actions', {
+      const url = force ? '/api/generate-weekly-actions?force=true' : '/api/generate-weekly-actions'
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify({}),
       })
       const json = await res.json()
       if (json.actions) {
-        setData({ fetchedAt: json.fetchedAt, actions: json.actions })
+        const next = { fetchedAt: json.fetchedAt, actions: json.actions }
+        _cache = next
+        setData(next)
       }
     } catch {
       // silent
@@ -61,7 +70,10 @@ export default function WeeklyActionsBlock() {
     }
   }, [])
 
-  useEffect(() => { fetchActions(false) }, [fetchActions])
+  useEffect(() => {
+    if (_cache !== null) return // already loaded — skip API call
+    fetchActions(false)
+  }, [fetchActions])
 
   function openAction(action: WeeklyAction) {
     setSelectedAction(action)
@@ -137,7 +149,7 @@ export default function WeeklyActionsBlock() {
               {data.fetchedAt && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {formatAge(data.fetchedAt)}
+                  {formatDate(data.fetchedAt)}
                 </span>
               )}
               <Button
