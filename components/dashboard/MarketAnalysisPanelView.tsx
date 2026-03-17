@@ -53,6 +53,12 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
   const [nicheAdded, setNicheAdded] = useState(false)
   const [explExpanded, setExplExpanded] = useState(false)
 
+  // Defensive normalization — older DB records may have null for these JSONB arrays
+  const signals = analysis.signals ?? []
+  const opportunities = analysis.opportunities ?? []
+  const risks = analysis.risks ?? []
+  const strategicRecommendations = analysis.strategicRecommendations ?? []
+
   const metrics = calculateRevenueMetrics(revenueInputFromMarketAnalysis(analysis))
 
   async function handleAddNiche() {
@@ -64,7 +70,7 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
         shortInsightSummary: analysis.summary,
         opportunityScore: analysis.gapScore,
         confidenceScore: Math.round((analysis.demandScore + analysis.gapScore) / 2),
-        signals: analysis.signals.map(s => ({
+        signals: signals.map(s => ({
           id: s.id,
           type: s.type as any,
           title: s.title,
@@ -80,8 +86,8 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
         estimatedMarketSize: '',
         region: analysis.region,
         category: analysis.category,
-        whyThisNicheFitsYourBusiness: analysis.strategicRecommendations[0] || '',
-        strategicNextSteps: analysis.strategicRecommendations,
+        whyThisNicheFitsYourBusiness: strategicRecommendations[0] || '',
+        strategicNextSteps: strategicRecommendations,
         relatedKeywords: [analysis.query],
         relatedCompetitors: [],
         status: 'tracking',
@@ -185,11 +191,11 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
       </div>
 
       {/* Signals */}
-      {analysis.signals.length > 0 && (
+      {signals.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold mb-3">סיגנלים שהשפיעו על הניתוח ({analysis.signals.length})</h3>
+          <h3 className="text-sm font-semibold mb-3">סיגנלים שהשפיעו על הניתוח ({signals.length})</h3>
           <div className="space-y-2">
-            {analysis.signals.map((s, i) => (
+            {signals.map((s, i) => (
               <SignalCard key={s.id || i} signal={s} />
             ))}
           </div>
@@ -197,13 +203,13 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
       )}
 
       {/* Opportunities & Risks */}
-      {(analysis.opportunities.length > 0 || analysis.risks.length > 0) && (
+      {(opportunities.length > 0 || risks.length > 0) && (
         <div className="grid grid-cols-2 gap-4">
-          {analysis.opportunities.length > 0 && (
+          {opportunities.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold mb-2">הזדמנויות 🟢</h3>
               <ul className="space-y-1.5">
-                {analysis.opportunities.map((o, i) => (
+                {opportunities.map((o, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm">
                     <span className="text-green-500 mt-0.5 shrink-0">•</span>
                     <span>{o}</span>
@@ -212,11 +218,11 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
               </ul>
             </div>
           )}
-          {analysis.risks.length > 0 && (
+          {risks.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold mb-2">סיכונים 🔴</h3>
               <ul className="space-y-1.5">
-                {analysis.risks.map((r, i) => (
+                {risks.map((r, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm">
                     <span className="text-red-500 mt-0.5 shrink-0">•</span>
                     <span>{r}</span>
@@ -229,11 +235,11 @@ export default function MarketAnalysisPanelView({ analysis, onSaved }: Props) {
       )}
 
       {/* Strategic recommendations */}
-      {analysis.strategicRecommendations.length > 0 && (
+      {strategicRecommendations.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-3">כיווני פעולה מומלצים</h3>
           <ol className="space-y-2">
-            {analysis.strategicRecommendations.map((rec, i) => (
+            {strategicRecommendations.map((rec, i) => (
               <li key={i} className="flex items-start gap-3">
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 mt-0.5">
                   {i + 1}

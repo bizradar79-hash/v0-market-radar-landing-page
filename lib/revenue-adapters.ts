@@ -79,9 +79,10 @@ export function revenueInputFromNiche(niche: NicheOpportunity): RevenueEngineInp
 // ── Market Analysis adapter ───────────────────────────────────────────────────
 
 export function revenueInputFromMarketAnalysis(analysis: MarketAnalysis): RevenueEngineInput {
-  const tenderSignals     = analysis.signals.filter(s => s.type === 'tender').length
-  const conferenceSignals = analysis.signals.filter(s => s.type === 'conference').length
-  const competitorSignals = analysis.signals.filter(s => s.type === 'competitor').length
+  const signals = analysis.signals ?? []
+  const tenderSignals     = signals.filter(s => s.type === 'tender').length
+  const conferenceSignals = signals.filter(s => s.type === 'conference').length
+  const competitorSignals = signals.filter(s => s.type === 'competitor').length
 
   const trendGrowth =
     analysis.marketMomentum === 'עולה'   ? 'עולה' :
@@ -112,7 +113,7 @@ export function revenueInputFromMarketAnalysis(analysis: MarketAnalysis): Revenu
     trendGrowthRate:          trendGrowth,
     searchVolumeScore:        analysis.demandScore,
     geoSpreadScore:           regionToCount(analysis.region),
-    signalVelocityScore:      analysis.signals.length,
+    signalVelocityScore:      signals.length,
     eventTenderPresenceScore: tenderSignals + conferenceSignals,
 
     competitorCountScore:     competitorSignals * 2,
@@ -127,7 +128,7 @@ export function revenueInputFromMarketAnalysis(analysis: MarketAnalysis): Revenu
     marketGapScore:     marketGap,
     urgencySignalScore: urgency,
 
-    signalCount: analysis.signals.length,
+    signalCount: signals.length,
   }
 }
 
