@@ -44,18 +44,38 @@ interface NavCounts {
   conferences: number
 }
 
-const getNavItems = (counts: NavCounts) => [
-  { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
-  { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
-  { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
-  { href: "/app/leads", label: "מרכז הזדמנויות ⭐", icon: Users, badge: counts.leads || undefined },
-  { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
-  { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
-  { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
-  { href: "/app/conferences", label: "כנסים", icon: Calendar, badge: counts.conferences || undefined },
-  { href: "/app/reports", label: "דוחות", icon: FileBarChart },
-  { href: "/app/alerts", label: "התראות", icon: Bell, badge: counts.alerts || undefined },
-  { href: "/app/settings", label: "הגדרות", icon: Settings },
+const getNavGroups = (counts: NavCounts) => [
+  {
+    title: "🚀 מנוע צמיחה",
+    items: [
+      { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
+      { href: "/app/leads", label: "מרכז הזדמנויות", icon: Users, badge: counts.leads || undefined },
+    ],
+  },
+  {
+    title: "📊 מודיעין שוק",
+    items: [
+      { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
+      { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
+      { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
+    ],
+  },
+  {
+    title: "🤝 פיתוח עסקי",
+    items: [
+      { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
+      { href: "/app/conferences", label: "כנסים", icon: Calendar, badge: counts.conferences || undefined },
+    ],
+  },
+  {
+    title: "⚙️ ניהול המערכת",
+    items: [
+      { href: "/app/reports", label: "דוחות", icon: FileBarChart },
+      { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
+      { href: "/app/settings", label: "הגדרות", icon: Settings },
+      { href: "/app/alerts", label: "התראות", icon: Bell, badge: counts.alerts || undefined },
+    ],
+  },
 ]
 
 export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
@@ -149,7 +169,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     window.location.href = '/login'
   }
 
-  const navItems = getNavItems(counts)
+  const navGroups = getNavGroups(counts)
 
   return (
     <aside
@@ -181,33 +201,45 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className={cn(
-                  "flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <item.icon className="h-5 w-5" />
-                  <span>{item.label}</span>
-                </div>
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-semibold text-primary">
-                    {item.badge}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 p-3 overflow-y-auto">
+          {navGroups.map((group, groupIndex) => (
+            <div key={group.title}>
+              <div className={cn(
+                "px-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right",
+                groupIndex === 0 ? "pt-2" : "pt-4 border-t border-border mt-2"
+              )}>
+                {group.title}
+              </div>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={onClose}
+                      className={cn(
+                        "flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                        isActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <item.icon className="h-5 w-5" />
+                        <span>{item.label}</span>
+                      </div>
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-semibold text-primary">
+                          {item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* User section */}
