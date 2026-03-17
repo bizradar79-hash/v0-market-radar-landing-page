@@ -19,6 +19,7 @@ import {
   LogOut,
   Calendar,
   UserCircle,
+  ShieldCheck,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -81,6 +82,8 @@ const getNavGroups = (counts: NavCounts) => [
 export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const pathname = usePathname()
   const [user, setUser] = useState<UserData | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [isImpersonating, setIsImpersonating] = useState(false)
   const [counts, setCounts] = useState<NavCounts>({
     leads: 0,
     tenders: 0,
@@ -124,6 +127,9 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   }, [])
 
   useEffect(() => {
+    const impersonating = sessionStorage.getItem('is_impersonating') === 'true'
+    setIsImpersonating(impersonating)
+
     const fetchUser = async () => {
       const supabase = createClient()
       const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -147,13 +153,20 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
           email: authUser.email || '',
           initials: initials.toUpperCase()
         })
+
+        // Check admin status (only if not impersonating — while impersonating, admin acts as normal user)
+        if (!impersonating) {
+          const { data: role } = await supabase
+            .from('user_roles').select('is_admin').eq('user_id', authUser.id).single()
+          if (role?.is_admin) setIsAdmin(true)
+        }
       }
     }
 
     fetchUser()
-    fetchCounts()
 
-    // Refresh counts every 30 seconds
+    // Only fetch counts when not in pure admin mode (while impersonating, counts are for the target user)
+    fetchCounts()
     const interval = setInterval(fetchCounts, 30000)
     return () => clearInterval(interval)
   }, [fetchCounts])
@@ -169,6 +182,9 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     window.location.href = '/login'
   }
 
+  // Admin mode: show simplified nav when admin is NOT impersonating
+  const showAdminNav = isAdmin && !isImpersonating
+
   const navGroups = getNavGroups(counts)
 
   return (
@@ -181,13 +197,15 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex items-center justify-between border-b border-border p-4">
-          <Link href="/app/dashboard" className="flex items-center gap-2">
+          <Link href={showAdminNav ? "/app/admin/impersonate" : "/app/dashboard"} className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
               <Radar className="h-5 w-5 text-primary-foreground" />
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-bold text-foreground">Market Radar</span>
-              <span className="text-xs text-muted-foreground">Israel AI</span>
+              <span className="text-xs text-muted-foreground">
+                {showAdminNav ? 'Admin Panel' : 'Israel AI'}
+              </span>
             </div>
           </Link>
           <Button
@@ -202,44 +220,69 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 p-3 overflow-y-auto">
-          {navGroups.map((group, groupIndex) => (
-            <div key={group.title}>
-              <div className={cn(
-                "px-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right",
-                groupIndex === 0 ? "pt-2" : "pt-4 border-t border-border mt-2"
-              )}>
-                {group.title}
+          {showAdminNav ? (
+            /* ── Admin-only navigation ── */
+            <div>
+              <div className="px-3 pb-1 pt-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">
+                🛡 ניהול מערכת
               </div>
               <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const isActive = pathname === item.href
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={onClose}
-                      className={cn(
-                        "flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <item.icon className="h-5 w-5" />
-                        <span>{item.label}</span>
-                      </div>
-                      {item.badge !== undefined && item.badge > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-semibold text-primary">
-                          {item.badge}
-                        </span>
-                      )}
-                    </Link>
-                  )
-                })}
+                <Link
+                  href="/app/admin/impersonate"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/impersonate"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                  <span>לוח אדמין</span>
+                </Link>
               </div>
             </div>
-          ))}
+          ) : (
+            /* ── Normal user navigation ── */
+            navGroups.map((group, groupIndex) => (
+              <div key={group.title}>
+                <div className={cn(
+                  "px-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right",
+                  groupIndex === 0 ? "pt-2" : "pt-4 border-t border-border mt-2"
+                )}>
+                  {group.title}
+                </div>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const isActive = pathname === item.href
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={onClose}
+                        className={cn(
+                          "flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                          isActive
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <item.icon className="h-5 w-5" />
+                          <span>{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && item.badge > 0 && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-semibold text-primary">
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
         </nav>
 
         {/* User section */}

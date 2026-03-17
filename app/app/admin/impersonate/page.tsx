@@ -55,6 +55,15 @@ export default function ImpersonatePage() {
   async function impersonate(targetUser: UserRow) {
     setImpersonating(targetUser.id)
     try {
+      // Save admin session before leaving — same-tab redirect preserves sessionStorage
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        sessionStorage.setItem('admin_access_token', session.access_token)
+        sessionStorage.setItem('admin_refresh_token', session.refresh_token)
+        sessionStorage.setItem('is_impersonating', 'true')
+        sessionStorage.setItem('admin_email', session.user.email ?? '')
+      }
+
       const res = await fetch('/api/admin/generate-magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -62,14 +71,23 @@ export default function ImpersonatePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.url) {
+        // Clean up on failure
+        sessionStorage.removeItem('admin_access_token')
+        sessionStorage.removeItem('admin_refresh_token')
+        sessionStorage.removeItem('is_impersonating')
+        sessionStorage.removeItem('admin_email')
         toast({ title: "שגיאה", description: data.error || "לא ניתן ליצור קישור", variant: "destructive" })
+        setImpersonating(null)
         return
       }
-      window.open(data.url, '_blank')
-      toast({ title: "קישור נוצר", description: `מתחבר בשם ${targetUser.email}` })
+      // Redirect in same tab — sessionStorage tokens survive navigation
+      window.location.href = data.url
     } catch {
+      sessionStorage.removeItem('admin_access_token')
+      sessionStorage.removeItem('admin_refresh_token')
+      sessionStorage.removeItem('is_impersonating')
+      sessionStorage.removeItem('admin_email')
       toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
-    } finally {
       setImpersonating(null)
     }
   }
