@@ -197,49 +197,6 @@ export default function AppDashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Weekly Actions — always first */}
-      <WeeklyActionsBlock />
-
-      {/* AI exhaustion banner */}
-      {bothExhausted && (
-        <div className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 p-4">
-          <span className="text-sm font-medium text-red-700">
-            מכסת AI יומית מוצתה (Groq + Gemini) — ניתוחים חדשים יתאפשרו לאחר איפוס המכסה (24 שעות)
-          </span>
-          <Link href="/admin/usage" className="text-xs text-red-600 underline whitespace-nowrap mr-3">
-            צפה בפרטים
-          </Link>
-        </div>
-      )}
-
-      {/* Profile Summary Card */}
-      {data?.companyInfo && (
-        <Card className="border-primary/20">
-          <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Building2 className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground">{data.companyInfo.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  {data.companyInfo.industry}
-                  {data.companyInfo.city ? ` · ${data.companyInfo.city}` : ''}
-                </p>
-                {data.companyInfo.businessOverview && (
-                  <p className="text-xs text-muted-foreground mt-0.5 max-w-sm line-clamp-1">
-                    {data.companyInfo.businessOverview.split(/[.!?]/)[0].trim()}
-                  </p>
-                )}
-              </div>
-            </div>
-            <Link href="/app/settings">
-              <Button variant="outline" size="sm">ערוך פרופיל</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Page Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -269,6 +226,49 @@ export default function AppDashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Profile Summary Card */}
+      {data?.companyInfo && (
+        <Card className="border-primary/20">
+          <CardContent className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">{data.companyInfo.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {data.companyInfo.industry}
+                  {data.companyInfo.city ? ` · ${data.companyInfo.city}` : ''}
+                </p>
+                {data.companyInfo.businessOverview && (
+                  <p className="text-xs text-muted-foreground mt-0.5 max-w-sm line-clamp-1">
+                    {data.companyInfo.businessOverview.split(/[.!?]/)[0].trim()}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Link href="/app/settings">
+              <Button variant="outline" size="sm">ערוך פרופיל</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Weekly Actions */}
+      <WeeklyActionsBlock />
+
+      {/* AI exhaustion banner */}
+      {bothExhausted && (
+        <div className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 p-4">
+          <span className="text-sm font-medium text-red-700">
+            מכסת AI יומית מוצתה (Groq + Gemini) — ניתוחים חדשים יתאפשרו לאחר איפוס המכסה (24 שעות)
+          </span>
+          <Link href="/admin/usage" className="text-xs text-red-600 underline whitespace-nowrap mr-3">
+            צפה בפרטים
+          </Link>
+        </div>
+      )}
 
       {/* KPI Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

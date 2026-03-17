@@ -119,8 +119,10 @@ export default function WeeklyActionsBlock() {
     )
   }
 
-  const highPriority = data.actions.filter(a => a.priority === 'גבוהה')
-  const rest = data.actions.filter(a => a.priority !== 'גבוהה')
+  const sortedActions = [
+    ...data.actions.filter(a => a.priority === 'גבוהה'),
+    ...data.actions.filter(a => a.priority !== 'גבוהה'),
+  ]
 
   return (
     <>
@@ -155,24 +157,12 @@ export default function WeeklyActionsBlock() {
             {data.actions.length} פעולות מומלצות · לחץ על כל כרטיס לפרטים מלאים
           </p>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {/* High priority row */}
-          {highPriority.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {highPriority.map(action => (
-                <ActionCard key={action.id} action={action} onClick={() => openAction(action)} />
-              ))}
-            </div>
-          )}
-
-          {/* Rest */}
-          {rest.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {rest.map(action => (
-                <ActionCard key={action.id} action={action} onClick={() => openAction(action)} />
-              ))}
-            </div>
-          )}
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sortedActions.map(action => (
+              <ActionCard key={action.id} action={action} onClick={() => openAction(action)} />
+            ))}
+          </div>
         </CardContent>
       </Card>
 
