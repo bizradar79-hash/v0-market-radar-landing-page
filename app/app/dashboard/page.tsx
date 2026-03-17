@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
 import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
+import MarketAnalysisBlock from "@/components/dashboard/MarketAnalysisBlock"
 import {
   TrendingUp,
   Target,
@@ -261,6 +262,9 @@ export default function AppDashboardPage() {
 
       {/* Niche Discovery */}
       <NicheDiscoveryBlock />
+
+      {/* Market Analysis */}
+      <MarketAnalysisBlock />
 
       {/* AI exhaustion banner */}
       {bothExhausted && (

@@ -1,6 +1,54 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
-import type { NicheOpportunityData, NicheStatus } from '@/types/niche-opportunity'
+import type { NicheOpportunity, NicheOpportunityData, NicheStatus } from '@/types/niche-opportunity'
+
+// POST — append a new niche (created from market analysis) with status: 'tracking'
+export async function POST(request: Request) {
+  try {
+    const ctx = await getFullContext()
+    if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { niche } = await request.json() as { niche: NicheOpportunity }
+    if (!niche?.id || !niche?.nicheTitle) {
+      return NextResponse.json({ error: 'Invalid niche object' }, { status: 400 })
+    }
+
+    console.log(`[niche-status] POST create nicheId=${niche.id} userId=${ctx.user.id}`)
+
+    const { data: company, error: fetchError } = await ctx.supabase
+      .from('companies').select('niche_opportunities').eq('id', ctx.user.id).single()
+
+    if (fetchError) {
+      console.error('[niche-status] fetch error:', fetchError.message)
+      return NextResponse.json({ error: fetchError.message }, { status: 500 })
+    }
+
+    const current = company?.niche_opportunities as NicheOpportunityData | null
+    const existing = current?.opportunities || []
+
+    // Deduplicate by id
+    const deduped = existing.filter((o: any) => String(o.id) !== String(niche.id))
+
+    const updated: NicheOpportunityData = {
+      fetchedAt: current?.fetchedAt || new Date().toISOString(),
+      opportunities: [...deduped, { ...niche, status: 'tracking' }],
+    }
+
+    const { error: updateError } = await ctx.supabase
+      .from('companies').update({ niche_opportunities: updated }).eq('id', ctx.user.id)
+
+    if (updateError) {
+      console.error('[niche-status] update error:', updateError.code, updateError.message)
+      return NextResponse.json({ error: updateError.message }, { status: 500 })
+    }
+
+    console.log(`[niche-status] POST success — nicheId=${niche.id} added as tracking`)
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    console.error('[niche-status] POST unexpected error:', e?.message)
+    return NextResponse.json({ error: e?.message }, { status: 500 })
+  }
+}
 
 export async function PATCH(request: Request) {
   try {
