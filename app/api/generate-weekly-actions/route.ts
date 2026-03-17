@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       { data: leads },
       { data: conferences },
     ] = await Promise.all([
-      ctx.supabase.from('companies').select('keyword_trends').eq('id', ctx.user.id).single(),
+      ctx.supabase.from('companies').select('keyword_trends, niche_opportunities').eq('id', ctx.user.id).single(),
       ctx.supabase.from('tenders').select('title, organization, deadline, link, description').eq('company_id', ctx.user.id).order('deadline', { ascending: true }).limit(10),
       ctx.supabase.from('news').select('title, source, url, summary, category, published_at').eq('company_id', ctx.user.id).order('published_at', { ascending: false }).limit(10),
       ctx.supabase.from('leads').select('name, industry, location, score').eq('company_id', ctx.user.id).order('score', { ascending: false }).limit(8),
@@ -51,6 +51,10 @@ export async function POST(request: Request) {
         }
       }
     }
+
+    // Tracked niches — drive strategic weekly actions
+    const nicheData = companyRow?.niche_opportunities as { opportunities: any[] } | null
+    const trackedNiches = (nicheData?.opportunities || []).filter((n: any) => n.status === 'tracking')
 
     const competitorNames = ctx.competitors?.map((c: any) => c.name).filter(Boolean) || []
 
@@ -100,12 +104,19 @@ ${leadLines.length > 0 ? leadLines.join('\n') : 'אין לידים'}
 
 ## כנסים קרובים (${conferenceLines.length}):
 ${conferenceLines.length > 0 ? conferenceLines.join('\n') : 'אין כנסים'}
+${trackedNiches.length > 0 ? `
+## נישות אסטרטגיות שהמשתמש עוקב אחריהן (${trackedNiches.length}):
+${trackedNiches.map((n: any) =>
+  `"${n.nicheTitle}" — ${n.shortInsightSummary || ''} | מילות מפתח: ${(n.relatedKeywords || []).join(', ')}`
+).join('\n')}` : ''}
 
 === המשימה ===
 
 הכן 5-7 פעולות קונקרטיות שהעסק צריך לעשות השבוע.
 כל פעולה חייבת להתבסס על נתון ספציפי מהנתונים לעיל (טרנד, מתחרה, מכרז, חדשה, ליד, כנס).
 אל תמציא נתונים שלא הופיעו למעלה.
+${trackedNiches.length > 0 ? `
+חשוב: עבור כל נישה אסטרטגית שצוינה למעלה, כלול לפחות פעולה אחת שמקדמת נישה זו השבוע. פעולות אלה יהיו אסטרטגיות ומוכוונות עתיד. ציין את שם הנישה בשדה "summary" של הפעולה כך שהמשתמש ידע לאיזו נישה הפעולה שייכת.` : ''}
 
 בשדה "signals" — ציין אילו פריטים ספציפיים מהמערכת הובילו להמלצה (שם הטרנד/מתחרה/מכרז/חדשה).
 - עבור טרנד → sourceRoute: "/app/trends"

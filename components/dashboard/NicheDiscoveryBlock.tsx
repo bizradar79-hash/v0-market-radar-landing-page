@@ -66,7 +66,7 @@ export default function NicheDiscoveryBlock() {
   async function handleStatusChange(nicheId: string, newStatus: NicheStatus) {
     const current = data?.opportunities.find(n => n.id === nicheId)
     const prev = statusOverrides[nicheId] ?? current?.status ?? 'new'
-    // Optimistic update
+    // Apply optimistic update immediately
     setStatusOverrides(o => ({ ...o, [nicheId]: newStatus }))
     try {
       const res = await fetch('/api/niche-status', {
@@ -74,10 +74,14 @@ export default function NicheDiscoveryBlock() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nicheId, status: newStatus }),
       })
-      if (!res.ok) throw new Error('failed')
+      // Only revert on server-side errors (5xx) — 200/no-op/4xx keep the optimistic state
+      if (res.status >= 500) {
+        console.warn(`[niche-status] server error ${res.status}, reverting`)
+        setStatusOverrides(o => ({ ...o, [nicheId]: prev }))
+      }
     } catch {
-      // Revert on error
-      setStatusOverrides(o => ({ ...o, [nicheId]: prev }))
+      // Network failure — keep optimistic state so UX stays responsive
+      console.warn('[niche-status] network error — keeping optimistic state')
     }
   }
 
