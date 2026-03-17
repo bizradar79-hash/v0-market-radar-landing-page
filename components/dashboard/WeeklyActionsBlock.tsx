@@ -119,7 +119,7 @@ export default function WeeklyActionsBlock() {
     )
   }
 
-  if (!data || data.actions.length === 0) {
+  if (!data || !data.actions || data.actions.length === 0) {
     return (
       <Card className="border-primary/20">
         <CardHeader className="pb-3">
@@ -142,8 +142,8 @@ export default function WeeklyActionsBlock() {
   }
 
   const sortedActions = [
-    ...data.actions.filter(a => a.priority === 'גבוהה'),
-    ...data.actions.filter(a => a.priority !== 'גבוהה'),
+    ...(data.actions ?? []).filter(a => a.priority === 'גבוהה'),
+    ...(data.actions ?? []).filter(a => a.priority !== 'גבוהה'),
   ]
 
   return (
@@ -244,6 +244,8 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
             estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
             estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
             confidence_score: metrics.confidenceScore,
+            market_region: '',
+            industry_tag: '',
           }}
           size="sm"
         />
