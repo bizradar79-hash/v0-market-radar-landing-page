@@ -28,11 +28,13 @@ function regionToCount(region: string): number {
 // ── Niche adapter ─────────────────────────────────────────────────────────────
 
 export function revenueInputFromNiche(niche: NicheOpportunity): RevenueEngineInput {
-  const tenderSignals    = niche.signals.filter(s => s.type === 'tender').length
-  const conferenceSignals = niche.signals.filter(s => s.type === 'conference').length
-  const competitorSignals = niche.signals.filter(s => s.type === 'competitor').length
+  const signals = niche.signals ?? []
+  const relatedCompetitors = niche.relatedCompetitors ?? []
+  const tenderSignals    = signals.filter(s => s.type === 'tender').length
+  const conferenceSignals = signals.filter(s => s.type === 'conference').length
+  const competitorSignals = signals.filter(s => s.type === 'competitor').length
 
-  const competitorCount = Math.max(niche.relatedCompetitors.length, competitorSignals)
+  const competitorCount = Math.max(relatedCompetitors.length, competitorSignals)
 
   const leadMid = parseLeadRangeMidpoint(niche.estimatedLeadPotential)
 
@@ -57,7 +59,7 @@ export function revenueInputFromNiche(niche: NicheOpportunity): RevenueEngineInp
     trendGrowthRate:          niche.demandTrend,
     searchVolumeScore:        niche.opportunityScore,
     geoSpreadScore:           regionToCount(niche.region),
-    signalVelocityScore:      niche.signals.length,
+    signalVelocityScore:      signals.length,
     eventTenderPresenceScore: tenderSignals + conferenceSignals,
 
     competitorCountScore:     competitorCount,
@@ -72,7 +74,7 @@ export function revenueInputFromNiche(niche: NicheOpportunity): RevenueEngineInp
     marketGapScore:     marketGap,
     urgencySignalScore: urgency,
 
-    signalCount: niche.signals.length,
+    signalCount: signals.length,
   }
 }
 
@@ -135,11 +137,12 @@ export function revenueInputFromMarketAnalysis(analysis: MarketAnalysis): Revenu
 // ── Weekly Action adapter ─────────────────────────────────────────────────────
 
 export function revenueInputFromWeeklyAction(action: WeeklyAction): RevenueEngineInput {
-  const tenderSignals     = action.signals.filter(s => s.type === 'tender').length
-  const conferenceSignals = action.signals.filter(s => s.type === 'conference').length
-  const competitorSignals = action.signals.filter(s => s.type === 'competitor').length
-  const leadSignals       = action.signals.filter(s => s.type === 'lead').length
-  const trendSignals      = action.signals.filter(s => s.type === 'trend').length
+  const signals           = action.signals ?? []
+  const tenderSignals     = signals.filter(s => s.type === 'tender').length
+  const conferenceSignals = signals.filter(s => s.type === 'conference').length
+  const competitorSignals = signals.filter(s => s.type === 'competitor').length
+  const leadSignals       = signals.filter(s => s.type === 'lead').length
+  const trendSignals      = signals.filter(s => s.type === 'trend').length
 
   const hasTrendSignal = trendSignals > 0
 
@@ -167,7 +170,7 @@ export function revenueInputFromWeeklyAction(action: WeeklyAction): RevenueEngin
     trendGrowthRate:          hasTrendSignal ? 'עולה' : 'יציב',
     searchVolumeScore:        searchVolume,
     geoSpreadScore:           2,
-    signalVelocityScore:      action.signals.length,
+    signalVelocityScore:      signals.length,
     eventTenderPresenceScore: tenderSignals + conferenceSignals,
 
     competitorCountScore:     competitorSignals * 2,
@@ -182,7 +185,7 @@ export function revenueInputFromWeeklyAction(action: WeeklyAction): RevenueEngin
     marketGapScore:     'בינוני',
     urgencySignalScore: urgency,
 
-    signalCount:            action.signals.length,
+    signalCount:            signals.length,
     timeToRevenueOverride,
   }
 }
