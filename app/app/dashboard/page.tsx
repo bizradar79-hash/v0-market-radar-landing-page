@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
+import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
 import {
   TrendingUp,
   Target,
@@ -196,6 +197,9 @@ export default function AppDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Weekly Actions — always first */}
+      <WeeklyActionsBlock />
+
       {/* AI exhaustion banner */}
       {bothExhausted && (
         <div className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 p-4">
