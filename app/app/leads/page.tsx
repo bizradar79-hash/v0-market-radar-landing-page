@@ -204,7 +204,7 @@ export default function OpportunitiesPage() {
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-8" dir="rtl">
+    <div className="space-y-8 overflow-x-hidden" dir="rtl">
 
       {/* Page Header */}
       <div>
@@ -307,7 +307,7 @@ export default function OpportunitiesPage() {
         ) : (
           <>
             <Card>
-              <CardContent className="p-0">
+              <CardContent className="p-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -350,7 +350,7 @@ export default function OpportunitiesPage() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <div className="w-32 space-y-1">
+                          <div className="min-w-[72px] w-24 space-y-1">
                             <Badge variant="outline" className={`text-xs ${getScoreColor(lead.score)}`}>
                               {lead.score}
                             </Badge>
@@ -439,7 +439,7 @@ export default function OpportunitiesPage() {
                     <p>{selectedLead.reason}</p>
                   </div>
                 )}
-                <div className="flex gap-2 pt-4 border-t">
+                <div className="flex flex-wrap gap-2 pt-4 border-t">
                   {selectedLead.website && (
                     <Button variant="outline" asChild>
                       <a href={selectedLead.website.startsWith('http') ? selectedLead.website : `https://${selectedLead.website}`} target="_blank" rel="noopener noreferrer">
@@ -588,7 +588,7 @@ function SavedOpportunityRow({
             )}
 
             {(opp.estimated_revenue_min > 0 || opp.estimated_revenue_max > 0) && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground break-words">
                 ₪{opp.estimated_revenue_min.toLocaleString()} – ₪{opp.estimated_revenue_max.toLocaleString()} / חודש
               </p>
             )}
@@ -605,7 +605,7 @@ function SavedOpportunityRow({
           </div>
 
           {/* Actions */}
-          <div className="shrink-0 flex flex-col items-end gap-2">
+          <div className="shrink-0 flex flex-col items-end gap-2 self-start">
             <button
               onClick={() => onDetails(opp)}
               className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium transition-colors"

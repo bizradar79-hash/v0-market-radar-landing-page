@@ -83,7 +83,7 @@ export default function SavedOpportunityDetailsPanel({ opp, open, onClose, onNot
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <p className="text-muted-foreground">הכנסה חודשית משוערת</p>
-                    <p className="font-semibold text-sm">
+                    <p className="font-semibold text-sm break-words">
                       ₪{opp.estimated_revenue_min.toLocaleString()} – ₪{opp.estimated_revenue_max.toLocaleString()}
                     </p>
                   </div>
