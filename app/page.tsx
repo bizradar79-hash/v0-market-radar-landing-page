@@ -19,9 +19,9 @@ function Header() {
       className={`sticky top-0 z-50 w-full bg-white transition-shadow duration-300 ${scrolled ? "shadow-md" : "border-b border-gray-100"}`}
       dir="rtl"
     >
-      <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div className="mx-auto flex min-h-[80px] max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center">
-          <Image src="/northstarlogo.jpg" alt="North Star Radar" width={140} height={140} className="h-16 w-auto" unoptimized />
+          <Image src="/northlogo.png" alt="North Star Radar" width={220} height={220} className="h-20 w-auto object-contain" unoptimized />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
@@ -562,7 +562,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
             <div>
-              <Image src="/northstarlogo.jpg" alt="North Star Radar" width={140} height={42} className="h-8 w-auto mb-1" unoptimized />
+              <Image src="/northlogo.png" alt="North Star Radar" width={140} height={42} className="h-8 w-auto mb-1" unoptimized />
               <p className="text-xs text-gray-400">הרדאר העסקי שמכוון אותך קדימה</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
