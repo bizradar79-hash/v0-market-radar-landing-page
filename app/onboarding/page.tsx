@@ -700,6 +700,15 @@ export default function OnboardingPage() {
                 <p className="mt-1 text-sm text-muted-foreground">הגדר מילות מפתח למעקב</p>
               </div>
 
+              <p className="text-sm font-medium text-foreground -mt-2">מילות המפתח הן הבסיס לאיכות המידע שתקבל מהמערכת</p>
+
+              <div className="rounded-lg bg-teal-50 border border-teal-100 p-4 text-sm text-teal-900 space-y-1">
+                <p className="font-semibold">💡 למה מילות מפתח חשובות?</p>
+                <p>המערכת משתמשת במילות המפתח שלך כדי לסרוק את השוק בצורה ממוקדת.</p>
+                <p>ככל שהמילים מדויקות יותר — כך הטרנדים, ההזדמנויות והמודיעין שתקבל</p>
+                <p>יהיו רלוונטיים יותר לעסק שלך.</p>
+              </div>
+
               {/* Keywords */}
               <div className="space-y-3">
                 <Label>מילות מפתח למעקב</Label>
@@ -725,6 +734,7 @@ export default function OnboardingPage() {
                     </Badge>
                   ))}
                 </div>
+                <p className="text-xs text-muted-foreground">ניתן להוסיף עד 10 מילות מפתח. ניתן לשנות בכל עת מהגדרות הפרופיל.</p>
               </div>
 
               {/* Industries */}

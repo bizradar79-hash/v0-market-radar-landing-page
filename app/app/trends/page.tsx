@@ -89,6 +89,7 @@ export default function TrendsPage() {
   const [newKw, setNewKw] = useState('')
   const [addingKw, setAddingKw] = useState(false)
   const [activeTab, setActiveTab] = useState<Record<string, 'israel' | 'world'>>({})
+  const [infoExpanded, setInfoExpanded] = useState(false)
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -252,6 +253,31 @@ export default function TrendsPage() {
             <Button variant="outline" size="sm" onClick={() => setShowAddKw(true)}>
               <Plus className="ml-2 h-3.5 w-3.5" />הוסף מילת מפתח
             </Button>
+          )}
+        </div>
+
+        {/* Data source info box */}
+        <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-sm">
+          {!infoExpanded ? (
+            <button
+              onClick={() => setInfoExpanded(true)}
+              className="text-blue-700 font-medium"
+            >
+              📡 מאיפה מגיעים הנתונים? ▼
+            </button>
+          ) : (
+            <div className="space-y-1 text-blue-800 leading-relaxed">
+              <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות</p>
+              <p>וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
+              <p>הנתונים מתעדכנים אחת לשבוע ומשקפים את מה שאנשים מחפשים ומדברים עליו</p>
+              <p>בתחום שלך ממש עכשיו.</p>
+              <button
+                onClick={() => setInfoExpanded(false)}
+                className="text-blue-700 font-medium mt-1 block"
+              >
+                הצג פחות ▲
+              </button>
+            </div>
           )}
         </div>
 
