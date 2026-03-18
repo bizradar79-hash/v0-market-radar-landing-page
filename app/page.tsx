@@ -21,7 +21,7 @@ function Header() {
     >
       <div className="mx-auto flex min-h-[80px] max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center">
-          <Image src="/northlogo.png" alt="North Star Radar" width={220} height={220} className="h-20 w-auto object-contain" style={{ maxHeight: '80px', width: 'auto' }} unoptimized />
+          <Image src="/logoradar.png" alt="North Star Radar" width={220} height={80} className="h-12 w-auto object-contain" unoptimized />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
@@ -562,7 +562,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
             <div>
-              <Image src="/northlogo.png" alt="North Star Radar" width={140} height={42} className="h-8 w-auto object-contain mb-1" style={{ maxHeight: '32px', width: 'auto' }} unoptimized />
+              <Image src="/logoradar.png" alt="North Star Radar" width={140} height={42} className="h-8 w-auto object-contain mb-1" unoptimized />
               <p className="text-xs text-gray-400">הרדאר העסקי שמכוון אותך קדימה</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
