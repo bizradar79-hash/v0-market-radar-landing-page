@@ -189,9 +189,9 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     >
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex items-center justify-between border-b border-border p-4">
+        <div className="flex h-16 items-center justify-between overflow-hidden border-b border-border px-4">
           <Link href={showAdminNav ? "/app/admin/impersonate" : "/app/dashboard"} className="flex items-center gap-2">
-            <Image src="/whitelogo.png" alt="North Star Radar" width={200} height={56} className="h-12 w-auto object-contain" unoptimized />
+            <Image src="/whitelogo.png" alt="North Star Radar" width={160} height={40} className="h-9 w-auto object-contain" unoptimized />
             {showAdminNav && (
               <span className="text-xs text-muted-foreground">Admin</span>
             )}

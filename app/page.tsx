@@ -16,12 +16,12 @@ function Header() {
 
   return (
     <header
-      className={`sticky top-0 z-50 w-full bg-white transition-shadow duration-300 ${scrolled ? "shadow-md" : "border-b border-gray-100"}`}
+      className={`sticky top-0 z-50 w-full h-16 overflow-hidden bg-white transition-shadow duration-300 flex items-center ${scrolled ? "shadow-md" : "border-b border-gray-100"}`}
       dir="rtl"
     >
-      <div className="mx-auto flex min-h-[80px] max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex items-center">
-          <Image src="/whitelogo.png" alt="North Star Radar" width={200} height={56} className="h-12 w-auto object-contain" unoptimized />
+      <div className="mx-auto flex h-full w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+        <Link href="/" className="flex items-center h-full">
+          <Image src="/whitelogo.png" alt="North Star Radar" width={160} height={40} className="h-9 w-auto object-contain" unoptimized />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
