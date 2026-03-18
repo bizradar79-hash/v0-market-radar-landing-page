@@ -12,9 +12,9 @@ export const metadata: Metadata = {
   title: 'North Star Radar | הרדאר העסקי שמכוון אותך להזדמנויות הנכונות',
   description: 'הרדאר העסקי שמכוון אותך להזדמנויות הנכונות',
   icons: {
-    icon: '/logofinal.png',
-    apple: '/logofinal.png',
-    shortcut: '/logofinal.png',
+    icon: '/favicon.png',
+    apple: '/favicon.png',
+    shortcut: '/favicon.png',
   },
 }
 

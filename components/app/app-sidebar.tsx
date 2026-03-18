@@ -191,9 +191,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         {/* Logo */}
         <div className="flex items-center justify-between border-b border-border p-4">
           <Link href={showAdminNav ? "/app/admin/impersonate" : "/app/dashboard"} className="flex items-center gap-2">
-            <div className="bg-card flex items-center">
-              <Image src="/logofinal.png" alt="North Star Radar" width={200} height={60} className="h-10 w-auto object-contain" unoptimized />
-            </div>
+            <Image src="/whitelogo.png" alt="North Star Radar" width={200} height={56} className="h-12 w-auto object-contain" unoptimized />
             {showAdminNav && (
               <span className="text-xs text-muted-foreground">Admin</span>
             )}
