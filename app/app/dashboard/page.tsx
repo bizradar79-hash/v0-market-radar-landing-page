@@ -13,13 +13,11 @@ import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
 import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
 import MarketAnalysisBlock from "@/components/dashboard/MarketAnalysisBlock"
 import {
-  TrendingUp,
   Target,
   Users,
   FileText,
   BarChart3,
   Activity,
-  Bell,
   ArrowLeft,
   Loader2,
   RefreshCw,
@@ -32,6 +30,7 @@ interface CompanyInfo {
   name: string
   industry: string
   city: string
+  website: string
   businessOverview: string
 }
 
@@ -88,7 +87,7 @@ export default function AppDashboardPage() {
       supabase.from("news").select("*", { count: "exact", head: true }),
       supabase.from("leads").select("name, score, industry").order("score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
-      supabase.from("companies").select("name, industry, city, last_analyzed, business_overview").single(),
+      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview").single(),
     ])
 
     setData({
@@ -106,6 +105,7 @@ export default function AppDashboardPage() {
         name: companyData.name || '',
         industry: companyData.industry || '',
         city: companyData.city || '',
+        website: companyData.website || '',
         businessOverview: companyData.business_overview || '',
       } : null,
     })
@@ -173,13 +173,12 @@ export default function AppDashboardPage() {
   }
 
   const kpiCards = [
-    { key: "leads", label: "לידים", icon: Users, href: "/app/leads", value: data?.leadsCount || 0 },
-    { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0 },
-    { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0 },
-    { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0 },
-    { key: "conferences", label: "כנסים", icon: Calendar, href: "/app/conferences", value: data?.conferencesCount || 0 },
-    { key: "news", label: "חדשות", icon: Newspaper, href: "/app/news", value: data?.newsCount || 0 },
-    { key: "alerts", label: "התראות חדשות", icon: Bell, href: "/app/alerts", value: data?.alertsCount || 0 },
+    { key: "leads", label: "לידים", icon: Users, href: "/app/leads", value: data?.leadsCount || 0, color: "bg-emerald-100 text-emerald-700" },
+    { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" },
+    { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" },
+    { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0, color: "bg-blue-100 text-blue-700" },
+    { key: "conferences", label: "כנסים", icon: Calendar, href: "/app/conferences", value: data?.conferencesCount || 0, color: "bg-indigo-100 text-indigo-700" },
+    { key: "news", label: "חדשות", icon: Newspaper, href: "/app/news", value: data?.newsCount || 0, color: "bg-slate-100 text-slate-700" },
   ]
 
   function getDaysUntil(deadline: string): number {
@@ -232,30 +231,64 @@ export default function AppDashboardPage() {
       {/* Profile Summary Card */}
       {data?.companyInfo && (
         <Card className="border-primary/20">
-          <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Building2 className="h-5 w-5 text-primary" />
+          <CardContent className="flex items-start justify-between gap-3 p-3">
+            <div className="flex items-start gap-2 min-w-0">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0 mt-0.5">
+                <Building2 className="h-4 w-4 text-primary" />
               </div>
-              <div>
-                <p className="font-semibold text-foreground">{data.companyInfo.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  {data.companyInfo.industry}
-                  {data.companyInfo.city ? ` · ${data.companyInfo.city}` : ''}
-                </p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <p className="font-semibold text-sm text-foreground">{data.companyInfo.name}</p>
+                  {data.companyInfo.industry && (
+                    <Badge variant="secondary" className="text-xs px-1.5 py-0">{data.companyInfo.industry}</Badge>
+                  )}
+                  {data.companyInfo.city && (
+                    <span className="text-xs text-muted-foreground">{data.companyInfo.city}</span>
+                  )}
+                </div>
+                {data.companyInfo.website && (
+                  <a
+                    href={data.companyInfo.website.startsWith('http') ? data.companyInfo.website : `https://${data.companyInfo.website}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline truncate block"
+                  >
+                    {data.companyInfo.website.replace(/^https?:\/\//, '')}
+                  </a>
+                )}
                 {data.companyInfo.businessOverview && (
-                  <p className="text-xs text-muted-foreground mt-0.5 max-w-sm line-clamp-1">
-                    {data.companyInfo.businessOverview.split(/[.!?]/)[0].trim()}
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                    {data.companyInfo.businessOverview}
                   </p>
                 )}
               </div>
             </div>
-            <Link href="/app/settings">
-              <Button variant="outline" size="sm">ערוך פרופיל</Button>
+            <Link href="/app/profile" className="shrink-0">
+              <Button variant="outline" size="sm">פרופיל עסקי</Button>
             </Link>
           </CardContent>
         </Card>
       )}
+
+      {/* Compact Stats Strip */}
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {kpiCards.map((stat) => {
+          const Icon = stat.icon
+          return (
+            <Link key={stat.key} href={stat.href}>
+              <Card className="transition-all hover:shadow-sm hover:border-primary/40">
+                <CardContent className="flex flex-col items-center gap-1 p-2 sm:p-3 text-center">
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${stat.color}`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <span className="text-lg font-bold leading-none">{stat.value}</span>
+                  <span className="text-xs text-muted-foreground leading-tight">{stat.label}</span>
+                </CardContent>
+              </Card>
+            </Link>
+          )
+        })}
+      </div>
 
       {/* Weekly Actions */}
       <WeeklyActionsBlock />
@@ -277,42 +310,6 @@ export default function AppDashboardPage() {
           </Link>
         </div>
       )}
-
-      {/* KPI Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {kpiCards.map((stat) => {
-          const Icon = stat.icon
-          return (
-            <Link key={stat.key} href={stat.href}>
-              <Card className="transition-all hover:shadow-md hover:border-primary/50">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Icon className="h-5 w-5 text-primary" />
-                    </div>
-                    {stat.value > 0 && (
-                      <div className="flex items-center gap-1 text-sm text-green-600">
-                        <TrendingUp className="h-4 w-4" />
-                        <span>חדש</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-3">
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <div className="mt-1 flex items-baseline gap-1">
-                      <span className="text-2xl font-bold">{stat.value}</span>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex items-center text-xs text-muted-foreground">
-                    <span>צפה בפרטים</span>
-                    <ArrowLeft className="mr-1 h-3 w-3" />
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          )
-        })}
-      </div>
 
       {/* Empty State or Data Sections */}
       {data && (data.leadsCount === 0 && data.competitorsCount === 0) ? (

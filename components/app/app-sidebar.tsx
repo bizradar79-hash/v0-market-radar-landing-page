@@ -13,7 +13,6 @@ import {
   TrendingUp,
   Newspaper,
   FileBarChart,
-  Bell,
   Settings,
   X,
   LogOut,
@@ -38,7 +37,6 @@ interface UserData {
 interface NavCounts {
   leads: number
   tenders: number
-  alerts: number
   competitors: number
   trends: number
   news: number
@@ -51,6 +49,7 @@ const getNavGroups = (counts: NavCounts) => [
     items: [
       { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
       { href: "/app/leads", label: "מרכז הזדמנויות", icon: Users, badge: counts.leads || undefined },
+      { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
     ],
   },
   {
@@ -72,9 +71,7 @@ const getNavGroups = (counts: NavCounts) => [
     title: "⚙️ ניהול המערכת",
     items: [
       { href: "/app/reports", label: "דוחות", icon: FileBarChart },
-      { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
       { href: "/app/settings", label: "הגדרות", icon: Settings },
-      { href: "/app/alerts", label: "התראות", icon: Bell, badge: counts.alerts || undefined },
     ],
   },
 ]
@@ -87,7 +84,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const [counts, setCounts] = useState<NavCounts>({
     leads: 0,
     tenders: 0,
-    alerts: 0,
     competitors: 0,
     trends: 0,
     news: 0,
@@ -100,7 +96,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     const [
       { count: leadsCount },
       { count: tendersCount },
-      { count: alertsCount },
       { count: competitorsCount },
       { count: trendsCount },
       { count: newsCount },
@@ -108,7 +103,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     ] = await Promise.all([
       supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
-      supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("news").select("*", { count: "exact", head: true }),
@@ -118,7 +112,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     setCounts({
       leads: leadsCount || 0,
       tenders: tendersCount || 0,
-      alerts: alertsCount || 0,
       competitors: competitorsCount || 0,
       trends: trendsCount || 0,
       news: newsCount || 0,
