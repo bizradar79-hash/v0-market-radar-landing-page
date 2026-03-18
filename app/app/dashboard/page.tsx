@@ -14,7 +14,7 @@ import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
 import MarketAnalysisBlock from "@/components/dashboard/MarketAnalysisBlock"
 import {
   Target,
-  Users,
+  Star,
   FileText,
   BarChart3,
   Activity,
@@ -35,15 +35,16 @@ interface CompanyInfo {
 }
 
 interface DashboardData {
-  leadsCount: number
+  savedOppsCount: number
   tendersCount: number
   competitorsCount: number
   trendsCount: number
-  alertsCount: number
   conferencesCount: number
   newsCount: number
-  topLeads: Array<{ name: string; score: number; industry: string }>
+  topCompetitors: Array<{ name: string; threat_score: number; services: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
+  upcomingConferences: Array<{ name: string; date: string; location: string }>
+  topTrends: Array<{ name: string; direction: string; category: string }>
   lastAnalyzed: string | null
   companyInfo: CompanyInfo | null
 }
@@ -66,40 +67,44 @@ export default function AppDashboardPage() {
   }, [])
 
   async function fetchDashboardData() {
+    const today = new Date().toISOString().split('T')[0]
     const [
-      { count: leadsCount },
+      { count: savedOppsCount },
       { count: tendersCount },
       { count: competitorsCount },
       { count: trendsCount },
-      { count: alertsCount },
       { count: conferencesCount },
       { count: newsCount },
-      { data: topLeads },
+      { data: topCompetitors },
       { data: upcomingTenders },
+      { data: upcomingConferences },
+      { data: topTrends },
       { data: companyData },
     ] = await Promise.all([
-      supabase.from("leads").select("*", { count: "exact", head: true }),
+      supabase.from("saved_opportunities").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
-      supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
       supabase.from("conferences").select("*", { count: "exact", head: true }),
       supabase.from("news").select("*", { count: "exact", head: true }),
-      supabase.from("leads").select("name, score, industry").order("score", { ascending: false }).limit(3),
+      supabase.from("competitors").select("name, threat_score, services").order("threat_score", { ascending: false }).limit(3),
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
+      supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
+      supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
       supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview").single(),
     ])
 
     setData({
-      leadsCount: leadsCount || 0,
+      savedOppsCount: savedOppsCount || 0,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
-      alertsCount: alertsCount || 0,
       conferencesCount: conferencesCount || 0,
       newsCount: newsCount || 0,
-      topLeads: topLeads || [],
+      topCompetitors: topCompetitors || [],
       upcomingTenders: upcomingTenders || [],
+      upcomingConferences: upcomingConferences || [],
+      topTrends: topTrends || [],
       lastAnalyzed: companyData?.last_analyzed || null,
       companyInfo: companyData ? {
         name: companyData.name || '',
@@ -173,7 +178,7 @@ export default function AppDashboardPage() {
   }
 
   const kpiCards = [
-    { key: "leads", label: "לידים", icon: Users, href: "/app/leads", value: data?.leadsCount || 0, color: "bg-emerald-100 text-emerald-700" },
+    { key: "opps", label: "הזדמנויות", icon: Star, href: "/app/leads", value: data?.savedOppsCount || 0, color: "bg-emerald-100 text-emerald-700" },
     { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" },
     { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" },
     { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0, color: "bg-blue-100 text-blue-700" },
@@ -211,7 +216,7 @@ export default function AppDashboardPage() {
               <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
             </div>
           )}
-          {(data?.leadsCount || 0) > 0 && (
+          {(data?.competitorsCount || 0) > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -311,112 +316,173 @@ export default function AppDashboardPage() {
         </div>
       )}
 
-      {/* Empty State or Data Sections */}
-      {data && (data.leadsCount === 0 && data.competitorsCount === 0) ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
-              <BarChart3 className="h-8 w-8 text-primary" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-Market Radar!</h3>
-            <p className="text-muted-foreground max-w-md mb-4">
-              המערכת שלך מוכנה לפעולה. הפעל סריקה ראשונה כדי להתחיל לקבל מודיעין עסקי.
-            </p>
-            {scanning ? (
-              <div className="flex flex-col items-center gap-3">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm text-muted-foreground">{scanProgress}</p>
-              </div>
-            ) : (
-              <Button onClick={runFirstScan} size="lg">
-                <BarChart3 className="ml-2 h-5 w-5" />
-                הפעל סריקה ראשונה
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+      {/* Smart Bottom Widgets */}
+      {data && (
+        data.competitorsCount === 0 && data.tendersCount === 0 && data.conferencesCount === 0 && data.trendsCount === 0 ? (
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Users className="h-5 w-5 text-primary" />
-                לידים מובילים
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data?.topLeads && data.topLeads.length > 0 ? (
-                <div className="space-y-3">
-                  {data.topLeads.map((lead, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-sm font-bold text-primary">
-                          {lead.score || 0}
-                        </div>
-                        <div>
-                          <span className="text-sm font-medium">{lead.name}</span>
-                          {lead.industry && <p className="text-xs text-muted-foreground">{lead.industry}</p>}
-                        </div>
-                      </div>
-                      <Badge variant="outline" className={
-                        (lead.score || 0) >= 80
-                          ? "border-green-200 text-green-600"
-                          : "border-yellow-200 text-yellow-600"
-                      }>
-                        {(lead.score || 0) >= 80 ? "חם" : "בינוני"}
-                      </Badge>
-                    </div>
-                  ))}
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
+                <BarChart3 className="h-8 w-8 text-primary" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-North Star Radar!</h3>
+              <p className="text-muted-foreground max-w-md mb-4">
+                המערכת שלך מוכנה לפעולה. הפעל סריקה ראשונה כדי להתחיל לקבל מודיעין עסקי.
+              </p>
+              {scanning ? (
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground">{scanProgress}</p>
                 </div>
               ) : (
-                <p className="text-center text-sm text-muted-foreground py-4">אין לידים עדיין</p>
+                <Button onClick={runFirstScan} size="lg">
+                  <BarChart3 className="ml-2 h-5 w-5" />
+                  הפעל סריקה ראשונה
+                </Button>
               )}
-              <Link href="/app/leads" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                צפה בכל הלידים
-                <ArrowLeft className="h-3.5 w-3.5" />
-              </Link>
             </CardContent>
           </Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {data.upcomingTenders.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="h-5 w-5 text-primary" />
+                    מכרזים קרובים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.upcomingTenders.map((tender, idx) => {
+                      const days = getDaysUntil(tender.deadline)
+                      return (
+                        <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                          <div>
+                            <p className="text-sm font-medium">{tender.title}</p>
+                            <p className="text-xs text-muted-foreground">{tender.organization}</p>
+                          </div>
+                          <Badge variant="outline" className={
+                            days <= 14 ? "border-red-200 text-red-600" : "border-green-200 text-green-600"
+                          }>
+                            {days > 0 ? `${days} ימים` : "היום"}
+                          </Badge>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בכל המכרזים
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <FileText className="h-5 w-5 text-primary" />
-                מכרזים קרובים
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data?.upcomingTenders && data.upcomingTenders.length > 0 ? (
-                <div className="space-y-3">
-                  {data.upcomingTenders.map((tender, idx) => {
-                    const days = getDaysUntil(tender.deadline)
-                    return (
+            {data.topCompetitors.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Target className="h-5 w-5 text-primary" />
+                    מתחרים עיקריים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.topCompetitors.map((comp, idx) => (
                       <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                        <div>
-                          <p className="text-sm font-medium">{tender.title}</p>
-                          <p className="text-xs text-muted-foreground">{tender.organization}</p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{comp.name}</p>
+                          {comp.services && <p className="text-xs text-muted-foreground line-clamp-1">{comp.services}</p>}
                         </div>
                         <Badge variant="outline" className={
-                          days <= 14
-                            ? "border-red-200 text-red-600"
-                            : "border-green-200 text-green-600"
+                          comp.threat_score >= 70 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"
                         }>
-                          {days > 0 ? `${days} ימים` : "היום"}
+                          {comp.threat_score}
                         </Badge>
                       </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="text-center text-sm text-muted-foreground py-4">אין מכרזים עדיין</p>
-              )}
-              <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                צפה בכל המכרזים
-                <ArrowLeft className="h-3.5 w-3.5" />
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
+                    ))}
+                  </div>
+                  <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בכל המתחרים
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
+            {data.upcomingConferences.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    כנסים קרובים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.upcomingConferences.map((conf, idx) => (
+                      <div key={idx} className="rounded-lg bg-muted/50 p-3">
+                        <p className="text-sm font-medium">{conf.name}</p>
+                        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                          {conf.date && <span>{conf.date}</span>}
+                          {conf.location && <span>· {conf.location}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Link href="/app/conferences" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בכל הכנסים
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
+            {data.topTrends.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Activity className="h-5 w-5 text-primary" />
+                    טרנדים מובילים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.topTrends.map((trend, idx) => (
+                      <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{trend.name}</p>
+                          {trend.category && <p className="text-xs text-muted-foreground">{trend.category}</p>}
+                        </div>
+                        <Badge variant="outline" className={
+                          (trend.direction === 'עולה' || trend.direction === 'up') ? "border-green-200 text-green-600" :
+                          (trend.direction === 'יורד' || trend.direction === 'down') ? "border-red-200 text-red-600" :
+                          "border-yellow-200 text-yellow-600"
+                        }>
+                          {(trend.direction === 'עולה' || trend.direction === 'up') ? 'עולה' :
+                           (trend.direction === 'יורד' || trend.direction === 'down') ? 'יורד' : 'יציב'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                  <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בכל הטרנדים
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
+            {data.upcomingTenders.length === 0 && data.topCompetitors.length === 0 &&
+             data.upcomingConferences.length === 0 && data.topTrends.length === 0 && (
+              <Card className="md:col-span-2">
+                <CardContent className="flex items-center justify-center py-8 text-center">
+                  <p className="text-muted-foreground text-sm">אין עדיין נתונים. לחץ רענן בכל מודול כדי להתחיל.</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )
       )}
     </div>
   )

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Users, Target, Loader2, Newspaper } from "lucide-react"
+import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Star, Target, Loader2, Newspaper } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface SwotData {
@@ -97,7 +97,7 @@ interface ReportData {
   weekRange: string
   generatedAt: string
   company: Company
-  highlights: { tenders: number; competitors: number; leads: number; alerts: number; trends: number; news: number; conferences: number }
+  highlights: { tenders: number; competitors: number; savedOpps: number; alerts: number; trends: number; news: number; conferences: number }
   competitors: Competitor[]
   leads: Lead[]
   tenders: Tender[]
@@ -169,7 +169,7 @@ export default function ReportsPage() {
     const [
       { count: tendersCount },
       { count: competitorsCount },
-      { count: leadsCount },
+      { count: savedOppsCount },
       { count: alertsCount },
       { data: comps },
       { data: leads },
@@ -181,7 +181,7 @@ export default function ReportsPage() {
     ] = await Promise.all([
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
-      supabase.from("leads").select("*", { count: "exact", head: true }),
+      supabase.from("saved_opportunities").select("*", { count: "exact", head: true }),
       supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
       supabase.from("competitors").select("name, website, services, threat_score, positioning").order("threat_score", { ascending: false }),
       supabase.from("leads").select("name, website, industry, score, reason, source").order("score", { ascending: false }),
@@ -198,7 +198,7 @@ export default function ReportsPage() {
     const generatedAt = now.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
 
     const recommendations: string[] = []
-    if ((leadsCount || 0) > 0) recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
+    if ((leads?.length || 0) > 0) recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
     if ((competitorsCount || 0) > 0) recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
     if ((tendersCount || 0) > 0) recommendations.push("לבחון את המכרזים הפתוחים ולפעול בהתאם")
     recommendations.push("להמשיך לעדכן את פרופיל החברה לתוצאות מדויקות יותר")
@@ -219,7 +219,7 @@ export default function ReportsPage() {
       highlights: {
         tenders: tendersCount || 0,
         competitors: competitorsCount || 0,
-        leads: leadsCount || 0,
+        savedOpps: savedOppsCount || 0,
         alerts: alertsCount || 0,
         trends: trends?.length || 0,
         news: news?.length || 0,
@@ -351,7 +351,7 @@ export default function ReportsPage() {
           <div class="grid-4">
             <div class="stat"><div class="stat-value">${reportData.highlights.tenders}</div><div class="stat-label">מכרזים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.competitors}</div><div class="stat-label">מתחרים</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.leads}</div><div class="stat-label">לידים</div></div>
+            <div class="stat"><div class="stat-value">${reportData.highlights.savedOpps}</div><div class="stat-label">הזדמנויות</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.alerts}</div><div class="stat-label">התראות</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.trends}</div><div class="stat-label">טרנדים</div></div>
             <div class="stat"><div class="stat-value">${reportData.highlights.news}</div><div class="stat-label">חדשות</div></div>
@@ -597,10 +597,10 @@ export default function ReportsPage() {
               <p className="text-2xl font-bold">{reportData.highlights.competitors}</p>
               <p className="text-sm text-muted-foreground">מתחרים</p>
             </div>
-            <div className="rounded-lg bg-blue-100 p-4 text-center">
-              <Users className="mx-auto mb-2 h-6 w-6 text-blue-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.leads}</p>
-              <p className="text-sm text-muted-foreground">לידים</p>
+            <div className="rounded-lg bg-emerald-100 p-4 text-center">
+              <Star className="mx-auto mb-2 h-6 w-6 text-emerald-600" />
+              <p className="text-2xl font-bold">{reportData.highlights.savedOpps}</p>
+              <p className="text-sm text-muted-foreground">הזדמנויות</p>
             </div>
             <div className="rounded-lg bg-yellow-100 p-4 text-center">
               <TrendingUp className="mx-auto mb-2 h-6 w-6 text-yellow-600" />
