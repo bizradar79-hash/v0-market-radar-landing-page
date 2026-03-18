@@ -71,7 +71,7 @@ export default function LoginPage() {
       <div className="relative z-10 w-full max-w-md">
         {/* Logo */}
         <div className="mb-8 flex justify-center">
-          <Image src="/logofinal.png" alt="North Star Radar" width={240} height={72} className="h-14 w-auto object-contain bg-transparent" unoptimized />
+          <Image src="/logofinal.png" alt="North Star Radar" width={200} height={60} className="h-12 w-auto object-contain" unoptimized />
         </div>
 
         <Card className="border-border bg-card/80 backdrop-blur-sm">

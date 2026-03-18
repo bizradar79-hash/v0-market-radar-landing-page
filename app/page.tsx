@@ -20,8 +20,10 @@ function Header() {
       dir="rtl"
     >
       <div className="mx-auto flex min-h-[80px] max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex items-center">
-          <Image src="/logofinal.png" alt="North Star Radar" width={240} height={72} className="h-14 w-auto object-contain bg-transparent" unoptimized />
+        <Link href="/" className="flex items-center h-full">
+          <div className="bg-white flex items-center h-full px-2">
+            <Image src="/logofinal.png" alt="North Star Radar" width={200} height={60} className="h-12 w-auto object-contain" unoptimized />
+          </div>
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
