@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import Image from "next/image"
 
 // ── Scroll-aware header ───────────────────────────────────────────────────
 
@@ -19,11 +20,8 @@ function Header() {
       dir="rtl"
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="text-2xl">⭐</span>
-          <span className="text-lg font-bold" style={{ color: "#0F172A" }}>
-            North Star Radar
-          </span>
+        <Link href="/" className="flex items-center">
+          <Image src="/logo.png" alt="North Star Radar" width={160} height={48} className="h-10 w-auto" unoptimized />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
@@ -564,10 +562,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xl">⭐</span>
-                <span className="font-bold" style={{ color: "#0F172A" }}>North Star Radar</span>
-              </div>
+              <Image src="/logo.png" alt="North Star Radar" width={140} height={42} className="h-8 w-auto mb-1" unoptimized />
               <p className="text-xs text-gray-400">הרדאר העסקי שמכוון אותך קדימה</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">

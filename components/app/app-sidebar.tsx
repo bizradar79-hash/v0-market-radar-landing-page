@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
@@ -14,7 +15,6 @@ import {
   FileBarChart,
   Bell,
   Settings,
-  Radar,
   X,
   LogOut,
   Calendar,
@@ -198,15 +198,10 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         {/* Logo */}
         <div className="flex items-center justify-between border-b border-border p-4">
           <Link href={showAdminNav ? "/app/admin/impersonate" : "/app/dashboard"} className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-              <Radar className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-foreground">Market Radar</span>
-              <span className="text-xs text-muted-foreground">
-                {showAdminNav ? 'Admin Panel' : 'Israel AI'}
-              </span>
-            </div>
+            <Image src="/logo.png" alt="North Star Radar" width={140} height={40} className="h-8 w-auto" unoptimized />
+            {showAdminNav && (
+              <span className="text-xs text-muted-foreground">Admin</span>
+            )}
           </Link>
           <Button
             variant="ghost"

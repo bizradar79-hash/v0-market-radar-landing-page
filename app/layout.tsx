@@ -9,25 +9,11 @@ const heebo = Heebo({
 });
 
 export const metadata: Metadata = {
-  title: 'Market Radar Israel AI | מודיעין עסקי אוטומטי',
-  description: 'מערכת AI שמזהה הזדמנויות עסקיות, לידים ומתחרים בזמן אמת לעסקים בישראל',
-  generator: 'v0.app',
+  title: 'North Star Radar | הרדאר העסקי שמכוון אותך להזדמנויות הנכונות',
+  description: 'הרדאר העסקי שמכוון אותך להזדמנויות הנכונות',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/favicon.png',
+    apple: '/favicon.png',
   },
 }
 
