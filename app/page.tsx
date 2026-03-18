@@ -19,9 +19,9 @@ function Header() {
       className={`sticky top-0 z-50 w-full bg-white transition-shadow duration-300 ${scrolled ? "shadow-md" : "border-b border-gray-100"}`}
       dir="rtl"
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+      <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link href="/" className="flex items-center">
-          <Image src="/northstarlogo.jpg" alt="North Star Radar" width={160} height={48} className="h-10 w-auto" unoptimized />
+          <Image src="/northstarlogo.jpg" alt="North Star Radar" width={140} height={140} className="h-16 w-auto" unoptimized />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
