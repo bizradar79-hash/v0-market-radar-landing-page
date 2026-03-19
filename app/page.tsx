@@ -33,7 +33,7 @@ function Header() {
         <div className="flex items-center gap-3">
           <Link
             href="/login"
-            className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors sm:block"
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
           >
             התחבר
           </Link>
