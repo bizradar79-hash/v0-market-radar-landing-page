@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 export async function GET() {
-  const base = 'https://v0-market-radar-landing-page.vercel.app'
+  const base = 'https://www.nsradar.co.il'
 
   // analyze has a GET diagnostic; all others are POST-only
   const checks = [

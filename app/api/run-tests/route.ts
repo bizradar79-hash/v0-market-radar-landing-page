@@ -5,7 +5,7 @@ export const maxDuration = 60
 
 const TEST_EMAIL = 'test@marketradar.co.il'
 const TEST_PASSWORD = 'Test123456!'
-const BASE_URL = 'https://v0-market-radar-landing-page.vercel.app'
+const BASE_URL = 'https://www.nsradar.co.il'
 
 const ROUTES = [
   '/api/analyze',

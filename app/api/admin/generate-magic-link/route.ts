@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     type: 'magiclink',
     email: target.email,
     options: {
-      redirectTo: 'https://v0-market-radar-landing-page.vercel.app/impersonate-callback',
+      redirectTo: 'https://www.nsradar.co.il/impersonate-callback',
     },
   })
   if (linkErr || !link?.properties?.action_link) {
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
   // Force the correct production redirect_to — Supabase may use its "Site URL" setting
   // which could point to a stale preview deployment. Override it directly in the URL.
   const actionUrl = new URL(link.properties.action_link)
-  actionUrl.searchParams.set('redirect_to', 'https://v0-market-radar-landing-page.vercel.app/impersonate-callback')
+  actionUrl.searchParams.set('redirect_to', 'https://www.nsradar.co.il/impersonate-callback')
 
   return NextResponse.json({ url: actionUrl.toString(), email: target.email })
 }
