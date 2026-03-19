@@ -5,12 +5,12 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world'): Promise<any[]> {
+async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world', geoContext?: string): Promise<any[]> {
   const geoText = region === 'israel'
     ? `בישראל. חפש מה אנשים מחפשים יותר בגוגל, מה עולה ברשתות חברתיות, מה מדוברים בפורומים ישראליים`
     : `בעולם (לא מוגבל לישראל). חפש מגמות גלובליות בגוגל, רשתות חברתיות, ופורומים בינלאומיים`
 
-  const prompt = `מצא את 5 הנושאים והביטויים שהיו הכי טרנדיים בשבוע האחרון וקשורים למילה: '${keyword}' ${geoText}.
+  const prompt = `מצא את 5 הנושאים והביטויים שהיו הכי טרנדיים בשבוע האחרון וקשורים למילה: '${keyword}' ${geoText}.${geoContext ? `\nהקשר עסקי: ${geoContext}` : ''}
 
 גם תן לכל ביטוי 4 נקודות נתונים שבועיות (ערך 0-100 עוצמה) עבור 4 השבועות האחרונים מהישן לחדש.
 
@@ -87,10 +87,12 @@ export async function POST(request: Request) {
       }
     }
 
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
+
     // Run Israel and World searches in parallel
     const [israelTrends, worldTrends] = await Promise.all([
-      fetchTrendsForRegion(keyword, 'israel'),
-      fetchTrendsForRegion(keyword, 'world'),
+      fetchTrendsForRegion(keyword, 'israel', geoContext),
+      fetchTrendsForRegion(keyword, 'world', geoContext),
     ])
 
     // Merge with existing keyword_trends in companies table

@@ -85,11 +85,13 @@ export async function POST(request: Request) {
       `"${t.name}" | ${t.direction || ''} | ${t.category || ''}`
     )
 
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
+
     const prompt = `אתה אנליסט שוק ישראלי מנוסה. היום: ${todayStr}.
 
 פרטי העסק:
 ${profile}
-תחום: ${company?.industry || ''} | עיר: ${company?.city || ''}
+תחום: ${company?.industry || ''} | עיר: ${company?.city || ''} | היקף גיאוגרפי: ${geoContext}
 
 === שאלת הניתוח ===
 שאילתה: "${query}"

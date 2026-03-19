@@ -82,11 +82,13 @@ export async function POST(request: Request) {
     const now = new Date()
     const todayStr = now.toISOString().split('T')[0]
 
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
+
     const prompt = `אתה יועץ עסקי ישראלי מנוסה. היום הוא ${todayStr}.
 
 פרטי העסק:
 ${profile}
-תחום: ${company?.industry || ''} | עיר: ${company?.city || ''}
+תחום: ${company?.industry || ''} | עיר: ${company?.city || ''} | היקף גיאוגרפי: ${geoContext}
 
 === נתונים עדכניים מהמערכת ===
 

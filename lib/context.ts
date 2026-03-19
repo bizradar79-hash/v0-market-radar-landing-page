@@ -67,6 +67,13 @@ export async function getFullContext() {
     geographicArea: geographicArea.join(', '),
   }
 
+  const geographic_scope: string = company?.geographic_scope || 'national'
+  const geoContext = geographic_scope === 'international'
+    ? 'העסק פעיל בישראל ובשווקים בינלאומיים. כלול תוצאות גם מחוץ לישראל.'
+    : geographic_scope === 'local' && company?.city && company.city !== 'כל הארץ'
+    ? `העסק פעיל באזור ${company.city}. תן עדיפות לתוצאות מקומיות.`
+    : 'העסק פעיל בכל רחבי ישראל. אל תגביל לעיר ספציפית.'
+
   const context = `
 === פרופיל החברה ===
 שם: ${company?.name}
@@ -78,6 +85,7 @@ export async function getFullContext() {
 תיאור: ${company?.description}
 מוצרים/שירותים/מילות מפתח: ${keywords.join(', ')}
 אזור גיאוגרפי: ${geographicArea.length > 0 ? geographicArea.join(', ') : company?.city || 'לא צוין'}
+היקף גיאוגרפי: ${geoContext}
 לקוחות יעד: ${targetCustomers.length > 0 ? targetCustomers.join(', ') : 'לא צוין'}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}
 
@@ -89,5 +97,5 @@ ${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
 השתמש אך ורק בנתונים ו-URLs שמופיעים בתוצאות החיפוש שסופקו.
 `
 
-  return { company, competitors, user, supabase, context, companyDomain, companyProfile }
+  return { company, competitors, user, supabase, context, companyDomain, companyProfile, geoContext }
 }

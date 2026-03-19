@@ -97,9 +97,10 @@ export default function OnboardingPage() {
   const [companyName, setCompanyName] = useState("")
   const [website, setWebsite] = useState("")
   const [industry, setIndustry] = useState("")
-  const [city, setCity] = useState("")
+  const [city, setCity] = useState("כל הארץ")
   const [companySize, setCompanySize] = useState("")
   const [description, setDescription] = useState("")
+  const [geographicScope, setGeographicScope] = useState<'local' | 'national' | 'international'>('national')
   
   // Step 2 - Competitors
   const [competitors, setCompetitors] = useState<Competitor[]>([])
@@ -215,6 +216,13 @@ export default function OnboardingPage() {
     }
   }
 
+  const handleScopeChange = (scope: 'local' | 'national' | 'international') => {
+    setGeographicScope(scope)
+    if (scope === 'national' || scope === 'international') {
+      setCity('כל הארץ')
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent, type: "keyword" | "industry" | "product") => {
     if (e.key === "Enter") {
       e.preventDefault()
@@ -253,6 +261,7 @@ export default function OnboardingPage() {
           .filter(([, enabled]) => enabled)
           .map(([id]) => id),
         onboarding_completed: true,
+        geographic_scope: geographicScope,
       }
       
       console.log("[v0] Saving company data:", companyData)
@@ -493,11 +502,48 @@ export default function OnboardingPage() {
                     id="city"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    placeholder="תל אביב"
+                    placeholder="לדוגמה: תל אביב, חיפה, כל הארץ"
                     className="bg-background"
+                    required={geographicScope === 'local'}
                   />
                 </div>
-                
+
+                <div className="space-y-3 md:col-span-2">
+                  <Label>היקף פעילות העסק</Label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {([
+                      { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
+                      { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
+                      { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
+                    ] as const).map(opt => (
+                      <label
+                        key={opt.value}
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                          geographicScope === opt.value
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border bg-background hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="geographicScope"
+                          value={opt.value}
+                          checked={geographicScope === opt.value}
+                          onChange={() => handleScopeChange(opt.value)}
+                          className="mt-1 accent-primary"
+                        />
+                        <div>
+                          <span className="font-medium text-foreground text-sm">{opt.emoji} {opt.label}</span>
+                          <p className="text-xs text-muted-foreground">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {geographicScope === 'international' && (
+                    <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
+                  )}
+                </div>
+
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="companySize">גודל חברה</Label>
                   <Select value={companySize} onValueChange={setCompanySize}>

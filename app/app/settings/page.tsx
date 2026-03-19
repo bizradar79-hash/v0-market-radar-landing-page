@@ -21,6 +21,7 @@ interface CompanyData {
   city: string
   size: string
   description: string
+  geographic_scope: 'local' | 'national' | 'international'
 }
 
 interface UserData {
@@ -40,6 +41,7 @@ export default function SettingsPage() {
     city: "",
     size: "",
     description: "",
+    geographic_scope: "national",
   })
 
   const [userData, setUserData] = useState<UserData>({
@@ -84,6 +86,7 @@ export default function SettingsPage() {
             city: company.city || "",
             size: company.size || "",
             description: company.description || "",
+            geographic_scope: (company.geographic_scope || "national") as 'local' | 'national' | 'international',
           })
           
           // Extract keywords from company data
@@ -122,6 +125,7 @@ export default function SettingsPage() {
           city: companyData.city,
           size: companyData.size,
           description: companyData.description,
+          geographic_scope: companyData.geographic_scope,
         })
         .eq('id', user.id)
     }
@@ -243,8 +247,47 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, city: e.target.value })
                     }
                     className="border-border bg-input"
-                    placeholder="הזן עיר"
+                    placeholder="לדוגמה: תל אביב, חיפה, כל הארץ"
                   />
+                </div>
+                <div className="space-y-3 md:col-span-2">
+                  <Label>היקף פעילות העסק</Label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {([
+                      { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
+                      { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
+                      { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
+                    ] as const).map(opt => (
+                      <label
+                        key={opt.value}
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                          companyData.geographic_scope === opt.value
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border bg-input hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="geographicScope"
+                          value={opt.value}
+                          checked={companyData.geographic_scope === opt.value}
+                          onChange={() => {
+                            const newScope = opt.value
+                            setCompanyData({
+                              ...companyData,
+                              geographic_scope: newScope,
+                              city: newScope !== 'local' ? 'כל הארץ' : companyData.city,
+                            })
+                          }}
+                          className="mt-1 accent-primary"
+                        />
+                        <div>
+                          <span className="font-medium text-foreground text-sm">{opt.emoji} {opt.label}</span>
+                          <p className="text-xs text-muted-foreground">{opt.desc}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="size">גודל חברה</Label>

@@ -54,6 +54,7 @@ export async function POST(request: Request) {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const keywords = (ctx.companyProfile?.keywords || []).join(', ')
     const industry = ctx.companyProfile?.industry || ''
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     const today = new Date().toISOString().split('T')[0]
 
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
 - תיאור: ${businessOverview}
 - מילות מפתח: ${keywords}
 - תחום: ${industry}
+- היקף גיאוגרפי: ${geoContext}
 
 חפש מכרזים ממשלתיים פתוחים בישראל שרלוונטיים לעסק זה.
 חפש באתרים: mr.gov.il, gov.il, mof.gov.il, health.gov.il ואתרים ממשלתיים אחרים.

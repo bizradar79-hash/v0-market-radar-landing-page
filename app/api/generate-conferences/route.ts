@@ -33,9 +33,12 @@ export async function POST(request: Request) {
     }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 כנסים, תערוכות או אירועים מקצועיים רלוונטיים בישראל ב-2026.
+היקף גיאוגרפי: ${geoContext}
+מצא 10 כנסים, תערוכות או אירועים מקצועיים רלוונטיים ב-2026.
+${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומיים גם מחוץ לישראל הרלוונטיים לתחום.' : 'כלול כנסים ואירועים בישראל בעיקר.'}
 כלול רק אירועים אמיתיים עם תאריך עתידי.
 כלול רק כנסים ואירועים עתידיים — תאריך 2026 בלבד שטרם עברו.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.

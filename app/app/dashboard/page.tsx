@@ -32,6 +32,7 @@ interface CompanyInfo {
   city: string
   website: string
   businessOverview: string
+  geographicScope: string
 }
 
 interface DashboardData {
@@ -91,7 +92,7 @@ export default function AppDashboardPage() {
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
       supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
-      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview").single(),
+      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope").single(),
     ])
 
     setData({
@@ -112,6 +113,7 @@ export default function AppDashboardPage() {
         city: companyData.city || '',
         website: companyData.website || '',
         businessOverview: companyData.business_overview || '',
+        geographicScope: companyData.geographic_scope || 'national',
       } : null,
     })
     setLoading(false)
@@ -250,6 +252,19 @@ export default function AppDashboardPage() {
                   {data.companyInfo.city && (
                     <span className="text-xs text-muted-foreground">{data.companyInfo.city}</span>
                   )}
+                  <Link href="/app/settings">
+                    <Badge className={`text-xs px-1.5 py-0 cursor-pointer hover:opacity-80 ${
+                      data.companyInfo.geographicScope === 'international' ? 'bg-teal-100 text-teal-700' :
+                      data.companyInfo.geographicScope === 'national' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {data.companyInfo.geographicScope === 'international'
+                        ? '🌍 פעיל בינלאומית'
+                        : data.companyInfo.geographicScope === 'national'
+                        ? '🇮🇱 פעיל בכל ישראל'
+                        : `🏙️ פעיל באזור ${data.companyInfo.city}`}
+                    </Badge>
+                  </Link>
                 </div>
                 {data.companyInfo.website && (
                   <a

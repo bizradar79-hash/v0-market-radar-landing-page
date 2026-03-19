@@ -28,9 +28,11 @@ export async function POST(request: Request) {
     }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-מצא 10 לידים פוטנציאליים בישראל — חברות או ארגונים שסביר שיזדקקו לשירותי העסק הזה באופן קבוע.
+היקף גיאוגרפי: ${geoContext}
+מצא 10 לידים פוטנציאליים ${geoContext.includes('בינלאומי') ? 'בישראל ובעולם' : 'בישראל'} — חברות או ארגונים שסביר שיזדקקו לשירותי העסק הזה באופן קבוע.
 
 תן עדיפות ל:
 - עסקים בינוניים-קטנים (לא חברות ענק בינלאומיות)

@@ -13,14 +13,15 @@ function cutoffDate(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 }
 
-async function fetchNews(businessOverview: string, days: number): Promise<any[]> {
+async function fetchNews(businessOverview: string, days: number, geoContext: string): Promise<any[]> {
   const cutoff = cutoffDate(days)
   const cutoffStr = toDateStr(cutoff)
   const todayStr = toDateStr(new Date())
 
   const prompt = `בהתבסס על תחום העסק: ${businessOverview}
+היקף גיאוגרפי: ${geoContext}
 מצא 10 חדשות רלוונטיות מ-${days} הימים האחרונים בלבד (מתאריך ${cutoffStr} עד היום ${todayStr}).
-כלול חדשות מישראל ומהעולם.
+${geoContext.includes('בינלאומי') ? 'כלול חדשות מישראל ומהעולם, עם משקל גבוה יותר לחדשות בינלאומיות.' : 'כלול חדשות מישראל ומהעולם.'}
 דחה כל חדשה שפורסמה לפני ${cutoffStr}.
 
 לכל חדשה תן relevance_score 0-100 ו-region: 'ישראל' או 'עולם'.
@@ -97,15 +98,16 @@ export async function POST(request: Request) {
     }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
+    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     // Step 1 — 30 days
-    const raw30 = await fetchNews(businessOverview, 30)
+    const raw30 = await fetchNews(businessOverview, 30, geoContext)
     let list = filterNews(raw30, 30)
     steps.window30 = { raw: raw30.length, filtered: list.length }
 
     // Step 2 — expand to 60 days if fewer than 5 results
     if (list.length < 5) {
-      const raw60 = await fetchNews(businessOverview, 60)
+      const raw60 = await fetchNews(businessOverview, 60, geoContext)
       const list60 = filterNews(raw60, 60)
       steps.window60 = { raw: raw60.length, filtered: list60.length }
       if (list60.length > list.length) list = list60
