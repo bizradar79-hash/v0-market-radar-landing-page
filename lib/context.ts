@@ -67,12 +67,21 @@ export async function getFullContext() {
     geographicArea: geographicArea.join(', '),
   }
 
-  const geographic_scope: string = company?.geographic_scope || 'national'
-  const geoContext = geographic_scope === 'international'
-    ? 'העסק פעיל בישראל ובשווקים בינלאומיים. כלול תוצאות גם מחוץ לישראל.'
-    : geographic_scope === 'local' && company?.city && company.city !== 'כל הארץ'
-    ? `העסק פעיל באזור ${company.city}. תן עדיפות לתוצאות מקומיות.`
-    : 'העסק פעיל בכל רחבי ישראל. אל תגביל לעיר ספציפית.'
+  const scopes: string[] = Array.isArray(company?.geographic_scope)
+    ? company.geographic_scope
+    : [company?.geographic_scope || 'national']
+
+  const geoContext = [
+    scopes.includes('local') && company?.city && company.city !== 'כל הארץ'
+      ? `העסק פעיל מקומית באזור ${company.city}.`
+      : null,
+    scopes.includes('national')
+      ? 'העסק פעיל בכל רחבי ישראל.'
+      : null,
+    scopes.includes('international')
+      ? 'העסק פעיל גם בשווקים בינלאומיים מחוץ לישראל — כלול תוצאות גלובליות רלוונטיות.'
+      : null,
+  ].filter(Boolean).join(' ')
 
   const context = `
 === פרופיל החברה ===

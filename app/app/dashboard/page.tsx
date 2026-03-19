@@ -32,7 +32,7 @@ interface CompanyInfo {
   city: string
   website: string
   businessOverview: string
-  geographicScope: string
+  geographicScope: string[]
 }
 
 interface DashboardData {
@@ -113,7 +113,9 @@ export default function AppDashboardPage() {
         city: companyData.city || '',
         website: companyData.website || '',
         businessOverview: companyData.business_overview || '',
-        geographicScope: companyData.geographic_scope || 'national',
+        geographicScope: Array.isArray(companyData.geographic_scope)
+          ? companyData.geographic_scope
+          : [companyData.geographic_scope || 'national'],
       } : null,
     })
     setLoading(false)
@@ -252,19 +254,19 @@ export default function AppDashboardPage() {
                   {data.companyInfo.city && (
                     <span className="text-xs text-muted-foreground">{data.companyInfo.city}</span>
                   )}
-                  <Link href="/app/settings">
-                    <Badge className={`text-xs px-1.5 py-0 cursor-pointer hover:opacity-80 ${
-                      data.companyInfo.geographicScope === 'international' ? 'bg-teal-100 text-teal-700' :
-                      data.companyInfo.geographicScope === 'national' ? 'bg-blue-100 text-blue-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {data.companyInfo.geographicScope === 'international'
-                        ? '🌍 פעיל בינלאומית'
-                        : data.companyInfo.geographicScope === 'national'
-                        ? '🇮🇱 פעיל בכל ישראל'
-                        : `🏙️ פעיל באזור ${data.companyInfo.city}`}
-                    </Badge>
-                  </Link>
+                  {data.companyInfo.geographicScope.map(scope => (
+                    <Link key={scope} href="/app/settings">
+                      <Badge className={`text-xs px-1.5 py-0 cursor-pointer hover:opacity-80 ${
+                        scope === 'international' ? 'bg-teal-100 text-teal-700' :
+                        scope === 'national' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {scope === 'international' ? '🌍 בינלאומי' :
+                         scope === 'national' ? '🇮🇱 ארצי' :
+                         `🏙️ מקומי`}
+                      </Badge>
+                    </Link>
+                  ))}
                 </div>
                 {data.companyInfo.website && (
                   <a

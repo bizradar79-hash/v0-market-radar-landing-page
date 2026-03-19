@@ -44,10 +44,12 @@ export async function POST(request: Request) {
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoArea: string[] = ctx.company?.geographic_area || []
     const keywords: string[] = ctx.company?.keywords || []
-    const geoScope = ctx.company?.geographic_scope || 'national'
+    const scopes: string[] = Array.isArray(ctx.company?.geographic_scope)
+      ? ctx.company.geographic_scope
+      : [ctx.company?.geographic_scope || 'national']
 
-    const isLocal = geoScope === 'local' || isLocalBusiness(overview, city, geoArea)
-    const isInternational = geoScope === 'international'
+    const isLocal = scopes.includes('local') || isLocalBusiness(overview, city, geoArea)
+    const isInternational = scopes.includes('international')
     const scopeLocation = isLocal ? (city || 'ישראל') : isInternational ? 'ישראל ועולם' : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 

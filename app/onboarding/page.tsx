@@ -19,6 +19,35 @@ const steps = [
   { id: 4, title: "בחר מודולים", icon: Settings },
 ]
 
+const ISRAELI_CITIES = [
+  'כל הארץ',
+  'תל אביב',
+  'ירושלים',
+  'חיפה',
+  'באר שבע',
+  'ראשון לציון',
+  'פתח תקווה',
+  'אשדוד',
+  'נתניה',
+  'בני ברק',
+  'חולון',
+  'רמת גן',
+  'אשקלון',
+  'רחובות',
+  'בת ים',
+  'הרצליה',
+  'כפר סבא',
+  'מודיעין',
+  'רעננה',
+  'לוד',
+  'נהריה',
+  'טבריה',
+  'אילת',
+  'צפת',
+  'עפולה',
+  'אחר',
+]
+
 const industries = [
   "טכנולוגיה",
   "פינטק",
@@ -98,9 +127,10 @@ export default function OnboardingPage() {
   const [website, setWebsite] = useState("")
   const [industry, setIndustry] = useState("")
   const [city, setCity] = useState("כל הארץ")
+  const [cityCustom, setCityCustom] = useState("")
   const [companySize, setCompanySize] = useState("")
   const [description, setDescription] = useState("")
-  const [geographicScope, setGeographicScope] = useState<'local' | 'national' | 'international'>('national')
+  const [geographicScope, setGeographicScope] = useState<string[]>(['national'])
   
   // Step 2 - Competitors
   const [competitors, setCompetitors] = useState<Competitor[]>([])
@@ -216,11 +246,13 @@ export default function OnboardingPage() {
     }
   }
 
-  const handleScopeChange = (scope: 'local' | 'national' | 'international') => {
-    setGeographicScope(scope)
-    if (scope === 'national' || scope === 'international') {
-      setCity('כל הארץ')
-    }
+  const effectiveCity = city === 'אחר' ? cityCustom.trim() || '' : city
+
+  const handleScopeToggle = (scope: string) => {
+    setGeographicScope(prev => {
+      const next = prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]
+      return next.length === 0 ? prev : next
+    })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent, type: "keyword" | "industry" | "product") => {
@@ -252,7 +284,7 @@ export default function OnboardingPage() {
         name: companyName,
         website,
         industry: effectiveIndustry,
-        city,
+        city: effectiveCity,
         size: companySize,
         description,
         competitors: competitors.map(c => ({ name: c.name, website: c.website })),
@@ -498,38 +530,47 @@ export default function OnboardingPage() {
                 
                 <div className="space-y-2">
                   <Label htmlFor="city">עיר</Label>
-                  <Input
-                    id="city"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="לדוגמה: תל אביב, חיפה, כל הארץ"
-                    className="bg-background"
-                    required={geographicScope === 'local'}
-                  />
+                  <Select value={city} onValueChange={(v) => { setCity(v); if (v !== 'אחר') setCityCustom("") }}>
+                    <SelectTrigger className="bg-background">
+                      <SelectValue placeholder="בחר עיר..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ISRAELI_CITIES.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {city === 'אחר' && (
+                    <Input
+                      value={cityCustom}
+                      onChange={(e) => setCityCustom(e.target.value)}
+                      placeholder="פרט את העיר..."
+                      className="bg-background mt-2"
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-3 md:col-span-2">
                   <Label>היקף פעילות העסק</Label>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {([
+                    {[
                       { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
                       { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
                       { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
-                    ] as const).map(opt => (
+                    ].map(opt => (
                       <label
                         key={opt.value}
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                          geographicScope === opt.value
+                          geographicScope.includes(opt.value)
                             ? 'border-primary bg-primary/5'
                             : 'border-border bg-background hover:border-primary/50'
                         }`}
                       >
                         <input
-                          type="radio"
-                          name="geographicScope"
+                          type="checkbox"
                           value={opt.value}
-                          checked={geographicScope === opt.value}
-                          onChange={() => handleScopeChange(opt.value)}
+                          checked={geographicScope.includes(opt.value)}
+                          onChange={() => handleScopeToggle(opt.value)}
                           className="mt-1 accent-primary"
                         />
                         <div>
@@ -539,7 +580,7 @@ export default function OnboardingPage() {
                       </label>
                     ))}
                   </div>
-                  {geographicScope === 'international' && (
+                  {geographicScope.includes('international') && (
                     <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
                   )}
                 </div>

@@ -12,7 +12,15 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { X, Plus, Save, Building2, KeyRound, Bell, User, Loader2 } from "lucide-react"
+
+const ISRAELI_CITIES = [
+  'כל הארץ', 'תל אביב', 'ירושלים', 'חיפה', 'באר שבע', 'ראשון לציון',
+  'פתח תקווה', 'אשדוד', 'נתניה', 'בני ברק', 'חולון', 'רמת גן', 'אשקלון',
+  'רחובות', 'בת ים', 'הרצליה', 'כפר סבא', 'מודיעין', 'רעננה', 'לוד',
+  'נהריה', 'טבריה', 'אילת', 'צפת', 'עפולה', 'אחר',
+]
 
 interface CompanyData {
   name: string
@@ -21,7 +29,7 @@ interface CompanyData {
   city: string
   size: string
   description: string
-  geographic_scope: 'local' | 'national' | 'international'
+  geographic_scope: string[]
 }
 
 interface UserData {
@@ -38,11 +46,13 @@ export default function SettingsPage() {
     name: "",
     website: "",
     industry: "",
-    city: "",
+    city: "כל הארץ",
     size: "",
     description: "",
-    geographic_scope: "national",
+    geographic_scope: ["national"],
   })
+  const [cityCustom, setCityCustom] = useState("")
+  const effectiveCity = companyData.city === 'אחר' ? cityCustom.trim() || '' : companyData.city
 
   const [userData, setUserData] = useState<UserData>({
     fullName: "",
@@ -79,14 +89,19 @@ export default function SettingsPage() {
           .single()
         
         if (company) {
+          const rawCity = company.city || ''
+          const cityDropdown = ISRAELI_CITIES.includes(rawCity) ? rawCity : (rawCity ? 'אחר' : 'כל הארץ')
+          if (cityDropdown === 'אחר') setCityCustom(rawCity)
           setCompanyData({
             name: company.name || "",
             website: company.website || "",
             industry: company.industry || "",
-            city: company.city || "",
+            city: cityDropdown,
             size: company.size || "",
             description: company.description || "",
-            geographic_scope: (company.geographic_scope || "national") as 'local' | 'national' | 'international',
+            geographic_scope: Array.isArray(company.geographic_scope)
+              ? company.geographic_scope
+              : [company.geographic_scope || 'national'],
           })
           
           // Extract keywords from company data
@@ -122,7 +137,7 @@ export default function SettingsPage() {
           name: companyData.name,
           website: companyData.website,
           industry: companyData.industry,
-          city: companyData.city,
+          city: effectiveCity,
           size: companyData.size,
           description: companyData.description,
           geographic_scope: companyData.geographic_scope,
@@ -240,44 +255,57 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="city">עיר</Label>
-                  <Input
-                    id="city"
+                  <Select
                     value={companyData.city}
-                    onChange={(e) =>
-                      setCompanyData({ ...companyData, city: e.target.value })
-                    }
-                    className="border-border bg-input"
-                    placeholder="לדוגמה: תל אביב, חיפה, כל הארץ"
-                  />
+                    onValueChange={(v) => {
+                      setCompanyData({ ...companyData, city: v })
+                      if (v !== 'אחר') setCityCustom("")
+                    }}
+                  >
+                    <SelectTrigger className="border-border bg-input">
+                      <SelectValue placeholder="בחר עיר..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ISRAELI_CITIES.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {companyData.city === 'אחר' && (
+                    <Input
+                      value={cityCustom}
+                      onChange={(e) => setCityCustom(e.target.value)}
+                      placeholder="פרט את העיר..."
+                      className="border-border bg-input mt-2"
+                    />
+                  )}
                 </div>
                 <div className="space-y-3 md:col-span-2">
                   <Label>היקף פעילות העסק</Label>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {([
+                    {[
                       { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
                       { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
                       { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
-                    ] as const).map(opt => (
+                    ].map(opt => (
                       <label
                         key={opt.value}
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                          companyData.geographic_scope === opt.value
+                          companyData.geographic_scope.includes(opt.value)
                             ? 'border-primary bg-primary/5'
                             : 'border-border bg-input hover:border-primary/50'
                         }`}
                       >
                         <input
-                          type="radio"
-                          name="geographicScope"
+                          type="checkbox"
                           value={opt.value}
-                          checked={companyData.geographic_scope === opt.value}
+                          checked={companyData.geographic_scope.includes(opt.value)}
                           onChange={() => {
-                            const newScope = opt.value
-                            setCompanyData({
-                              ...companyData,
-                              geographic_scope: newScope,
-                              city: newScope !== 'local' ? 'כל הארץ' : companyData.city,
-                            })
+                            const prev = companyData.geographic_scope
+                            const next = prev.includes(opt.value)
+                              ? prev.filter(s => s !== opt.value)
+                              : [...prev, opt.value]
+                            if (next.length > 0) setCompanyData({ ...companyData, geographic_scope: next })
                           }}
                           className="mt-1 accent-primary"
                         />
@@ -288,6 +316,9 @@ export default function SettingsPage() {
                       </label>
                     ))}
                   </div>
+                  {companyData.geographic_scope.includes('international') && (
+                    <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="size">גודל חברה</Label>
