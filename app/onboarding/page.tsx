@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Radar, Building2, Users, Tag, Settings, ChevronLeft, ChevronRight, Check, Plus, X, Loader2, Sparkles } from "lucide-react"
+import Image from "next/image"
+import { Building2, Users, Tag, Settings, ChevronLeft, ChevronRight, Check, Plus, X, Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -384,11 +385,15 @@ export default function OnboardingPage() {
       <div className="relative mx-auto max-w-3xl px-4 py-8">
         {/* Header */}
         <div className="mb-8 text-center">
-          <div className="mb-4 flex items-center justify-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <Radar className="h-6 w-6 text-primary" />
-            </div>
-            <span className="text-xl font-bold text-foreground">Market Radar</span>
+          <div className="mb-4 flex items-center justify-center">
+            <Image
+              src="/whitelogo.png"
+              alt="North Star Radar"
+              width={200}
+              height={56}
+              className="h-12 w-auto object-contain"
+              unoptimized
+            />
           </div>
           <h1 className="text-2xl font-bold text-foreground">הגדרת החשבון</h1>
           <p className="mt-2 text-muted-foreground">מלא את הפרטים כדי להתאים את המערכת לצרכים שלך</p>
