@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
@@ -107,11 +108,17 @@ export async function POST(request: Request) {
     const todayStr = now.toISOString().split('T')[0]
 
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+
+    const profileEdge = businessProfile ? `
+- יתרון תחרותי: ${businessProfile.competitiveAdvantage}
+- מיצוב בשוק: ${businessProfile.marketPosition}
+- נישות קשורות לחיפוש: ${[...businessProfile.primaryKeywords, ...businessProfile.secondaryKeywords].slice(0, 8).join(', ')}` : ''
 
     const prompt = `אתה אסטרטג שוק ישראלי מנוסה. היום הוא ${todayStr}.
 
 פרטי העסק:
-${profile}
+${profile}${profileEdge}
 תחום: ${company?.industry || ''} | עיר: ${company?.city || ''} | היקף גיאוגרפי: ${geoContext}
 
 === נתונים עדכניים מהמערכת ===

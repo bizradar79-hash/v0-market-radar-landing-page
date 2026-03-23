@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -35,7 +36,17 @@ export async function POST(request: Request) {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+    const industryTags = businessProfile?.industryTags?.length
+      ? `תגיות תעשייה: ${businessProfile.industryTags.join(', ')}.`
+      : ''
+    const geoMarkets = businessProfile?.geographicMarkets?.length
+      ? `שווקים גיאוגרפיים רלוונטיים: ${businessProfile.geographicMarkets.join(', ')}.`
+      : ''
+
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
+${industryTags}
+${geoMarkets}
 היקף גיאוגרפי: ${geoContext}
 מצא 10 כנסים, תערוכות או אירועים מקצועיים רלוונטיים ב-2026.
 ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומיים גם מחוץ לישראל הרלוונטיים לתחום.' : 'כלול כנסים ואירועים בישראל בעיקר.'}

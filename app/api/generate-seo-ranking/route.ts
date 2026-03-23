@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -55,7 +56,10 @@ export async function POST(request: Request) {
 
     // ── Step 1: Business understanding ──────────────────────────────────────
     // Ask Grok to read the business overview and produce an optimal search query
-    const fallbackQuery = [industry, scopeLocation, keywords.slice(0, 3).join(' ')].filter(Boolean).join(' ')
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+    const profileKeywords = businessProfile?.primaryKeywords?.slice(0, 3).join(' ') || ''
+    const fallbackQuery = profileKeywords
+      || [industry, scopeLocation, keywords.slice(0, 3).join(' ')].filter(Boolean).join(' ')
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
     const searchQuery = businessAnalysis?.google_query || fallbackQuery
 

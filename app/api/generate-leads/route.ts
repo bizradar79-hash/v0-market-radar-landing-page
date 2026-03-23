@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -30,7 +31,15 @@ export async function POST(request: Request) {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
-    const prompt = `בהתבסס על תחום העסק: ${businessOverview}
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+    const audienceContext = businessProfile?.targetAudiences?.length
+      ? `\nקהלי יעד מדויקים לחיפוש: ${businessProfile.targetAudiences.join(', ')}.`
+      : ''
+    const searchQueriesContext = businessProfile?.searchQueries?.length
+      ? `\nשאילתות חיפוש לגילוי לידים: ${businessProfile.searchQueries.slice(0, 4).join(' | ')}.`
+      : ''
+
+    const prompt = `בהתבסס על תחום העסק: ${businessOverview}${audienceContext}${searchQueriesContext}
 היקף גיאוגרפי: ${geoContext}
 מצא 10 לידים פוטנציאליים ${geoContext.includes('בינלאומי') ? 'בישראל ובעולם' : 'בישראל'} — חברות או ארגונים שסביר שיזדקקו לשירותי העסק הזה באופן קבוע.
 

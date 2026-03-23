@@ -1,6 +1,7 @@
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -48,10 +49,12 @@ export async function POST(request: Request) {
 
     // ── Step 1: Business understanding ──────────────────────────────────────
     // Ask Grok to read the business overview and produce the right AI question
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
     const keywordString = keywords.slice(0, 5).join(', ')
+    const coreActivityDesc = businessProfile?.coreActivity || industry
     const fallbackQuestion = isLocal
-      ? `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} ב${scopeLocation}?`
-      : `מי הם העסקים המובילים בתחום ${industry}${keywordString ? ` (${keywordString})` : ''} בישראל?`
+      ? `מי הם העסקים המובילים בתחום ${coreActivityDesc} ב${scopeLocation}?`
+      : `מי הם העסקים המובילים בתחום ${coreActivityDesc}${keywordString ? ` (${keywordString})` : ''} בישראל?`
 
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
     const geoQuestion = businessAnalysis?.ai_question || fallbackQuestion

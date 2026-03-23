@@ -2,6 +2,7 @@ import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -123,13 +124,25 @@ export async function POST(request: Request) {
 
     const geoContext = ctx?.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
+    const businessProfile = (ctx?.company?.business_profile ?? null) as BusinessProfile | null
+    const searchTerms = businessProfile?.primaryKeywords?.join(', ')
+      ?? keywords
+      ?? businessOverview.slice(0, 120)
+    const industryContext = businessProfile
+      ? `תחום: ${businessProfile.industryTags.join(', ')}. קהל יעד: ${businessProfile.targetAudiences.join(', ')}.`
+      : ''
+    const knownCompetitorsSeed = businessProfile?.directCompetitors?.length
+      ? `\nמתחרים ידועים שכבר מעקב אחריהם (מצא עוד דומים להם, אל תחזור על אותם שמות): ${businessProfile.directCompetitors.slice(0, 5).join(', ')}`
+      : ''
+
     const prompt = `אתה מומחה לשוק הישראלי עם גישה לאינטרנט.
 
 פרטי העסק:
 - סקירה: ${businessOverview}
 - אתר: ${website}
-- מילות מפתח: ${keywords}
-- היקף גיאוגרפי: ${geoContext}
+- מילות מפתח לחיפוש: ${searchTerms}
+- ${industryContext}
+- היקף גיאוגרפי: ${geoContext}${knownCompetitorsSeed}
 
 שלב 1 — זהה את הנישה הספציפית ביותר של העסק (לדוגמה: לא "תוספי תזונה" אלא "ייצור תוספי תזונה נוזליים במותג פרטי").
 

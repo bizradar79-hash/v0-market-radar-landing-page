@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -56,6 +57,11 @@ export async function POST(request: Request) {
     const industry = ctx.companyProfile?.industry || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+    const industryTags = businessProfile?.industryTags?.join(', ') || industry
+    const targetAudiences = businessProfile?.targetAudiences?.join(', ') || ''
+    const geoMarkets = businessProfile?.geographicMarkets?.join(', ') || ''
+
     const today = new Date().toISOString().split('T')[0]
 
     const prompt = `אתה מומחה למכרזים ממשלתיים בישראל.
@@ -63,7 +69,9 @@ export async function POST(request: Request) {
 פרטי העסק:
 - תיאור: ${businessOverview}
 - מילות מפתח: ${keywords}
-- תחום: ${industry}
+- תחום ותגיות תעשייה: ${industryTags}
+${targetAudiences ? `- קהלי יעד: ${targetAudiences}` : ''}
+${geoMarkets ? `- שווקים גיאוגרפיים: ${geoMarkets}` : ''}
 - היקף גיאוגרפי: ${geoContext}
 
 חפש מכרזים ממשלתיים פתוחים בישראל שרלוונטיים לעסק זה.

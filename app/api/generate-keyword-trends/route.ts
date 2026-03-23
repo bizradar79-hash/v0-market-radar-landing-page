@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -65,7 +66,19 @@ export async function POST(request: Request) {
     const keyword = body.keyword
     const force = forceQuery || body.force === true
 
-    if (!keyword) return NextResponse.json({ error: 'Missing keyword' }, { status: 400 })
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+
+    if (!keyword) {
+      // Return suggested keywords from business profile if user has none yet
+      const companyKeywords: string[] = ctx.company?.keywords || []
+      const suggestedKeywords = businessProfile?.primaryKeywords?.filter(
+        k => !companyKeywords.includes(k)
+      ).slice(0, 10) || []
+      return NextResponse.json({
+        error: 'Missing keyword',
+        suggested_keywords: suggestedKeywords,
+      }, { status: 400 })
+    }
 
     // Per-keyword cache check
     if (!force) {

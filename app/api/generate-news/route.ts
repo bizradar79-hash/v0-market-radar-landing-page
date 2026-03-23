@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
@@ -100,14 +101,19 @@ export async function POST(request: Request) {
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
+    const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+    const newsSearchContext = businessProfile
+      ? `${businessOverview}\nתגיות תעשייה: ${businessProfile.industryTags.join(', ')}. שאילתות מפתח: ${businessProfile.searchQueries.slice(0, 5).join(', ')}.`
+      : businessOverview
+
     // Step 1 — 30 days
-    const raw30 = await fetchNews(businessOverview, 30, geoContext)
+    const raw30 = await fetchNews(newsSearchContext, 30, geoContext)
     let list = filterNews(raw30, 30)
     steps.window30 = { raw: raw30.length, filtered: list.length }
 
     // Step 2 — expand to 60 days if fewer than 5 results
     if (list.length < 5) {
-      const raw60 = await fetchNews(businessOverview, 60, geoContext)
+      const raw60 = await fetchNews(newsSearchContext, 60, geoContext)
       const list60 = filterNews(raw60, 60)
       steps.window60 = { raw: raw60.length, filtered: list60.length }
       if (list60.length > list.length) list = list60
