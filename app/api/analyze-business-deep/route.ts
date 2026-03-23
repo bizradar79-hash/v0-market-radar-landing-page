@@ -81,6 +81,11 @@ export async function POST(request: Request) {
 
     const prompt = `אתה אנליסט עסקי מומחה. נתח לעומק את העסק הבא וחפש מידע עליו באינטרנט:
 
+חשוב מאוד: החזר את כל הערכים בעברית בלבד.
+שמות מוצרים, תיאורים, קהלי יעד, תגיות תעשייה, יתרון תחרותי — הכל בעברית.
+רק מילות מפתח לחיפוש (primaryKeywords, secondaryKeywords, searchQueries)
+יכולות להיות גם באנגלית כי משתמשים בהן לחיפוש.
+
 שם החברה: ${companyName}
 אתר: ${website}
 תיאור: ${shortDescription}
