@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase/client"
+import { BusinessProfileConfirmation } from "@/components/onboarding/BusinessProfileConfirmation"
+import type { BusinessProfile } from "@/types/business-profile"
 
 const steps = [
   { id: 1, title: "פרטי החברה", icon: Building2 },
@@ -163,6 +165,68 @@ export default function OnboardingPage() {
   const [industryCustom, setIndustryCustom] = useState("")
   const effectiveIndustry = industry === 'אחר' ? industryCustom.trim() : industry
 
+  // Step 0 — AI Business Analysis
+  const [analysisPhase, setAnalysisPhase] = useState<'step0' | 'confirm' | 'wizard'>('step0')
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [step0Name, setStep0Name] = useState("")
+  const [step0Website, setStep0Website] = useState("")
+  const [step0Description, setStep0Description] = useState("")
+  const [deepProfile, setDeepProfile] = useState<BusinessProfile | null>(null)
+  const [confirmingSave, setConfirmingSave] = useState(false)
+
+  const handleAnalyzeBusiness = async () => {
+    setAnalyzing(true)
+    setAnalysisError(null)
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/analyze-business-deep', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          companyName: step0Name,
+          website: step0Website,
+          shortDescription: step0Description,
+        }),
+      })
+      const data = await res.json()
+      if (data.success && data.profile) {
+        setDeepProfile(data.profile)
+        setAnalysisPhase('confirm')
+      } else {
+        setAnalysisError(data.error || 'שגיאה בניתוח העסק, נסה שנית')
+      }
+    } catch {
+      setAnalysisError('שגיאת רשת, נסה שנית')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleConfirmProfile = async (confirmed: BusinessProfile) => {
+    setConfirmingSave(true)
+    try {
+      // Pre-fill wizard state from confirmed profile
+      if (step0Name) setCompanyName(step0Name)
+      if (step0Website) setWebsite(step0Website)
+      if (step0Description) setDescription(step0Description)
+      setKeywords(confirmed.primaryKeywords.slice(0, 10))
+      setIndustriesTags(confirmed.industryTags)
+      setCompetitors(
+        confirmed.directCompetitors.slice(0, 5).map(name => ({ name, website: '' }))
+      )
+      // Store confirmed profile to save later on final submit
+      setDeepProfile(confirmed)
+      setAnalysisPhase('wizard')
+    } finally {
+      setConfirmingSave(false)
+    }
+  }
+
   const addCompetitor = () => {
     if (newCompetitorName.trim()) {
       const scoreVal = parseInt(newCompetitorThreatScore)
@@ -295,6 +359,7 @@ export default function OnboardingPage() {
           .map(([id]) => id),
         onboarding_completed: true,
         geographic_scope: geographicScope,
+        ...(deepProfile ? { business_profile: deepProfile } : {}),
       }
       
       console.log("[v0] Saving company data:", companyData)
@@ -404,14 +469,15 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Progress Bar */}
+        {/* Progress Bar — only shown in wizard phase */}
+        {analysisPhase === 'wizard' && (
         <div className="mb-8">
           <div className="flex items-center justify-between">
             {steps.map((step, index) => {
               const Icon = step.icon
               const isActive = currentStep === step.id
               const isCompleted = currentStep > step.id
-              
+
               return (
                 <div key={step.id} className="flex flex-1 items-center">
                   <div className="flex flex-col items-center">
@@ -446,10 +512,110 @@ export default function OnboardingPage() {
             })}
           </div>
         </div>
+        )}
 
         {/* Step Content */}
         <div className="rounded-xl border border-border bg-card p-6 shadow-lg">
-          {isScanning ? (
+
+          {/* Step 0 — AI Business Analysis */}
+          {analysisPhase === 'step0' && (
+            <div className="space-y-6" dir="rtl">
+              <div>
+                <h2 className="text-xl font-semibold text-foreground">ניתוח עסקי אוטומטי</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  AI יסרוק את האתר שלך ויבנה פרופיל עסקי מדויק — כולל מילות מפתח, מתחרים וקהלי יעד
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="step0Name">שם החברה *</Label>
+                  <Input
+                    id="step0Name"
+                    value={step0Name}
+                    onChange={e => setStep0Name(e.target.value)}
+                    placeholder="שם החברה שלך"
+                    className="bg-background"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="step0Website">אתר אינטרנט</Label>
+                  <Input
+                    id="step0Website"
+                    type="url"
+                    dir="ltr"
+                    value={step0Website}
+                    onChange={e => setStep0Website(e.target.value)}
+                    placeholder="https://example.com"
+                    className="bg-background text-left"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="step0Desc">תיאור קצר</Label>
+                  <Textarea
+                    id="step0Desc"
+                    value={step0Description}
+                    onChange={e => setStep0Description(e.target.value)}
+                    placeholder="2-3 משפטים על מה שהעסק עושה, למי הוא מוכר ומה הוא מציע..."
+                    className="min-h-[90px] bg-background"
+                  />
+                </div>
+              </div>
+
+              {analysisError && (
+                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                  {analysisError}
+                </div>
+              )}
+
+              {analyzing && (
+                <div className="flex flex-col items-center gap-3 py-4 text-center">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                  <p className="font-medium text-foreground">AI סורק ומנתח את העסק שלך...</p>
+                  <p className="text-sm text-muted-foreground">(30–60 שניות)</p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between pt-2 border-t border-border">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setAnalysisPhase('wizard')}
+                  disabled={analyzing}
+                  className="text-muted-foreground"
+                >
+                  דלג לטופס ידני
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleAnalyzeBusiness}
+                  disabled={analyzing || !step0Name.trim()}
+                  className="gap-2"
+                >
+                  {analyzing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {analyzing ? 'מנתח...' : 'נתח את העסק שלי 🔍'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 0 confirm — show BusinessProfileConfirmation */}
+          {analysisPhase === 'confirm' && deepProfile && (
+            <BusinessProfileConfirmation
+              profile={deepProfile}
+              onConfirm={handleConfirmProfile}
+              onRetry={() => setAnalysisPhase('step0')}
+              isConfirming={confirmingSave}
+            />
+          )}
+
+          {analysisPhase === 'wizard' && (isScanning ? (
             <div className="space-y-6">
               <div className="text-center">
                 <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
@@ -958,7 +1124,7 @@ export default function OnboardingPage() {
             )}
           </div>
           </>
-          )}
+          ))}
         </div>
       </div>
     </div>

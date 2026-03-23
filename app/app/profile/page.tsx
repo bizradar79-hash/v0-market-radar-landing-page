@@ -19,8 +19,11 @@ import {
   Phone,
   Globe,
   MapPin,
+  Search,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { BusinessProfileConfirmation } from "@/components/onboarding/BusinessProfileConfirmation"
+import type { BusinessProfile } from "@/types/business-profile"
 
 interface SwotData {
   strengths: string[]
@@ -58,6 +61,10 @@ export default function ProfilePage() {
   const [generatingOverview, setGeneratingOverview] = useState(false)
   const [generatingSwot, setGeneratingSwot] = useState(false)
   const [loadingPlaces, setLoadingPlaces] = useState(false)
+  const [analyzingDeep, setAnalyzingDeep] = useState(false)
+  const [deepProfile, setDeepProfile] = useState<BusinessProfile | null>(null)
+  const [showDeepConfirm, setShowDeepConfirm] = useState(false)
+  const [savingDeepProfile, setSavingDeepProfile] = useState(false)
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
@@ -140,6 +147,58 @@ export default function ProfilePage() {
     }
   }
 
+  async function analyzeDeep() {
+    setAnalyzingDeep(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: company } = await supabase
+        .from('companies')
+        .select('name, website, description')
+        .eq('id', user.id)
+        .single()
+
+      const res = await fetch('/api/analyze-business-deep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: company?.name || '',
+          website: company?.website || '',
+          shortDescription: company?.description || '',
+        }),
+      })
+      const data = await res.json()
+      if (data.success && data.profile) {
+        setDeepProfile(data.profile)
+        setShowDeepConfirm(true)
+      } else {
+        toast({ title: "שגיאה", description: data.error || "לא הצלחנו לנתח את העסק", variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
+    } finally {
+      setAnalyzingDeep(false)
+    }
+  }
+
+  async function handleConfirmDeepProfile(confirmed: BusinessProfile) {
+    setSavingDeepProfile(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      await supabase
+        .from('companies')
+        .update({ business_profile: confirmed })
+        .eq('id', user.id)
+      setShowDeepConfirm(false)
+      toast({ title: "פרופיל עסקי עודכן", description: "המידע ישמש לשיפור כל הניתוחים" })
+    } catch {
+      toast({ title: "שגיאה בשמירה", variant: "destructive" })
+    } finally {
+      setSavingDeepProfile(false)
+    }
+  }
+
   // Map URL uses business name + city from Supabase profile
   const mapQuery = encodeURIComponent(`${companyName} ${companyCity}`.trim())
 
@@ -161,10 +220,37 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6">
+      {/* Deep profile confirmation overlay */}
+      {showDeepConfirm && deepProfile && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-xl my-8">
+            <BusinessProfileConfirmation
+              profile={deepProfile}
+              onConfirm={handleConfirmDeepProfile}
+              onRetry={() => setShowDeepConfirm(false)}
+              isConfirming={savingDeepProfile}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
-        <p className="text-muted-foreground">סקירה ונוכחות גיאוגרפית של העסק</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
+          <p className="text-muted-foreground">סקירה ונוכחות גיאוגרפית של העסק</p>
+        </div>
+        <Button
+          onClick={analyzeDeep}
+          disabled={analyzingDeep}
+          variant="outline"
+          className="shrink-0 gap-2"
+        >
+          {analyzingDeep
+            ? <><Loader2 className="h-4 w-4 animate-spin" />מנתח...</>
+            : <><Search className="h-4 w-4" />נתח מחדש עם AI</>
+          }
+        </Button>
       </div>
 
       {/* Section 1: Business Overview */}

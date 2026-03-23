@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { scrapeWebsite } from './scrape'
+import type { BusinessProfile } from '@/types/business-profile'
 
 function parseDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
@@ -106,5 +107,20 @@ ${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
 השתמש אך ורק בנתונים ו-URLs שמופיעים בתוצאות החיפוש שסופקו.
 `
 
-  return { company, competitors, user, supabase, context, companyDomain, companyProfile, geoContext }
+  const businessProfile = (company?.business_profile ?? null) as BusinessProfile | null
+
+  const enrichedContext = businessProfile ? `
+פרופיל עסקי מפורט:
+- פעילות עיקרית: ${businessProfile.coreActivity}
+- מודל עסקי: ${businessProfile.businessModel}
+- מוצרים: ${businessProfile.products.map(p => p.name).join(', ')}
+- קהלי יעד: ${businessProfile.targetAudiences.join(', ')}
+- יתרון תחרותי: ${businessProfile.competitiveAdvantage}
+- תגיות תעשייה: ${businessProfile.industryTags.join(', ')}
+- מילות חיפוש עיקריות: ${businessProfile.primaryKeywords.join(', ')}
+- שאילתות מוכנות: ${businessProfile.searchQueries.join(' | ')}
+
+${context}` : context
+
+  return { company, competitors, user, supabase, context: enrichedContext, companyDomain, companyProfile, geoContext }
 }
