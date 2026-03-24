@@ -13,6 +13,20 @@ function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
 
+function isOwnResult(r: any, companyName: string, companyDomain: string): boolean {
+  const name = companyName.toLowerCase().trim()
+  const domain = companyDomain.toLowerCase().trim()
+  const resultTitle = (r.title || r.name || '').toLowerCase().trim()
+  const resultDomain = extractDomain(r.url || '').toLowerCase().trim()
+  const resultUrl = (r.url || '').toLowerCase().trim()
+  const nameSlug = name.replace(/\s+/g, '')
+  return (
+    (domain.length >= 3 && (resultDomain.includes(domain) || resultUrl.includes(domain))) ||
+    (name.length >= 3 && resultTitle.includes(name)) ||
+    (nameSlug.length >= 3 && resultDomain.includes(nameSlug))
+  )
+}
+
 function isLocalBusiness(overview: string, city: string, geoArea: string[]): boolean {
   if (!geoArea || geoArea.length === 0) return false
   if (geoArea.includes('כל הארץ') || geoArea.length > 2) return false
@@ -80,9 +94,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
   const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
   results.forEach((r: any) => {
+    r.isOwn = isOwnResult(r, companyName, companyDomain)
     const rDomain = extractDomain(r.url || '')
-    r.isOwn = companyDomain ? rDomain === companyDomain || rDomain.includes(companyDomain) : false
-    r.isKnownCompetitor = competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
+    r.isKnownCompetitor = !r.isOwn && competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
   })
 
   const ownResult = results.find(r => r.isOwn)

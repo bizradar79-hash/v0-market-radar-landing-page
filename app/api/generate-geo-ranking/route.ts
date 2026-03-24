@@ -7,6 +7,24 @@ import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
+function extractDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+}
+
+function isOwnResult(r: any, companyName: string, companyDomain: string): boolean {
+  const name = companyName.toLowerCase().trim()
+  const domain = companyDomain.toLowerCase().trim()
+  const resultTitle = (r.title || r.name || '').toLowerCase().trim()
+  const resultDomain = extractDomain(r.url || '').toLowerCase().trim()
+  const resultUrl = (r.url || '').toLowerCase().trim()
+  const nameSlug = name.replace(/\s+/g, '')
+  return (
+    (domain.length >= 3 && (resultDomain.includes(domain) || resultUrl.includes(domain))) ||
+    (name.length >= 3 && resultTitle.includes(name)) ||
+    (nameSlug.length >= 3 && resultDomain.includes(nameSlug))
+  )
+}
+
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 const ENGINES = ['general', 'chatgpt', 'gemini', 'grok', 'perplexity'] as const
@@ -97,10 +115,10 @@ async function runGeoQuestion(
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
   const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
-  const companyNameLower = companyName.toLowerCase()
+  const companyDomainForGeo = extractDomain(website)
   results.forEach((r: any) => {
+    r.isOwn = isOwnResult(r, companyName, companyDomainForGeo)
     const rName = (r.name || '').toLowerCase()
-    r.isOwn = companyNameLower.length >= 3 && (rName.includes(companyNameLower) || companyNameLower.includes(rName))
     r.isKnownCompetitor = !r.isOwn && competitorNames.some(n => {
       const nLower = n.toLowerCase()
       return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
