@@ -60,6 +60,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Force no-cache on all API routes
+  if (pathname.startsWith('/api/')) {
+    supabaseResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    supabaseResponse.headers.set('Pragma', 'no-cache')
+    supabaseResponse.headers.set('Expires', '0')
+    supabaseResponse.headers.set('Surrogate-Control', 'no-store')
+    supabaseResponse.headers.set('x-vercel-cache', 'MISS')
+  }
+
   return supabaseResponse
 }
 
