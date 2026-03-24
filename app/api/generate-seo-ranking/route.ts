@@ -84,12 +84,15 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   })
 
   const ownResult = results.find(r => r.isOwn)
+  // Fix 7: only "appeared" when the result is actually in the list AND has a valid position
+  const appeared = !!ownResult && ownResult.position != null
+  const position = appeared ? (ownResult!.position ?? null) : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
 
   return {
-    position: ownResult?.position ?? null,
+    position,
     topResults,
-    appeared: !!ownResult,
+    appeared,
     results,
   }
 }

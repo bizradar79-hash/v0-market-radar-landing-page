@@ -127,6 +127,13 @@ interface GEORanking {
   query: string
   results: RankingResult[]
   queryVariants?: QueryVariant[]
+  engines?: {
+    general?: EngineResults
+    chatgpt?: EngineResults
+    gemini?: EngineResults
+    grok?: EngineResults
+    perplexity?: EngineResults
+  }
   userMentioned: boolean
   userPosition: number | null
   recommendations: string[]
@@ -136,16 +143,32 @@ interface GEORanking {
   fetchedAt: string
 }
 
+interface ReviewSource {
+  name: string
+  rating?: number | null
+  review_count?: number | null
+  url?: string | null
+}
+
 interface ReviewsAnalysis {
   overallSentiment: 'חיובי' | 'מעורב' | 'שלילי'
   totalReviewsFound: number
   averageRating?: number | null
+  weighted_average?: number | null
+  sentiment_score?: number | null
   positiveThemes: string[]
   negativeThemes: string[]
   recurringComplaints: string[]
   opportunities: string[]
   summary: string
-  sources: string[]
+  sources: ReviewSource[] | string[]
+}
+
+interface EngineResults {
+  results: RankingResult[]
+  appeared: boolean
+  position: number | null
+  topResults: string[]
 }
 
 type ModalTab = 'details' | 'ai' | 'reviews'
@@ -194,6 +217,9 @@ export default function CompetitorsPage() {
   const [expandedSeoRow, setExpandedSeoRow] = useState<number | null>(null)
   const [expandedGeoRow, setExpandedGeoRow] = useState<number | null>(null)
 
+  // GEO engine tab
+  const [selectedGeoEngine, setSelectedGeoEngine] = useState<'general' | 'chatgpt' | 'gemini' | 'grok' | 'perplexity'>('general')
+
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -217,7 +243,18 @@ export default function CompetitorsPage() {
       .order("source", { ascending: true })   // manual first
       .order("threat_score", { ascending: false })
 
-    if (!error && data) setCompetitors(data)
+    if (!error && data) {
+      // Trim to max 10 — delete excess auto competitors from DB
+      if (data.length > 10) {
+        const excess = data.slice(10).filter(c => c.source !== 'manual')
+        if (excess.length > 0) {
+          await supabase.from('competitors').delete().in('id', excess.map(c => c.id))
+        }
+        setCompetitors(data.slice(0, 10))
+      } else {
+        setCompetitors(data)
+      }
+    }
     setLoading(false)
   }
 
@@ -747,7 +784,7 @@ export default function CompetitorsPage() {
                             <tr
                               key={`seo-row-${i}`}
                               onClick={() => setExpandedSeoRow(expandedSeoRow === i ? null : i)}
-                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared ? 'bg-green-50/50' : 'bg-red-50/30'}`}
+                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared && v.position != null ? 'bg-green-50/50' : 'bg-red-50/30'}`}
                             >
                               <td className="py-2.5 px-3">
                                 <span
@@ -758,7 +795,7 @@ export default function CompetitorsPage() {
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 text-center">
-                                {v.appeared ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
+                                {v.appeared && v.position != null ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
                               </td>
                               <td className="py-2.5 px-3">
                                 {v.position != null
@@ -906,12 +943,65 @@ export default function CompetitorsPage() {
               {geoRanking.what_business_does && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Bot className="h-3 w-3 shrink-0" />AI הבין: {geoRanking.what_business_does}</p>
               )}
-              {geoRanking.queryVariants && geoRanking.queryVariants.length > 0 ? (
+              {geoRanking.engines ? (
+                /* New engine-tab display */
+                <>
+                  {/* Engine tabs */}
+                  <div className="flex gap-0 border-b border-border overflow-x-auto">
+                    {([
+                      { id: 'general', label: 'כללי' },
+                      { id: 'chatgpt', label: 'ChatGPT' },
+                      { id: 'gemini', label: 'Gemini' },
+                      { id: 'grok', label: 'Grok' },
+                      { id: 'perplexity', label: 'Perplexity' },
+                    ] as const).map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setSelectedGeoEngine(tab.id)}
+                        className={`shrink-0 px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px ${
+                          selectedGeoEngine === tab.id
+                            ? 'border-primary text-primary'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Selected engine results */}
+                  {(() => {
+                    const eng = geoRanking.engines![selectedGeoEngine]
+                    if (!eng) return <p className="text-sm text-muted-foreground py-4 text-center">אין נתונים למנוע זה — לחץ רענן</p>
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          {eng.appeared && eng.position != null
+                            ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />נמצאת במיקום #{eng.position}</Badge>
+                            : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />לא נמצאת בטופ 10</Badge>
+                          }
+                        </div>
+                        <div className="space-y-0.5">
+                          {eng.results.length > 0 ? eng.results.map((r, ri) => (
+                            <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${r.isOwn ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                              <span className={`font-mono font-bold w-6 shrink-0 text-right ${r.isOwn ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                              <span className={`flex-1 font-medium ${r.isOwn ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                              {r.isOwn && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                              {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
+                            </div>
+                          )) : (
+                            <p className="text-xs text-muted-foreground">רענן לצפייה בתוצאות</p>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </>
+              ) : geoRanking.queryVariants && geoRanking.queryVariants.length > 0 ? (
                 <>
                   {/* Summary */}
                   <div className="flex items-center gap-2">
                     {(() => {
-                      const appeared = geoRanking.queryVariants!.filter(v => v.appeared).length
+                      const appeared = geoRanking.queryVariants!.filter(v => v.appeared && v.position != null).length
                       const total = geoRanking.queryVariants!.length
                       return appeared > 0
                         ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />נמצאת ב-{appeared} מתוך {total} שאלות AI</Badge>
@@ -941,7 +1031,7 @@ export default function CompetitorsPage() {
                             <tr
                               key={`geo-row-${i}`}
                               onClick={() => setExpandedGeoRow(expandedGeoRow === i ? null : i)}
-                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared ? 'bg-green-50/50' : 'bg-red-50/30'}`}
+                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared && v.position != null ? 'bg-green-50/50' : 'bg-red-50/30'}`}
                             >
                               <td className="py-2.5 px-3">
                                 <span
@@ -952,7 +1042,7 @@ export default function CompetitorsPage() {
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 text-center">
-                                {v.appeared ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
+                                {v.appeared && v.position != null ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
                               </td>
                               <td className="py-2.5 px-3">
                                 {v.position != null
@@ -1017,7 +1107,7 @@ export default function CompetitorsPage() {
                 /* Fallback: original single-question display */
                 <>
                   <div className="flex items-center gap-2">
-                    {geoRanking.userMentioned
+                    {geoRanking.userMentioned && geoRanking.userPosition != null
                       ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />העסק שלי מוזכר במיקום #{geoRanking.userPosition}</Badge>
                       : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />העסק שלי לא מוזכר</Badge>
                     }
@@ -1282,10 +1372,43 @@ export default function CompetitorsPage() {
                             <div className="flex items-center gap-3 flex-wrap">
                               <Badge variant="outline" className={sentimentColor}>{rv.overallSentiment}</Badge>
                               {rv.totalReviewsFound > 0 && <span className="text-sm text-muted-foreground">{rv.totalReviewsFound} ביקורות נמצאו</span>}
-                              {rv.averageRating != null && <span className="text-sm font-medium">⭐ {rv.averageRating.toFixed(1)}</span>}
-                              {rv.sources.length > 0 && <span className="text-xs text-muted-foreground">מקורות: {rv.sources.join(', ')}</span>}
                             </div>
                             {rv.summary && <p className="text-sm text-muted-foreground rounded-lg bg-muted/40 border px-3 py-2">{rv.summary}</p>}
+                            {/* Per-source breakdown */}
+                            {rv.sources.length > 0 && (
+                              <div className="rounded-lg border border-border overflow-hidden">
+                                <div className="bg-muted/40 px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
+                                  פירוט לפי מקור
+                                </div>
+                                <div className="divide-y divide-border">
+                                  {rv.sources.map((s: any, si: number) => {
+                                    const isObj = typeof s === 'object' && s !== null
+                                    const srcName = isObj ? s.name : s
+                                    const srcRating = isObj ? s.rating : null
+                                    const srcCount = isObj ? s.review_count : null
+                                    const srcUrl = isObj ? s.url : null
+                                    return (
+                                      <div key={si} className="flex items-center gap-3 px-3 py-2 text-sm">
+                                        <span className="flex-1 font-medium">{srcName}</span>
+                                        {srcRating != null && <span className="text-yellow-600 font-medium">⭐ {Number(srcRating).toFixed(1)}</span>}
+                                        {srcCount != null && <span className="text-muted-foreground text-xs">({Number(srcCount).toLocaleString()} ביקורות)</span>}
+                                        {srcUrl && (
+                                          <a href={srcUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                {(rv.weighted_average != null || rv.sentiment_score != null) && (
+                                  <div className="bg-muted/20 px-3 py-2 border-t border-border flex items-center gap-4 text-xs text-muted-foreground">
+                                    {rv.weighted_average != null && <span>ממוצע משוקלל: <strong className="text-foreground">⭐ {Number(rv.weighted_average).toFixed(1)}</strong></span>}
+                                    {rv.sentiment_score != null && <span>ציון סנטימנט AI: <strong className="text-foreground">{Number(rv.sentiment_score).toFixed(1)}/10</strong> <span title="ציון משוקלל המשקף עומק ועקביות הביקורות">ℹ️</span></span>}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             {/* Strengths / Weaknesses */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">

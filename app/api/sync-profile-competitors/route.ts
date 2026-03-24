@@ -10,16 +10,18 @@ const MAX_COMPETITORS = 10
 async function enrichCompetitor(name: string, contextHint: string): Promise<{
   services: string
   website: string | null
+  google_rating: number | null
+  google_review_count: number | null
   threat_score: number
   positioning: string
   trend: string
 } | null> {
   try {
     const prompt = `חפש מידע על החברה "${name}"${contextHint ? ` (${contextHint})` : ''}.
-מצא: תיאור שירותים/מוצרים, אתר אינטרנט, מיצוב בשוק.
+מצא: תיאור שירותים/מוצרים, אתר אינטרנט, דירוג Google Maps, מספר ביקורות בגוגל בלבד, מיצוב בשוק.
 החזר JSON בלבד:
-{"services": "", "website": "https://...", "threat_score": 60-100, "positioning": "מוביל שוק/מתחרה ישיר/שחקן חדש", "trend": "growing/stable/declining"}
-אם אין אתר ידוע, השאר website כ-null.
+{"services": "", "website": "https://...", "google_rating": 0.0, "google_review_count": 0, "threat_score": 60-100, "positioning": "מוביל שוק/מתחרה ישיר/שחקן חדש", "trend": "growing/stable/declining"}
+אם אין אתר ידוע, השאר website כ-null. אם אין דירוג גוגל, השאר google_rating כ-0.
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
     const res = await fetch('https://api.x.ai/v1/responses', {
@@ -54,10 +56,27 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       ? Math.max(60, Math.min(100, parsed.threat_score))
       : 60
 
+    const googleRating = typeof parsed.google_rating === 'number' && parsed.google_rating > 0 ? parsed.google_rating : null
+    const googleReviewCount = typeof parsed.google_review_count === 'number' && parsed.google_review_count > 0 ? parsed.google_review_count : null
+
+    // Apply Google rating bonus to threat score (same formula as find-competitors)
+    let finalThreat = threat
+    if (googleRating != null) {
+      if (googleRating >= 4.5) finalThreat = Math.min(100, finalThreat + 20)
+      else if (googleRating >= 4.0) finalThreat = Math.min(100, finalThreat + 15)
+      else if (googleRating >= 3.5) finalThreat = Math.min(100, finalThreat + 10)
+    }
+    if (googleReviewCount != null) {
+      if (googleReviewCount > 500) finalThreat = Math.min(100, finalThreat + 10)
+      else if (googleReviewCount >= 100) finalThreat = Math.min(100, finalThreat + 5)
+    }
+
     return {
       services: typeof parsed.services === 'string' && parsed.services.length > 2 ? parsed.services : '',
       website: typeof parsed.website === 'string' && parsed.website.startsWith('http') ? parsed.website : null,
-      threat_score: threat,
+      google_rating: googleRating,
+      google_review_count: googleReviewCount,
+      threat_score: finalThreat,
       positioning: typeof parsed.positioning === 'string' ? parsed.positioning : 'מתחרה ישיר',
       trend: ['growing', 'stable', 'declining'].includes(parsed.trend) ? parsed.trend : 'stable',
     }
@@ -129,6 +148,8 @@ export async function POST() {
           }
           if (enriched.services) update.services = enriched.services
           if (enriched.website) update.website = enriched.website
+          if (enriched.google_rating != null) update.google_rating = enriched.google_rating
+          if (enriched.google_review_count != null) update.google_review_count = enriched.google_review_count
           await supabase.from('competitors').update(update).eq('id', comp.id)
         } catch { /* keep placeholder data */ }
       })

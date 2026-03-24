@@ -7,17 +7,31 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+const ENGINES = ['general', 'chatgpt', 'gemini', 'grok', 'perplexity'] as const
+type Engine = typeof ENGINES[number]
+
+const ENGINE_PERSONA: Record<Engine, string> = {
+  general: 'ענה על השאלה מתוך הידע הכללי שלך',
+  chatgpt: 'ענה על השאלה כפי ש-ChatGPT (OpenAI GPT-4) היה עונה על בסיס מאגר הידע שלו',
+  gemini: 'ענה על השאלה כפי ש-Google Gemini היה עונה, לפי מה שאתה יודע על הידע שלו',
+  grok: 'ענה על השאלה מהידע הייחודי שלך כ-Grok של xAI, עם גישה לנתונים עדכניים',
+  perplexity: 'ענה על השאלה כפי ש-Perplexity AI היה עונה, עם דגש על מידע עדכני מהאינטרנט',
+}
+
 async function runGeoQuestion(
   question: string,
   companyName: string,
   website: string,
   competitorNames: string[],
+  engine: Engine = 'general',
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
   const competitorListText = competitorNames.length > 0
     ? `\nמתחרים ידועים:\n${competitorNames.join(', ')}`
     : ''
 
-  const prompt = `ענה על השאלה הבאה מתוך הידע שלך בלבד, ללא חיפוש אינטרנט:
+  const persona = ENGINE_PERSONA[engine]
+
+  const prompt = `${persona}.
 
 "${question}"
 
@@ -69,11 +83,13 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     })
   })
 
-  const userMentioned = parsed.userMentioned === true || results.some(r => r.isOwn)
-  const userPosition = parsed.userPosition ?? (results.find(r => r.isOwn)?.position ?? null)
+  // Fix 7: only "appeared" when actually found in the results list with a valid position
+  const ownResult = results.find(r => r.isOwn)
+  const appeared = !!ownResult && ownResult.position != null
+  const userPosition = appeared ? (ownResult!.position ?? null) : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
 
-  return { position: userPosition, topResults, appeared: userMentioned, results }
+  return { position: userPosition, topResults, appeared, results }
 }
 
 export async function POST(request: Request) {
@@ -126,38 +142,26 @@ export async function POST(request: Request) {
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
     const primaryQuestion = businessAnalysis?.ai_question || fallbackQuestion
 
-    // Build question variations from business profile
-    const rawQuestions: string[] = businessProfile ? [
-      primaryQuestion,
-      businessProfile.coreActivity ? `מי מספק שירותי ${businessProfile.coreActivity} בישראל?` : '',
-      businessProfile.products[0]?.name ? `מי מייצר ${businessProfile.products[0].name} בישראל?` : '',
-      ...businessProfile.searchQueries.slice(0, 2),
-    ].filter(Boolean) : [primaryQuestion]
-
-    const questionList = [...new Set(rawQuestions)]
-      .filter(q => q.length >= 15) // remove short strings (brand names, etc.)
-      .slice(0, 5)
-
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // Run all questions in parallel
-    const variantResults = await Promise.all(
-      questionList.map(q => runGeoQuestion(q, companyName, website, competitorNames))
+    // Run all 5 engines in parallel on the primary question
+    const engineResults = await Promise.all(
+      ENGINES.map(engine => runGeoQuestion(primaryQuestion, companyName, website, competitorNames, engine))
     )
 
-    const queryVariants = questionList.map((q, i) => ({
-      query: q,
-      position: variantResults[i].position,
-      topResults: variantResults[i].topResults,
-      appeared: variantResults[i].appeared,
-      results: variantResults[i].results,
-    }))
+    const engines: Record<string, { results: any[]; appeared: boolean; position: number | null; topResults: string[] }> = {}
+    ENGINES.forEach((engine, i) => {
+      engines[engine] = {
+        results: engineResults[i].results,
+        appeared: engineResults[i].appeared,
+        position: engineResults[i].position,
+        topResults: engineResults[i].topResults,
+      }
+    })
 
-    // Primary result uses first question for backward-compat display
-    const primaryVariant = variantResults[0]
-    const userMentioned = primaryVariant.appeared
-    const userPosition = primaryVariant.position
+    // Primary (general) for backward-compat fields
+    const primary = engineResults[0]
 
     // Recommendations via second call
     const contextLine = businessAnalysis?.what_business_does
@@ -185,10 +189,12 @@ export async function POST(request: Request) {
 
     const result = {
       query: primaryQuestion,
-      results: primaryVariant.results,
-      queryVariants,
-      userMentioned,
-      userPosition,
+      // Backward-compat top-level fields
+      results: primary.results,
+      userMentioned: primary.appeared,
+      userPosition: primary.position,
+      // New engine-based structure
+      engines,
       recommendations,
       isLocal,
       scope,
