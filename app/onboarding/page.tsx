@@ -128,6 +128,7 @@ export default function OnboardingPage() {
   // Step 1 - Company Details
   const [companyName, setCompanyName] = useState("")
   const [website, setWebsite] = useState("")
+  const [phone, setPhone] = useState("")
   const [industry, setIndustry] = useState("")
   const [city, setCity] = useState("כל הארץ")
   const [cityCustom, setCityCustom] = useState("")
@@ -348,6 +349,7 @@ export default function OnboardingPage() {
         id: user.id,
         name: companyName,
         website,
+        phone: phone.trim(),
         industry: effectiveIndustry,
         city: effectiveCity,
         size: companySize,
@@ -434,7 +436,7 @@ export default function OnboardingPage() {
 
   const canProceed = () => {
     if (currentStep === 1) {
-      return companyName.trim() !== "" && !!effectiveIndustry
+      return companyName.trim() !== "" && phone.trim() !== ""
     }
     return true
   }
@@ -661,7 +663,20 @@ export default function OnboardingPage() {
                     className="bg-background"
                   />
                 </div>
-                
+
+                <div className="space-y-2">
+                  <Label htmlFor="phone">טלפון *</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    dir="ltr"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="05X-XXXXXXX"
+                    className="bg-background text-left"
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="website">אתר אינטרנט</Label>
                   <Input
@@ -674,31 +689,7 @@ export default function OnboardingPage() {
                     className="bg-background text-left"
                   />
                 </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="industry">תעשייה *</Label>
-                  <Select value={industry} onValueChange={(v) => { setIndustry(v); if (v !== 'אחר') setIndustryCustom("") }}>
-                    <SelectTrigger className="bg-background">
-                      <SelectValue placeholder="בחר תעשייה" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {industries.map((ind) => (
-                        <SelectItem key={ind} value={ind}>
-                          {ind}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {industry === 'אחר' && (
-                    <Input
-                      value={industryCustom}
-                      onChange={(e) => setIndustryCustom(e.target.value)}
-                      placeholder="פרט את תחום העסק..."
-                      className="bg-background mt-2"
-                    />
-                  )}
-                </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="city">עיר</Label>
                   <Select value={city} onValueChange={(v) => { setCity(v); if (v !== 'אחר') setCityCustom("") }}>
@@ -772,16 +763,6 @@ export default function OnboardingPage() {
                   </Select>
                 </div>
                 
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="description">תיאור מוצרים/שירותים</Label>
-                  <Textarea
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="תאר את המוצרים או השירותים שהחברה מציעה..."
-                    className="min-h-[100px] bg-background"
-                  />
-                </div>
               </div>
             </div>
           )}

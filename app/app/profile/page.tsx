@@ -142,7 +142,13 @@ export default function ProfilePage() {
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
+  const [companyPhone, setCompanyPhone] = useState("")
+  const [companyWebsite, setCompanyWebsite] = useState("")
+  const [companyIndustry, setCompanyIndustry] = useState("")
+  const [companyDescription, setCompanyDescription] = useState("")
   const [overview, setOverview] = useState<string>("")
+  const [savingCompany, setSavingCompany] = useState(false)
+  const [editingCompany, setEditingCompany] = useState(false)
   const [swot, setSwot] = useState<SwotData | null>(null)
   const [places, setPlaces] = useState<PlacesData | null>(null)
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null)
@@ -174,13 +180,17 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('companies')
-      .select('name, city, swot, business_overview, geo_data, business_profile')
+      .select('name, city, phone, website, industry, description, swot, business_overview, geo_data, business_profile')
       .eq('id', user.id)
       .single()
 
     if (data) {
       setCompanyName(data.name || '')
       setCompanyCity(data.city || '')
+      setCompanyPhone(data.phone || '')
+      setCompanyWebsite(data.website || '')
+      setCompanyIndustry(data.industry || '')
+      setCompanyDescription(data.description || '')
       if (data.business_overview) setOverview(data.business_overview)
       if (data.swot && Object.keys(data.swot).length > 0) setSwot(data.swot as SwotData)
       if (data.geo_data && typeof data.geo_data === 'object' && Object.keys(data.geo_data).length > 0) {
@@ -189,6 +199,29 @@ export default function ProfilePage() {
       if (data.business_profile) setBusinessProfile(data.business_profile as BusinessProfile)
     }
     setLoading(false)
+  }
+
+  async function saveCompanyDetails() {
+    setSavingCompany(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { error } = await supabase.from('companies').update({
+        name: companyName.trim(),
+        city: companyCity.trim(),
+        phone: companyPhone.trim(),
+        website: companyWebsite.trim(),
+        industry: companyIndustry.trim(),
+        description: companyDescription.trim(),
+      }).eq('id', user.id)
+      if (error) throw error
+      setEditingCompany(false)
+      toast({ title: "פרטי החברה עודכנו" })
+    } catch {
+      toast({ title: "שגיאה בשמירה", variant: "destructive" })
+    } finally {
+      setSavingCompany(false)
+    }
   }
 
   async function patchProfile(partial: Partial<BusinessProfile>) {
@@ -336,6 +369,77 @@ export default function ProfilePage() {
         <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
         <p className="text-muted-foreground">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* COMPANY DETAILS CARD                                                */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Building2 className="h-4 w-4 text-primary" />פרטי החברה
+            </CardTitle>
+            {!editingCompany && (
+              <Button variant="ghost" size="sm" onClick={() => setEditingCompany(true)} className="h-7 gap-1 text-xs">
+                <Pencil className="h-3 w-3" />ערוך
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {editingCompany ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">שם חברה</label>
+                  <Input value={companyName} onChange={e => setCompanyName(e.target.value)} className="h-8 text-sm bg-background" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">טלפון</label>
+                  <Input dir="ltr" value={companyPhone} onChange={e => setCompanyPhone(e.target.value)} placeholder="05X-XXXXXXX" className="h-8 text-sm bg-background text-left" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">עיר</label>
+                  <Input value={companyCity} onChange={e => setCompanyCity(e.target.value)} className="h-8 text-sm bg-background" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">אתר אינטרנט</label>
+                  <Input dir="ltr" value={companyWebsite} onChange={e => setCompanyWebsite(e.target.value)} placeholder="https://" className="h-8 text-sm bg-background text-left" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">תעשייה</label>
+                  <Input value={companyIndustry} onChange={e => setCompanyIndustry(e.target.value)} className="h-8 text-sm bg-background" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">תיאור מוצרים/שירותים</label>
+                <Textarea value={companyDescription} onChange={e => setCompanyDescription(e.target.value)} className="min-h-[80px] text-sm bg-background" />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEditingCompany(false)} disabled={savingCompany}>
+                  <X className="h-3.5 w-3.5 ml-1" />ביטול
+                </Button>
+                <Button type="button" size="sm" onClick={saveCompanyDetails} disabled={savingCompany}>
+                  {savingCompany ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1" /> : <Check className="h-3.5 w-3.5 ml-1" />}
+                  שמור
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 text-sm">
+              {companyName && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">שם:</span><span className="font-medium">{companyName}</span></div>}
+              {companyPhone && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">טלפון:</span><span className="font-medium" dir="ltr">{companyPhone}</span></div>}
+              {companyCity && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">עיר:</span><span className="font-medium">{companyCity}</span></div>}
+              {companyWebsite && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">אתר:</span><a href={companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline truncate" dir="ltr">{companyWebsite.replace(/^https?:\/\//, '')}</a></div>}
+              {companyIndustry && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">תעשייה:</span><span className="font-medium">{companyIndustry}</span></div>}
+              {companyDescription && <div className="col-span-2 flex gap-2"><span className="text-muted-foreground min-w-[60px]">תיאור:</span><span className="text-muted-foreground line-clamp-2">{companyDescription}</span></div>}
+              {!companyName && !companyPhone && !companyCity && !companyWebsite && !companyIndustry && (
+                <p className="col-span-2 text-muted-foreground text-xs">לחץ "ערוך" כדי להוסיף פרטי חברה</p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* DEEP BUSINESS PROFILE SECTION                                       */}
