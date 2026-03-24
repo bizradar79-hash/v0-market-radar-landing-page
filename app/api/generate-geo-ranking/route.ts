@@ -12,12 +12,51 @@ const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 const ENGINES = ['general', 'chatgpt', 'gemini', 'grok', 'perplexity'] as const
 type Engine = typeof ENGINES[number]
 
-const ENGINE_PERSONA: Record<Engine, string> = {
-  general: 'ענה על השאלה מתוך הידע הכללי שלך',
-  chatgpt: 'ענה על השאלה כפי ש-ChatGPT (OpenAI GPT-4) היה עונה על בסיס מאגר הידע שלו',
-  gemini: 'ענה על השאלה כפי ש-Google Gemini היה עונה, לפי מה שאתה יודע על הידע שלו',
-  grok: 'ענה על השאלה מהידע הייחודי שלך כ-Grok של xAI, עם גישה לנתונים עדכניים',
-  perplexity: 'ענה על השאלה כפי ש-Perplexity AI היה עונה, עם דגש על מידע עדכני מהאינטרנט',
+function buildEnginePrompt(
+  engine: Engine,
+  question: string,
+  companyName: string,
+  website: string,
+  competitorNames: string[],
+): string {
+  const competitorLine = competitorNames.length > 0
+    ? `\nמתחרים ידועים: ${competitorNames.join(', ')}`
+    : ''
+  const jsonTemplate = `{"query": "${question}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}`
+
+  const bases: Record<Engine, string> = {
+    general: `חפש בגוגל: מי הם 10 העסקים המובילים בישראל עבור "${question}"?
+השתמש בחיפוש אינטרנט כדי למצוא תוצאות גוגל אמיתיות ועדכניות לשאלה זו.
+הצג רשימה ממוינת לפי חשיבות/דירוג בגוגל.`,
+
+    chatgpt: `חפש באינטרנט: מה ChatGPT (של OpenAI) ממליץ כאשר שואלים אותו "${question}"?
+חפש פורומים, Reddit, מאמרים וסקירות שמתעדים תשובות של ChatGPT לשאלה זו.
+גלה אילו עסקים ישראליים ChatGPT מציין בתשובותיו.`,
+
+    gemini: `חפש באינטרנט: מה Google Gemini ממליץ כאשר שואלים אותו "${question}"?
+חפש פורומים, Reddit, מאמרים וסקירות שמתעדים תשובות של Gemini לשאלה זו.
+גלה אילו עסקים ישראליים Gemini מציין בתשובותיו.`,
+
+    grok: `חפש בזמן אמת: "${question}" בישראל.
+השתמש בחיפוש האינטרנט החי שלך כדי למצוא את העסקים הרלוונטיים ביותר כיום.
+העדף מקורות עדכניים וידיעות אחרונות.`,
+
+    perplexity: `חפש באינטרנט: מה Perplexity AI מצטט ומפנה אליו כאשר שואלים אותו "${question}"?
+חפש מקורות, פורומים ו-Reddit המתעדים תשובות של Perplexity לשאלה זו.
+גלה אילו עסקים ישראליים Perplexity מציין ומקשר אליהם.`,
+  }
+
+  return `${bases[engine]}
+${competitorLine}
+
+ציין האם ${companyName} (אתר: ${website}) מוזכר ברשימה. (userMentioned: true/false, userPosition: מספר או null)
+
+תן רשימה של עד 10 עסקים לפי סדר חשיבותם.
+
+החזר JSON בלבד:
+${jsonTemplate}
+
+CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 }
 
 async function runGeoQuestion(
@@ -27,31 +66,14 @@ async function runGeoQuestion(
   competitorNames: string[],
   engine: Engine = 'general',
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  const competitorListText = competitorNames.length > 0
-    ? `\nמתחרים ידועים:\n${competitorNames.join(', ')}`
-    : ''
-
-  const persona = ENGINE_PERSONA[engine]
-
-  const prompt = `${persona}.
-
-"${question}"
-
-תן רשימה של עד 10 עסקים, לפי סדר חשיבותם.
-${competitorListText}
-
-ציין האם ${companyName} (אתר: ${website}) מוזכר ברשימה. (userMentioned: true/false, userPosition: מספר או null)
-
-החזר JSON בלבד:
-{"query": "${question}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}
-
-CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
+  const prompt = buildEnginePrompt(engine, question, companyName, website, competitorNames)
 
   const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
     body: JSON.stringify({
       model: 'grok-4-fast-non-reasoning',
+      tools: [{ type: 'web_search' }],
       input: [{ role: 'user', content: prompt }],
     }),
   })
@@ -85,7 +107,6 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     })
   })
 
-  // Fix 7: only "appeared" when actually found in the results list with a valid position
   const ownResult = results.find(r => r.isOwn)
   const appeared = !!ownResult && ownResult.position != null
   const userPosition = appeared ? (ownResult!.position ?? null) : null
@@ -147,7 +168,7 @@ export async function POST(request: Request) {
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // Run all 5 engines in parallel on the primary question
+    // Run all 5 engines in parallel, each with its own distinct web_search prompt
     const engineResults = await Promise.all(
       ENGINES.map(engine => runGeoQuestion(primaryQuestion, companyName, website, competitorNames, engine))
     )
@@ -195,7 +216,7 @@ export async function POST(request: Request) {
       results: primary.results,
       userMentioned: primary.appeared,
       userPosition: primary.position,
-      // New engine-based structure
+      // Engine-based structure
       engines,
       recommendations,
       isLocal,
