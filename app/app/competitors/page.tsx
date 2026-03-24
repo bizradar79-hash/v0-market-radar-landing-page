@@ -95,11 +95,21 @@ interface RankingResult {
   isKnownCompetitor?: boolean
 }
 
+interface QueryVariantResult {
+  position: number
+  name: string
+  url?: string
+  title?: string
+  isOwn?: boolean
+  isKnownCompetitor?: boolean
+}
+
 interface QueryVariant {
   query: string
   position: number | null
   topResults: string[]
   appeared: boolean
+  results?: QueryVariantResult[]
 }
 
 interface SEORanking {
@@ -179,6 +189,10 @@ export default function CompetitorsPage() {
   // Show-all toggles for query variant tables
   const [showAllSeo, setShowAllSeo] = useState(false)
   const [showAllGeo, setShowAllGeo] = useState(false)
+
+  // Expanded row indices for SEO/GEO accordion
+  const [expandedSeoRow, setExpandedSeoRow] = useState<number | null>(null)
+  const [expandedGeoRow, setExpandedGeoRow] = useState<number | null>(null)
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -697,36 +711,81 @@ export default function CompetitorsPage() {
                     })()}
                   </div>
                   {/* Variants table */}
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-right">שאילתה</TableHead>
-                          <TableHead className="text-right w-20">נמצאת</TableHead>
-                          <TableHead className="text-right w-20">מיקום</TableHead>
-                          <TableHead className="text-right hidden md:table-cell">מתחרים מובילים</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full table-fixed text-sm">
+                      <colgroup>
+                        <col style={{ width: '50%' }} />
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '20%' }} className="hidden md:table-column" />
+                      </colgroup>
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40">
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">שאילתה</th>
+                          <th className="text-center py-2 px-3 text-xs font-medium text-muted-foreground">נמצאת</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">מיקום</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground hidden md:table-cell">מתחרים מובילים</th>
+                        </tr>
+                      </thead>
+                      <tbody>
                         {(showAllSeo ? seoRanking.queryVariants : seoRanking.queryVariants.slice(0, 6)).map((v, i) => (
-                          <TableRow key={i} className={v.appeared ? "bg-green-50/60" : "bg-red-50/40"}>
-                            <TableCell className="text-sm font-medium">{v.query}</TableCell>
-                            <TableCell className="text-center">
-                              {v.appeared ? <span className="text-green-600 text-base">✅</span> : <span className="text-red-500 text-base">❌</span>}
-                            </TableCell>
-                            <TableCell>
-                              {v.position != null
-                                ? <span className="font-bold text-green-700">#{v.position}</span>
-                                : <span className="text-muted-foreground text-sm">—</span>
-                              }
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                              {v.topResults.slice(0, 3).join(', ') || '—'}
-                            </TableCell>
-                          </TableRow>
+                          <>
+                            <tr
+                              key={`seo-row-${i}`}
+                              onClick={() => setExpandedSeoRow(expandedSeoRow === i ? null : i)}
+                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared ? 'bg-green-50/50' : 'bg-red-50/30'}`}
+                            >
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className="block text-sm font-medium truncate"
+                                  title={v.query}
+                                >
+                                  {v.query}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {v.appeared ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {v.position != null
+                                  ? <span className="font-bold text-green-700">#{v.position}</span>
+                                  : <span className="text-muted-foreground">—</span>
+                                }
+                              </td>
+                              <td className="py-2.5 px-3 hidden md:table-cell text-muted-foreground truncate">
+                                {v.topResults.slice(0, 3).join(', ') || '—'}
+                              </td>
+                            </tr>
+                            {expandedSeoRow === i && (
+                              <tr key={`seo-expand-${i}`} className="bg-muted/20 border-b border-border">
+                                <td colSpan={4} className="px-3 py-3">
+                                  <p className="text-xs font-medium text-muted-foreground mb-2 break-words whitespace-normal">{v.query}</p>
+                                  {v.results && v.results.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {v.results.map((r, ri) => (
+                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${r.isOwn ? 'bg-primary/10 border border-primary/20' : 'bg-background border border-border'}`}>
+                                          <span className={`font-bold w-5 shrink-0 ${r.isOwn ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                          <span className={`flex-1 font-medium truncate ${r.isOwn ? 'text-primary' : ''}`}>{r.name}</span>
+                                          {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0 py-0 h-4">שלי</Badge>}
+                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600 shrink-0 py-0 h-4">מתחרה</Badge>}
+                                          {r.url && (
+                                            <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary shrink-0 hover:underline" title={r.url}>
+                                              <ExternalLink className="h-3 w-3" />
+                                            </a>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </>
                         ))}
-                      </TableBody>
-                    </Table>
+                      </tbody>
+                    </table>
                   </div>
                   {seoRanking.queryVariants.length > 6 && (
                     <button onClick={() => setShowAllSeo(v => !v)} className="text-sm text-primary flex items-center gap-1 hover:underline">
@@ -829,36 +888,76 @@ export default function CompetitorsPage() {
                     })()}
                   </div>
                   {/* Variants table */}
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-right">שאלה</TableHead>
-                          <TableHead className="text-right w-20">נמצאת</TableHead>
-                          <TableHead className="text-right w-20">מיקום</TableHead>
-                          <TableHead className="text-right hidden md:table-cell">מובילים</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <table className="w-full table-fixed text-sm">
+                      <colgroup>
+                        <col style={{ width: '50%' }} />
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '20%' }} className="hidden md:table-column" />
+                      </colgroup>
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40">
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">שאלה</th>
+                          <th className="text-center py-2 px-3 text-xs font-medium text-muted-foreground">נמצאת</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">מיקום</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground hidden md:table-cell">מובילים</th>
+                        </tr>
+                      </thead>
+                      <tbody>
                         {(showAllGeo ? geoRanking.queryVariants : geoRanking.queryVariants.slice(0, 6)).map((v, i) => (
-                          <TableRow key={i} className={v.appeared ? "bg-green-50/60" : "bg-red-50/40"}>
-                            <TableCell className="text-sm font-medium">{v.query}</TableCell>
-                            <TableCell className="text-center">
-                              {v.appeared ? <span className="text-green-600 text-base">✅</span> : <span className="text-red-500 text-base">❌</span>}
-                            </TableCell>
-                            <TableCell>
-                              {v.position != null
-                                ? <span className="font-bold text-green-700">#{v.position}</span>
-                                : <span className="text-muted-foreground text-sm">—</span>
-                              }
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                              {v.topResults.slice(0, 3).join(', ') || '—'}
-                            </TableCell>
-                          </TableRow>
+                          <>
+                            <tr
+                              key={`geo-row-${i}`}
+                              onClick={() => setExpandedGeoRow(expandedGeoRow === i ? null : i)}
+                              className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared ? 'bg-green-50/50' : 'bg-red-50/30'}`}
+                            >
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className="block text-sm font-medium truncate"
+                                  title={v.query}
+                                >
+                                  {v.query}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {v.appeared ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                {v.position != null
+                                  ? <span className="font-bold text-green-700">#{v.position}</span>
+                                  : <span className="text-muted-foreground">—</span>
+                                }
+                              </td>
+                              <td className="py-2.5 px-3 hidden md:table-cell text-muted-foreground truncate">
+                                {v.topResults.slice(0, 3).join(', ') || '—'}
+                              </td>
+                            </tr>
+                            {expandedGeoRow === i && (
+                              <tr key={`geo-expand-${i}`} className="bg-muted/20 border-b border-border">
+                                <td colSpan={4} className="px-3 py-3">
+                                  <p className="text-xs font-medium text-muted-foreground mb-2 break-words whitespace-normal">{v.query}</p>
+                                  {v.results && v.results.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {v.results.map((r, ri) => (
+                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${r.isOwn ? 'bg-primary/10 border border-primary/20' : 'bg-background border border-border'}`}>
+                                          <span className={`font-bold w-5 shrink-0 ${r.isOwn ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                          <span className={`flex-1 font-medium truncate ${r.isOwn ? 'text-primary' : ''}`}>{r.name}</span>
+                                          {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0 py-0 h-4">שלי</Badge>}
+                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600 shrink-0 py-0 h-4">מתחרה</Badge>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </>
                         ))}
-                      </TableBody>
-                    </Table>
+                      </tbody>
+                    </table>
                   </div>
                   {geoRanking.queryVariants.length > 6 && (
                     <button onClick={() => setShowAllGeo(v => !v)} className="text-sm text-primary flex items-center gap-1 hover:underline">

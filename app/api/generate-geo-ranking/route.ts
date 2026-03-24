@@ -134,7 +134,9 @@ export async function POST(request: Request) {
       ...businessProfile.searchQueries.slice(0, 2),
     ].filter(Boolean) : [primaryQuestion]
 
-    const questionList = [...new Set(rawQuestions)].slice(0, 5)
+    const questionList = [...new Set(rawQuestions)]
+      .filter(q => q.length >= 15) // remove short strings (brand names, etc.)
+      .slice(0, 5)
 
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
@@ -149,6 +151,7 @@ export async function POST(request: Request) {
       position: variantResults[i].position,
       topResults: variantResults[i].topResults,
       appeared: variantResults[i].appeared,
+      results: variantResults[i].results,
     }))
 
     // Primary result uses first question for backward-compat display

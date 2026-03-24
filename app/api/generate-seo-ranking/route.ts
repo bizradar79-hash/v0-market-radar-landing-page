@@ -161,6 +161,7 @@ export async function POST(request: Request) {
       position: variantResults[i].position,
       topResults: variantResults[i].topResults,
       appeared: variantResults[i].appeared,
+      results: variantResults[i].results,
     }))
 
     // Primary result uses first query for backward-compat display
