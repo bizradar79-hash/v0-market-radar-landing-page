@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { search } from '@/lib/search'
 
 export async function GET() {

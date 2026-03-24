@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getFullContext } from '@/lib/context'
 import { analyzeWithAI } from '@/lib/ai'
 import { trackSearchUsage } from '@/lib/usage'

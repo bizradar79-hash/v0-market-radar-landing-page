@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import Groq from 'groq-sdk'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextResponse } from 'next/server'

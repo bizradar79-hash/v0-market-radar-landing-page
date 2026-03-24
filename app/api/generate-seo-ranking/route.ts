@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
