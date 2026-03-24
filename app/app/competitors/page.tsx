@@ -198,9 +198,17 @@ export default function CompetitorsPage() {
   const { toast } = useToast()
 
   useEffect(() => {
-    fetchCompetitors()
+    syncProfileCompetitors().then(() => fetchCompetitors())
     fetchRankings()
   }, [])
+
+  async function syncProfileCompetitors() {
+    try {
+      await fetch('/api/sync-profile-competitors', { method: 'POST' })
+    } catch {
+      // non-blocking — don't stop page load on failure
+    }
+  }
 
   async function fetchCompetitors() {
     const { data, error } = await supabase
@@ -757,24 +765,27 @@ export default function CompetitorsPage() {
                               </td>
                             </tr>
                             {expandedSeoRow === i && (
-                              <tr key={`seo-expand-${i}`} className="bg-muted/20 border-b border-border">
+                              <tr key={`seo-expand-${i}`} className="bg-muted/10 border-b border-border">
                                 <td colSpan={4} className="px-3 py-3">
-                                  <p className="text-xs font-medium text-muted-foreground mb-2 break-words whitespace-normal">{v.query}</p>
+                                  <p className="text-xs text-muted-foreground mb-2 break-words whitespace-normal font-medium">{v.query}</p>
                                   {v.results && v.results.length > 0 ? (
-                                    <div className="space-y-1">
+                                    <div className="space-y-0.5">
                                       {v.results.map((r, ri) => (
-                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${r.isOwn ? 'bg-primary/10 border border-primary/20' : 'bg-background border border-border'}`}>
-                                          <span className={`font-bold w-5 shrink-0 ${r.isOwn ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
-                                          <span className={`flex-1 font-medium truncate ${r.isOwn ? 'text-primary' : ''}`}>{r.name}</span>
-                                          {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0 py-0 h-4">שלי</Badge>}
-                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600 shrink-0 py-0 h-4">מתחרה</Badge>}
+                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${r.isOwn ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                                          <span className={`font-mono font-bold w-6 shrink-0 text-right ${r.isOwn ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                          <span className={`flex-1 font-medium ${r.isOwn ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                                          {r.isOwn && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
                                           {r.url && (
-                                            <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary shrink-0 hover:underline" title={r.url}>
+                                            <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0" title={r.url}>
                                               <ExternalLink className="h-3 w-3" />
                                             </a>
                                           )}
                                         </div>
                                       ))}
+                                      {!v.results.some(r => r.isOwn) && (
+                                        <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
@@ -934,19 +945,22 @@ export default function CompetitorsPage() {
                               </td>
                             </tr>
                             {expandedGeoRow === i && (
-                              <tr key={`geo-expand-${i}`} className="bg-muted/20 border-b border-border">
+                              <tr key={`geo-expand-${i}`} className="bg-muted/10 border-b border-border">
                                 <td colSpan={4} className="px-3 py-3">
-                                  <p className="text-xs font-medium text-muted-foreground mb-2 break-words whitespace-normal">{v.query}</p>
+                                  <p className="text-xs text-muted-foreground mb-2 break-words whitespace-normal font-medium">{v.query}</p>
                                   {v.results && v.results.length > 0 ? (
-                                    <div className="space-y-1">
+                                    <div className="space-y-0.5">
                                       {v.results.map((r, ri) => (
-                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${r.isOwn ? 'bg-primary/10 border border-primary/20' : 'bg-background border border-border'}`}>
-                                          <span className={`font-bold w-5 shrink-0 ${r.isOwn ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
-                                          <span className={`flex-1 font-medium truncate ${r.isOwn ? 'text-primary' : ''}`}>{r.name}</span>
-                                          {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary shrink-0 py-0 h-4">שלי</Badge>}
-                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600 shrink-0 py-0 h-4">מתחרה</Badge>}
+                                        <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${r.isOwn ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                                          <span className={`font-mono font-bold w-6 shrink-0 text-right ${r.isOwn ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                          <span className={`flex-1 font-medium ${r.isOwn ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                                          {r.isOwn && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                                          {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
                                         </div>
                                       ))}
+                                      {!v.results.some(r => r.isOwn) && (
+                                        <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
+                                      )}
                                     </div>
                                   ) : (
                                     <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
