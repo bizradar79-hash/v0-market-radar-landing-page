@@ -120,7 +120,7 @@ export default function TrendsPage() {
   async function generateTrends() {
     setGenerating(true)
     try {
-      const res = await fetch("/api/generate-trends", { method: "POST" })
+      const res = await fetch("/api/generate-trends?force=true", { method: "POST" })
       const data = await res.json()
       if (data.success) {
         await fetchTrends()
@@ -141,7 +141,7 @@ export default function TrendsPage() {
       const res = await fetch('/api/generate-keyword-trends', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: kw }),
+        body: JSON.stringify({ keyword: kw, force: true }),
       })
       const data = await res.json()
       if (data.success) {

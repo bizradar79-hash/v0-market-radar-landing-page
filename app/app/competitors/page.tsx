@@ -270,7 +270,7 @@ export default function CompetitorsPage() {
   async function refreshSeo() {
     setLoadingSeo(true)
     try {
-      const res = await fetch('/api/generate-seo-ranking', { method: 'POST' })
+      const res = await fetch('/api/generate-seo-ranking?force=true', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         setSeoRanking(data as SEORanking)
@@ -288,7 +288,7 @@ export default function CompetitorsPage() {
   async function refreshGeo() {
     setLoadingGeo(true)
     try {
-      const res = await fetch('/api/generate-geo-ranking', { method: 'POST' })
+      const res = await fetch('/api/generate-geo-ranking?force=true', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         setGeoRanking(data as GEORanking)
