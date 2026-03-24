@@ -49,6 +49,11 @@ import {
   UserPlus,
   Search,
   Bot,
+  Star,
+  ThumbsUp,
+  ThumbsDown,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -90,9 +95,17 @@ interface RankingResult {
   isKnownCompetitor?: boolean
 }
 
+interface QueryVariant {
+  query: string
+  position: number | null
+  topResults: string[]
+  appeared: boolean
+}
+
 interface SEORanking {
   query: string
   results: RankingResult[]
+  queryVariants?: QueryVariant[]
   recommendations: string[]
   isLocal?: boolean
   scope?: string
@@ -103,6 +116,7 @@ interface SEORanking {
 interface GEORanking {
   query: string
   results: RankingResult[]
+  queryVariants?: QueryVariant[]
   userMentioned: boolean
   userPosition: number | null
   recommendations: string[]
@@ -112,7 +126,19 @@ interface GEORanking {
   fetchedAt: string
 }
 
-type ModalTab = 'details' | 'ai'
+interface ReviewsAnalysis {
+  overallSentiment: 'חיובי' | 'מעורב' | 'שלילי'
+  totalReviewsFound: number
+  averageRating?: number | null
+  positiveThemes: string[]
+  negativeThemes: string[]
+  recurringComplaints: string[]
+  opportunities: string[]
+  summary: string
+  sources: string[]
+}
+
+type ModalTab = 'details' | 'ai' | 'reviews'
 
 export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
@@ -145,6 +171,14 @@ export default function CompetitorsPage() {
   const [geoRanking, setGeoRanking] = useState<GEORanking | null>(null)
   const [loadingSeo, setLoadingSeo] = useState(false)
   const [loadingGeo, setLoadingGeo] = useState(false)
+
+  // Reviews analysis
+  const [reviews, setReviews] = useState<Record<string, ReviewsAnalysis>>({})
+  const [loadingReviews, setLoadingReviews] = useState<Record<string, boolean>>({})
+
+  // Show-all toggles for query variant tables
+  const [showAllSeo, setShowAllSeo] = useState(false)
+  const [showAllGeo, setShowAllGeo] = useState(false)
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -282,6 +316,33 @@ export default function CompetitorsPage() {
     }
   }
 
+  async function fetchReviews(competitor: Competitor) {
+    if (reviews[competitor.id] || loadingReviews[competitor.id]) return
+    // Check sessionStorage cache
+    const cacheKey = `reviews_${competitor.id}`
+    const cached = sessionStorage.getItem(cacheKey)
+    if (cached) {
+      try { setReviews(prev => ({ ...prev, [competitor.id]: JSON.parse(cached) })); return } catch {}
+    }
+    setLoadingReviews(prev => ({ ...prev, [competitor.id]: true }))
+    try {
+      const res = await fetch('/api/analyze-competitor-reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitorName: competitor.name, competitorWebsite: competitor.website }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setReviews(prev => ({ ...prev, [competitor.id]: data }))
+        sessionStorage.setItem(cacheKey, JSON.stringify(data))
+      }
+    } catch (e) {
+      console.error('fetchReviews error:', e)
+    } finally {
+      setLoadingReviews(prev => ({ ...prev, [competitor.id]: false }))
+    }
+  }
+
   async function addManualCompetitor() {
     if (!addName.trim()) return
     setAdding(true)
@@ -414,16 +475,8 @@ export default function CompetitorsPage() {
 
 
   const isManual = (c: Competitor) => c.source === 'manual'
-  const manualCompetitors = competitors.filter(isManual)
-  const autoCompetitors = competitors.filter(c => !isManual(c))
 
-  const CompetitorTable = ({
-    items,
-    showEditAction,
-  }: {
-    items: Competitor[]
-    showEditAction: boolean
-  }) => (
+  const CompetitorTable = ({ items }: { items: Competitor[] }) => (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
@@ -452,6 +505,12 @@ export default function CompetitorsPage() {
                     }
                   </button>
                   <span className="font-medium">{competitor.name}</span>
+                  <Badge
+                    variant="outline"
+                    className={`text-xs px-1.5 py-0 ${isManual(competitor) ? 'border-gray-300 text-gray-500 bg-gray-50' : 'border-teal-300 text-teal-600 bg-teal-50'}`}
+                  >
+                    {isManual(competitor) ? 'ידני' : 'אוטומטי'}
+                  </Badge>
                 </div>
               </TableCell>
               <TableCell className="hidden md:table-cell">
@@ -493,7 +552,7 @@ export default function CompetitorsPage() {
                       <Brain className="ml-2 h-4 w-4" />
                       ניתוח AI
                     </DropdownMenuItem>
-                    {showEditAction && (
+                    {isManual(competitor) && (
                       <DropdownMenuItem onClick={() => openEdit(competitor)}>
                         <Pencil className="ml-2 h-4 w-4" />
                         ערוך
@@ -558,66 +617,35 @@ export default function CompetitorsPage() {
         </div>
       </div>
 
-      {/* Section 1: Manual competitors */}
+      {/* Unified competitors list */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-lg">
-              <UserPlus className="h-5 w-5 text-primary" />
-              מתחרים שהוספת
-              {manualCompetitors.length > 0 && (
-                <Badge variant="secondary">{manualCompetitors.length}</Badge>
+              <Target className="h-5 w-5 text-primary" />
+              כל המתחרים
+              {competitors.length > 0 && (
+                <Badge variant="secondary">{competitors.length}</Badge>
               )}
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
-              <UserPlus className="ml-2 h-3.5 w-3.5" />
-              הוסף ידנית
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {manualCompetitors.length > 0 ? (
-            <CompetitorTable items={manualCompetitors} showEditAction={true} />
-          ) : (
-            <div className="px-6 py-8 text-center text-sm text-muted-foreground">
-              עדיין לא הוספת מתחרים ידנית. מתחרים שתוסיף ידנית לא יימחקו בסריקות אוטומטיות.
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+                <UserPlus className="ml-2 h-3.5 w-3.5" />
+                הוסף ידנית
+              </Button>
+              <Button variant="outline" size="sm" onClick={discoverCompetitors} disabled={discovering}>
+                {discovering ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
+                סרוק
+              </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Section 2: Auto-discovered competitors */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Sparkles className="h-5 w-5 text-primary" />
-              מתחרים שנמצאו אוטומטית
-              {autoCompetitors.length > 0 && (
-                <Badge variant="secondary">{autoCompetitors.length}</Badge>
-              )}
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={discoverCompetitors}
-              disabled={discovering}
-            >
-              {discovering ? (
-                <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="ml-2 h-3.5 w-3.5" />
-              )}
-              רענן
-            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {autoCompetitors.length > 0 ? (
-            <CompetitorTable items={autoCompetitors} showEditAction={false} />
+          {competitors.length > 0 ? (
+            <CompetitorTable items={competitors} />
           ) : (
             <div className="px-6 py-8 text-center text-sm text-muted-foreground">
-              לא נמצאו מתחרים אוטומטית. לחץ "רענן" כדי לסרוק.
+              לא נמצאו מתחרים. לחץ "סרוק" לגילוי אוטומטי או "הוסף ידנית".
             </div>
           )}
         </CardContent>
@@ -653,72 +681,94 @@ export default function CompetitorsPage() {
             </div>
           ) : seoRanking ? (
             <div className="space-y-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Search className="h-3 w-3 shrink-0" />
-                  <span>חיפוש: <span className="font-medium text-foreground">{seoRanking.query}</span></span>
-                </div>
-                {seoRanking.what_business_does && (
-                  <p className="text-xs text-muted-foreground pr-5">AI הבין: {seoRanking.what_business_does}</p>
-                )}
-              </div>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-right w-16">מיקום</TableHead>
-                      <TableHead className="text-right">שם</TableHead>
-                      <TableHead className="text-right hidden md:table-cell">כותרת</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {seoRanking.results.map((r, i) => (
-                      <TableRow key={i} className={r.isOwn ? "bg-primary/5 border-primary/20" : ""}>
-                        <TableCell>
-                          <span className={`font-bold text-lg ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>
-                            #{r.position}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
-                            {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
-                            {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
-                          </div>
-                          {r.url && (
-                            <a href={r.url} target="_blank" rel="noopener noreferrer"
-                              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-0.5 truncate max-w-[200px]">
-                              <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                              {r.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40)}
-                            </a>
-                          )}
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          <span className="text-sm text-muted-foreground">{r.title || '—'}</span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!seoRanking.results.some(r => r.isOwn) && (
+              {seoRanking.what_business_does && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Search className="h-3 w-3 shrink-0" />AI הבין: {seoRanking.what_business_does}</p>
+              )}
+              {seoRanking.queryVariants && seoRanking.queryVariants.length > 0 ? (
+                <>
+                  {/* Summary */}
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const appeared = seoRanking.queryVariants!.filter(v => v.appeared).length
+                      const total = seoRanking.queryVariants!.length
+                      return appeared > 0
+                        ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />נמצאת ב-{appeared} מתוך {total} חיפושים</Badge>
+                        : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />לא נמצאת באף חיפוש ({total} נבדקו)</Badge>
+                    })()}
+                  </div>
+                  {/* Variants table */}
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-right">שאילתה</TableHead>
+                          <TableHead className="text-right w-20">נמצאת</TableHead>
+                          <TableHead className="text-right w-20">מיקום</TableHead>
+                          <TableHead className="text-right hidden md:table-cell">מתחרים מובילים</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(showAllSeo ? seoRanking.queryVariants : seoRanking.queryVariants.slice(0, 6)).map((v, i) => (
+                          <TableRow key={i} className={v.appeared ? "bg-green-50/60" : "bg-red-50/40"}>
+                            <TableCell className="text-sm font-medium">{v.query}</TableCell>
+                            <TableCell className="text-center">
+                              {v.appeared ? <span className="text-green-600 text-base">✅</span> : <span className="text-red-500 text-base">❌</span>}
+                            </TableCell>
+                            <TableCell>
+                              {v.position != null
+                                ? <span className="font-bold text-green-700">#{v.position}</span>
+                                : <span className="text-muted-foreground text-sm">—</span>
+                              }
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                              {v.topResults.slice(0, 3).join(', ') || '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {seoRanking.queryVariants.length > 6 && (
+                    <button onClick={() => setShowAllSeo(v => !v)} className="text-sm text-primary flex items-center gap-1 hover:underline">
+                      {showAllSeo ? <><ChevronUp className="h-3.5 w-3.5" />הצג פחות</> : <><ChevronDown className="h-3.5 w-3.5" />הצג הכל ({seoRanking.queryVariants.length})</>}
+                    </button>
+                  )}
+                </>
+              ) : (
+                /* Fallback: original single-query display */
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={3} className="text-center py-3">
-                          <Badge variant="outline" className="text-muted-foreground">העסק שלי לא מופיע ב-10 הראשונים</Badge>
-                        </TableCell>
+                        <TableHead className="text-right w-16">מיקום</TableHead>
+                        <TableHead className="text-right">שם</TableHead>
+                        <TableHead className="text-right hidden md:table-cell">כותרת</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {seoRanking.results.map((r, i) => (
+                        <TableRow key={i} className={r.isOwn ? "bg-primary/5" : ""}>
+                          <TableCell><span className={`font-bold text-lg ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>#{r.position}</span></TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
+                              {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                              {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell"><span className="text-sm text-muted-foreground">{r.title || '—'}</span></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
               {seoRanking.recommendations.length > 0 && (
                 <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
-                  <h4 className="text-sm font-semibold flex items-center gap-2 text-primary">
-                    <Lightbulb className="h-3.5 w-3.5" />
-                    המלצות לשיפור SEO
-                  </h4>
+                  <h4 className="text-sm font-semibold flex items-center gap-2 text-primary"><Lightbulb className="h-3.5 w-3.5" />המלצות לשיפור SEO</h4>
                   <ul className="space-y-1.5">
                     {seoRanking.recommendations.map((rec, i) => (
-                      <li key={i} className="text-sm flex items-start gap-2">
-                        <span className="font-bold text-primary shrink-0">{i + 1}.</span>{rec}
-                      </li>
+                      <li key={i} className="text-sm flex items-start gap-2"><span className="font-bold text-primary shrink-0">{i + 1}.</span>{rec}</li>
                     ))}
                   </ul>
                 </div>
@@ -763,51 +813,86 @@ export default function CompetitorsPage() {
             </div>
           ) : geoRanking ? (
             <div className="space-y-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Bot className="h-3 w-3 shrink-0" />
-                  <span>שאלה: <span className="font-medium text-foreground">{geoRanking.query}</span></span>
-                </div>
-                {geoRanking.what_business_does && (
-                  <p className="text-xs text-muted-foreground pr-5">AI הבין: {geoRanking.what_business_does}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {geoRanking.userMentioned ? (
-                  <Badge className="bg-green-100 text-green-700 border-green-200">
-                    <CheckCircle2 className="h-3 w-3 ml-1" />
-                    העסק שלי מוזכר במיקום #{geoRanking.userPosition}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    <XCircle className="h-3 w-3 ml-1" />
-                    העסק שלי לא מוזכר
-                  </Badge>
-                )}
-              </div>
-              <div className="space-y-2">
-                {geoRanking.results.map((r, i) => (
-                  <div key={i} className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${r.isOwn ? "border-primary/30 bg-primary/5" : "border-border"}`}>
-                    <span className={`font-bold w-6 text-center ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>
-                      #{r.position}
-                    </span>
-                    <span className={`flex-1 text-sm font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
-                    {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
-                    {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
+              {geoRanking.what_business_does && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Bot className="h-3 w-3 shrink-0" />AI הבין: {geoRanking.what_business_does}</p>
+              )}
+              {geoRanking.queryVariants && geoRanking.queryVariants.length > 0 ? (
+                <>
+                  {/* Summary */}
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const appeared = geoRanking.queryVariants!.filter(v => v.appeared).length
+                      const total = geoRanking.queryVariants!.length
+                      return appeared > 0
+                        ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />נמצאת ב-{appeared} מתוך {total} שאלות AI</Badge>
+                        : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />לא נמצאת בשאלות AI ({total} נבדקו)</Badge>
+                    })()}
                   </div>
-                ))}
-              </div>
+                  {/* Variants table */}
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-right">שאלה</TableHead>
+                          <TableHead className="text-right w-20">נמצאת</TableHead>
+                          <TableHead className="text-right w-20">מיקום</TableHead>
+                          <TableHead className="text-right hidden md:table-cell">מובילים</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(showAllGeo ? geoRanking.queryVariants : geoRanking.queryVariants.slice(0, 6)).map((v, i) => (
+                          <TableRow key={i} className={v.appeared ? "bg-green-50/60" : "bg-red-50/40"}>
+                            <TableCell className="text-sm font-medium">{v.query}</TableCell>
+                            <TableCell className="text-center">
+                              {v.appeared ? <span className="text-green-600 text-base">✅</span> : <span className="text-red-500 text-base">❌</span>}
+                            </TableCell>
+                            <TableCell>
+                              {v.position != null
+                                ? <span className="font-bold text-green-700">#{v.position}</span>
+                                : <span className="text-muted-foreground text-sm">—</span>
+                              }
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                              {v.topResults.slice(0, 3).join(', ') || '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {geoRanking.queryVariants.length > 6 && (
+                    <button onClick={() => setShowAllGeo(v => !v)} className="text-sm text-primary flex items-center gap-1 hover:underline">
+                      {showAllGeo ? <><ChevronUp className="h-3.5 w-3.5" />הצג פחות</> : <><ChevronDown className="h-3.5 w-3.5" />הצג הכל ({geoRanking.queryVariants.length})</>}
+                    </button>
+                  )}
+                </>
+              ) : (
+                /* Fallback: original single-question display */
+                <>
+                  <div className="flex items-center gap-2">
+                    {geoRanking.userMentioned
+                      ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />העסק שלי מוזכר במיקום #{geoRanking.userPosition}</Badge>
+                      : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />העסק שלי לא מוזכר</Badge>
+                    }
+                  </div>
+                  <div className="space-y-2">
+                    {geoRanking.results.map((r, i) => (
+                      <div key={i} className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${r.isOwn ? "border-primary/30 bg-primary/5" : "border-border"}`}>
+                        <span className={`font-bold w-6 text-center ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>#{r.position}</span>
+                        <span className={`flex-1 text-sm font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
+                        {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                        {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
               {geoRanking.recommendations.length > 0 && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-2">
-                  <h4 className="text-sm font-semibold flex items-center gap-2 text-blue-700">
-                    <Lightbulb className="h-3.5 w-3.5" />
-                    המלצות לשיפור נוכחות AI
-                  </h4>
+                  <h4 className="text-sm font-semibold flex items-center gap-2 text-blue-700"><Lightbulb className="h-3.5 w-3.5" />המלצות לשיפור נוכחות AI</h4>
                   <ul className="space-y-1.5">
                     {geoRanking.recommendations.map((rec, i) => (
-                      <li key={i} className="text-sm flex items-start gap-2 text-blue-800">
-                        <span className="font-bold shrink-0">{i + 1}.</span>{rec}
-                      </li>
+                      <li key={i} className="text-sm flex items-start gap-2 text-blue-800"><span className="font-bold shrink-0">{i + 1}.</span>{rec}</li>
                     ))}
                   </ul>
                 </div>
@@ -916,6 +1001,7 @@ export default function CompetitorsPage() {
                   {([
                     { id: 'details' as ModalTab, label: 'פרטים', icon: Eye },
                     { id: 'ai' as ModalTab, label: 'ניתוח AI', icon: Brain },
+                    { id: 'reviews' as ModalTab, label: 'ניתוח ביקורות 🌟', icon: Star },
                   ]).map(tab => {
                     const Icon = tab.icon
                     return (
@@ -925,6 +1011,9 @@ export default function CompetitorsPage() {
                           setActiveTab(tab.id)
                           if (tab.id === 'ai' && !analysis && analyzing !== selectedCompetitor.id) {
                             analyzeCompetitor(selectedCompetitor)
+                          }
+                          if (tab.id === 'reviews') {
+                            fetchReviews(selectedCompetitor)
                           }
                         }}
                         className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -1022,6 +1111,88 @@ export default function CompetitorsPage() {
                         <Trash2 className="ml-2 h-4 w-4" />מחק
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {activeTab === 'reviews' && (
+                  <div>
+                    {loadingReviews[selectedCompetitor.id] ? (
+                      <div className="space-y-4 animate-pulse py-4">
+                        <div className="h-8 rounded bg-muted w-1/3" />
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="h-32 rounded bg-muted" />
+                          <div className="h-32 rounded bg-muted" />
+                        </div>
+                        <div className="h-24 rounded bg-muted" />
+                      </div>
+                    ) : reviews[selectedCompetitor.id] ? (
+                      (() => {
+                        const rv = reviews[selectedCompetitor.id]
+                        const sentimentColor = rv.overallSentiment === 'חיובי' ? 'bg-green-100 text-green-700 border-green-200' : rv.overallSentiment === 'שלילי' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                        return (
+                          <div className="space-y-5">
+                            {/* Header */}
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <Badge variant="outline" className={sentimentColor}>{rv.overallSentiment}</Badge>
+                              {rv.totalReviewsFound > 0 && <span className="text-sm text-muted-foreground">{rv.totalReviewsFound} ביקורות נמצאו</span>}
+                              {rv.averageRating != null && <span className="text-sm font-medium">⭐ {rv.averageRating.toFixed(1)}</span>}
+                              {rv.sources.length > 0 && <span className="text-xs text-muted-foreground">מקורות: {rv.sources.join(', ')}</span>}
+                            </div>
+                            {rv.summary && <p className="text-sm text-muted-foreground rounded-lg bg-muted/40 border px-3 py-2">{rv.summary}</p>}
+                            {/* Strengths / Weaknesses */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
+                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-green-700 text-sm">
+                                  <ThumbsUp className="h-4 w-4" />✅ חוזקות לפי לקוחות
+                                </h4>
+                                <ul className="space-y-1">
+                                  {rv.positiveThemes.map((t, i) => <li key={i} className="text-sm text-green-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{t}</li>)}
+                                  {rv.positiveThemes.length === 0 && <li className="text-sm text-muted-foreground">לא נמצאו</li>}
+                                </ul>
+                              </div>
+                              <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
+                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-red-700 text-sm">
+                                  <ThumbsDown className="h-4 w-4" />❌ חולשות לפי לקוחות
+                                </h4>
+                                <ul className="space-y-1">
+                                  {[...rv.negativeThemes, ...rv.recurringComplaints].filter((v, i, a) => a.indexOf(v) === i).map((t, i) => (
+                                    <li key={i} className="text-sm text-red-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{t}</li>
+                                  ))}
+                                  {rv.negativeThemes.length === 0 && rv.recurringComplaints.length === 0 && <li className="text-sm text-muted-foreground">לא נמצאו</li>}
+                                </ul>
+                              </div>
+                            </div>
+                            {/* Opportunities */}
+                            {rv.opportunities.length > 0 && (
+                              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-blue-700 text-sm">
+                                  <Lightbulb className="h-4 w-4" />הזדמנויות עבורך
+                                </h4>
+                                <ul className="space-y-1">
+                                  {rv.opportunities.map((o, i) => <li key={i} className="text-sm text-blue-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{o}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            <Button variant="outline" size="sm" onClick={() => {
+                              const cacheKey = `reviews_${selectedCompetitor.id}`
+                              sessionStorage.removeItem(cacheKey)
+                              setReviews(prev => { const n = { ...prev }; delete n[selectedCompetitor.id]; return n })
+                              fetchReviews(selectedCompetitor)
+                            }}>
+                              <RefreshCw className="ml-2 h-3.5 w-3.5" />רענן ניתוח
+                            </Button>
+                          </div>
+                        )
+                      })()
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                        <Star className="h-12 w-12 text-muted-foreground/50" />
+                        <p className="text-muted-foreground">לחץ לניתוח ביקורות {selectedCompetitor.name}</p>
+                        <Button onClick={() => fetchReviews(selectedCompetitor)}>
+                          <Star className="ml-2 h-4 w-4" />נתח ביקורות
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
 

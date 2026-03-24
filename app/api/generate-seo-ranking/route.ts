@@ -18,6 +18,82 @@ function isLocalBusiness(overview: string, city: string, geoArea: string[]): boo
   return geoArea.length <= 1 || localKeywords.some(k => overview.includes(k))
 }
 
+async function runSeoQuery(
+  query: string,
+  companyName: string,
+  website: string,
+  companyDomain: string,
+  competitorWebsites: string[],
+  isLocal: boolean,
+): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
+  const competitorListText = competitorWebsites.length > 0
+    ? `\nאתרי מתחרים ידועים:\n${competitorWebsites.join('\n')}`
+    : ''
+  const localPackNote = isLocal
+    ? `\nזהו חיפוש מקומי. כלול תוצאות מ-Google Maps / Local Pack אם מופיעות.`
+    : ''
+
+  const prompt = `אתה מומחה SEO ישראלי. השתמש ב-web_search לחיפוש: "${query}"${localPackNote}
+
+פרטי העסק: שם: ${companyName} | אתר: ${website} | דומיין: ${companyDomain}
+${competitorListText}
+
+CRITICAL: דווח רק על URLs אמיתיים מהחיפוש. אל תבדה תוצאות.
+
+לכל תוצאה ציין: position(1-10), name, url, title, isOwn(true אם דומיין מכיל "${companyDomain}"), isKnownCompetitor
+
+החזר JSON בלבד:
+{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false, "isKnownCompetitor": false}], "recommendations": []}
+
+CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
+
+  const response = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+    body: JSON.stringify({
+      model: 'grok-4-fast-non-reasoning',
+      input: [{ role: 'user', content: prompt }],
+      tools: [{ type: 'web_search' }],
+    }),
+  })
+
+  const data = await response.json()
+  if (!response.ok || !data.output) return { position: null, topResults: [], appeared: false, results: [] }
+
+  const text = data.output
+    .filter((item: any) => item.type === 'message')
+    .flatMap((item: any) => item.content)
+    .filter((c: any) => c.type === 'output_text')
+    .map((c: any) => c.text)
+    .join('')
+
+  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+  const s = clean.indexOf('{')
+  const e = clean.lastIndexOf('}')
+  if (s === -1 || e <= s) return { position: null, topResults: [], appeared: false, results: [] }
+
+  let parsed: any = {}
+  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
+
+  const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
+  const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+  results.forEach((r: any) => {
+    const rDomain = extractDomain(r.url || '')
+    r.isOwn = companyDomain ? rDomain === companyDomain || rDomain.includes(companyDomain) : false
+    r.isKnownCompetitor = competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
+  })
+
+  const ownResult = results.find(r => r.isOwn)
+  const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
+
+  return {
+    position: ownResult?.position ?? null,
+    topResults,
+    appeared: !!ownResult,
+    results,
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
@@ -54,106 +130,75 @@ export async function POST(request: Request) {
     const scopeLocation = isLocal ? (city || 'ישראל') : isInternational ? 'ישראל ועולם' : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
-    // ── Step 1: Business understanding ──────────────────────────────────────
-    // Ask Grok to read the business overview and produce an optimal search query
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
     const profileKeywords = businessProfile?.primaryKeywords?.slice(0, 3).join(' ') || ''
     const fallbackQuery = profileKeywords
       || [industry, scopeLocation, keywords.slice(0, 3).join(' ')].filter(Boolean).join(' ')
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
-    const searchQuery = businessAnalysis?.google_query || fallbackQuery
+    const primaryQuery = businessAnalysis?.google_query || fallbackQuery
 
-    // ── Step 2: SEO search ───────────────────────────────────────────────────
+    // Build query variations from business profile
+    const rawQueries: string[] = businessProfile ? [
+      primaryQuery,
+      businessProfile.coreActivity && city ? `${businessProfile.coreActivity} ${city}` : '',
+      ...businessProfile.primaryKeywords.slice(0, 2).map(kw => `${kw} ישראל`),
+      ...businessProfile.products.slice(0, 2).map(p => p.name).filter(Boolean),
+    ].filter(Boolean) : [primaryQuery]
+
+    // Deduplicate and cap at 5
+    const queryList = [...new Set(rawQueries)].slice(0, 5)
+
     const savedCompetitors: any[] = ctx.competitors || []
-    const competitorWebsites = savedCompetitors
-      .map((c: any) => c.website).filter(Boolean).slice(0, 10)
+    const competitorWebsites = savedCompetitors.map((c: any) => c.website).filter(Boolean).slice(0, 10)
 
+    // Run all queries in parallel
+    const variantResults = await Promise.all(
+      queryList.map(q => runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal))
+    )
+
+    const queryVariants = queryList.map((q, i) => ({
+      query: q,
+      position: variantResults[i].position,
+      topResults: variantResults[i].topResults,
+      appeared: variantResults[i].appeared,
+    }))
+
+    // Primary result uses first query for backward-compat display
+    const primaryVariant = variantResults[0]
     const competitorListText = competitorWebsites.length > 0
-      ? `\nאתרי מתחרים ידועים לסימון (isKnownCompetitor: true אם ה-URL שייך לאחד מהם):\n${competitorWebsites.join('\n')}`
+      ? `\nאתרי מתחרים ידועים לסימון:\n${competitorWebsites.join('\n')}`
       : ''
-
     const localPackNote = isLocal
-      ? `\nשים לב: זהו חיפוש מקומי. כלול גם תוצאות מ-Google Maps / Local Pack אם מופיעות, וסמן אותן ב-title עם "(Google Maps)" בסוף.`
+      ? `\nשים לב: זהו חיפוש מקומי. כלול גם תוצאות מ-Google Maps / Local Pack אם מופיעות.`
       : ''
 
-    const prompt = `אתה מומחה SEO ישראלי. השתמש בכלי web_search כדי לחפש בגוגל את השאילתה הבאה ורשום את 10 התוצאות האורגניות הראשונות בדיוק לפי סדרן בדף התוצאות:${localPackNote}
-
-שאילתת חיפוש: "${searchQuery}"
-
-פרטי העסק שלנו:
-- שם: ${companyName}
-- אתר: ${website}
-- דומיין: ${companyDomain}
-${competitorListText}
-
-CRITICAL: דווח אך ורק על URLs שמופיעים בפועל בתוצאות החיפוש שקיבלת מ-web_search. אסור לבדות URLs או כותרות שלא ראית בתוצאות האמיתיות.
-
-לכל תוצאת חיפוש אמיתית ציין:
-- position: מיקום (1-10)
-- name: שם העסק או הדף
-- url: ה-URL המדויק שמופיע בגוגל
-- title: כותרת הדף כפי שמופיעה בגוגל
-- isOwn: true רק אם הדומיין של ה-URL מכיל "${companyDomain}", אחרת false
-- isKnownCompetitor: true אם ה-URL שייך לאחד מאתרי המתחרים הידועים, אחרת false
-
-לאחר הרשימה, כתוב 3 המלצות ספציפיות לשיפור דירוג SEO של ${companyName} בהתבסס על התוצאות שמצאת.
-
-החזר JSON בלבד:
-{"query": "${searchQuery}", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false, "isKnownCompetitor": false}], "recommendations": ["", "", ""]}
-
-CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
-
-    const response = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search' }],
-      }),
-    })
-
-    const data = await response.json()
-    if (!response.ok || !data.output) {
-      return NextResponse.json({ error: 'xAI API error', detail: data }, { status: 500 })
-    }
-
-    const text = data.output
-      .filter((item: any) => item.type === 'message')
-      .flatMap((item: any) => item.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('')
-
-    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-    const start = clean.indexOf('{')
-    const end = clean.lastIndexOf('}')
-    if (start === -1 || end <= start) {
-      return NextResponse.json({ error: 'Failed to parse response', raw: text.slice(0, 500) }, { status: 500 })
-    }
-
-    let parsed: any = {}
-    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch {
-      return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
-    }
-
-    // Post-process: enforce isOwn and isKnownCompetitor by domain matching
-    const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
-    const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
-
-    results.forEach((r: any) => {
-      const rDomain = extractDomain(r.url || '')
-      r.isOwn = companyDomain ? rDomain === companyDomain || rDomain.includes(companyDomain) : false
-      r.isKnownCompetitor = competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
-    })
+    // Build recommendations via second Grok call on primary query results
+    const topNamesStr = primaryVariant.results.slice(0, 5).map(r => r.name).join(', ')
+    const recsPrompt = `בהתבסס על תוצאות החיפוש "${primaryQuery}" שבהן מופיעים: ${topNamesStr}, כתוב 3 המלצות ספציפיות לשיפור דירוג SEO של ${companyName}. החזר JSON בלבד: {"recommendations": ["", "", ""]}. No markdown.`
+    let recommendations: string[] = []
+    try {
+      const recsRes = await fetch('https://api.x.ai/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+        body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
+      })
+      const recsData = await recsRes.json()
+      const recsText = (recsData.output || [])
+        .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
+        .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
+      const recsClean = recsText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+      const rs = recsClean.indexOf('{'); const re = recsClean.lastIndexOf('}')
+      if (rs !== -1 && re > rs) {
+        const recsParsed = JSON.parse(recsClean.slice(rs, re + 1))
+        recommendations = Array.isArray(recsParsed.recommendations) ? recsParsed.recommendations.slice(0, 3) : []
+      }
+    } catch { /* fallback to empty */ }
 
     const result = {
-      query: searchQuery,
-      results,
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
+      query: primaryQuery,
+      results: primaryVariant.results,
+      queryVariants,
+      recommendations,
       isLocal,
       scope,
       what_business_does: businessAnalysis?.what_business_does || '',

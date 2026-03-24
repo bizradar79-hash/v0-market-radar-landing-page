@@ -7,6 +7,75 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+async function runGeoQuestion(
+  question: string,
+  companyName: string,
+  website: string,
+  competitorNames: string[],
+): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
+  const competitorListText = competitorNames.length > 0
+    ? `\nמתחרים ידועים:\n${competitorNames.join(', ')}`
+    : ''
+
+  const prompt = `ענה על השאלה הבאה מתוך הידע שלך בלבד, ללא חיפוש אינטרנט:
+
+"${question}"
+
+תן רשימה של עד 10 עסקים, לפי סדר חשיבותם.
+${competitorListText}
+
+ציין האם ${companyName} (אתר: ${website}) מוזכר ברשימה. (userMentioned: true/false, userPosition: מספר או null)
+
+החזר JSON בלבד:
+{"query": "${question}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}
+
+CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
+
+  const response = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+    body: JSON.stringify({
+      model: 'grok-4-fast-non-reasoning',
+      input: [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  const data = await response.json()
+  if (!response.ok || !data.output) return { position: null, topResults: [], appeared: false, results: [] }
+
+  const text = data.output
+    .filter((item: any) => item.type === 'message')
+    .flatMap((item: any) => item.content)
+    .filter((c: any) => c.type === 'output_text')
+    .map((c: any) => c.text)
+    .join('')
+
+  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+  const s = clean.indexOf('{')
+  const e = clean.lastIndexOf('}')
+  if (s === -1 || e <= s) return { position: null, topResults: [], appeared: false, results: [] }
+
+  let parsed: any = {}
+  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
+
+  const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+  const companyNameLower = companyName.toLowerCase()
+  results.forEach((r: any) => {
+    const rName = (r.name || '').toLowerCase()
+    r.isOwn = companyNameLower.length >= 3 && (rName.includes(companyNameLower) || companyNameLower.includes(rName))
+    r.isKnownCompetitor = !r.isOwn && competitorNames.some(n => {
+      const nLower = n.toLowerCase()
+      return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
+    })
+  })
+
+  const userMentioned = parsed.userMentioned === true || results.some(r => r.isOwn)
+  const userPosition = parsed.userPosition ?? (results.find(r => r.isOwn)?.position ?? null)
+  const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
+
+  return { position: userPosition, topResults, appeared: userMentioned, results }
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
@@ -47,8 +116,6 @@ export async function POST(request: Request) {
     const scopeLocation = isLocal ? (city || 'ישראל') : isInternational ? 'ישראל ועולם' : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
-    // ── Step 1: Business understanding ──────────────────────────────────────
-    // Ask Grok to read the business overview and produce the right AI question
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
     const keywordString = keywords.slice(0, 5).join(', ')
     const coreActivityDesc = businessProfile?.coreActivity || industry
@@ -57,99 +124,69 @@ export async function POST(request: Request) {
       : `מי הם העסקים המובילים בתחום ${coreActivityDesc}${keywordString ? ` (${keywordString})` : ''} בישראל?`
 
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
-    const geoQuestion = businessAnalysis?.ai_question || fallbackQuestion
+    const primaryQuestion = businessAnalysis?.ai_question || fallbackQuestion
 
-    // ── Step 2: GEO test — pure AI knowledge, no web_search ─────────────────
+    // Build question variations from business profile
+    const rawQuestions: string[] = businessProfile ? [
+      primaryQuestion,
+      businessProfile.coreActivity ? `מי מספק שירותי ${businessProfile.coreActivity} בישראל?` : '',
+      businessProfile.products[0]?.name ? `מי מייצר ${businessProfile.products[0].name} בישראל?` : '',
+      ...businessProfile.searchQueries.slice(0, 2),
+    ].filter(Boolean) : [primaryQuestion]
+
+    const questionList = [...new Set(rawQuestions)].slice(0, 5)
+
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    const competitorListText = competitorNames.length > 0
-      ? `\nמתחרים ידועים לסימון (isKnownCompetitor: true אם מוזכרים):\n${competitorNames.join(', ')}`
-      : ''
+    // Run all questions in parallel
+    const variantResults = await Promise.all(
+      questionList.map(q => runGeoQuestion(q, companyName, website, competitorNames))
+    )
 
+    const queryVariants = questionList.map((q, i) => ({
+      query: q,
+      position: variantResults[i].position,
+      topResults: variantResults[i].topResults,
+      appeared: variantResults[i].appeared,
+    }))
+
+    // Primary result uses first question for backward-compat display
+    const primaryVariant = variantResults[0]
+    const userMentioned = primaryVariant.appeared
+    const userPosition = primaryVariant.position
+
+    // Recommendations via second call
     const contextLine = businessAnalysis?.what_business_does
       ? `בהתחשב בכך ש${companyName} ${businessAnalysis.what_business_does}`
       : `בהתחשב בתחום "${industry}"`
-
-    const prompt = `ענה על השאלה הבאה מתוך הידע שלך בלבד, ללא חיפוש אינטרנט — כפי שמנוע AI כמו ChatGPT, Gemini או Perplexity היה עונה:
-
-"${geoQuestion}"
-
-תן רשימה של עד 10 עסקים שאתה מכיר בתחום זה, לפי סדר חשיבותם בשוק.
-${competitorListText}
-
-לאחר הרשימה, ציין:
-- האם ${companyName} (אתר: ${website}) מוזכר ברשימה שלך? (userMentioned: true/false)
-- אם כן, באיזה מיקום? (userPosition: מספר או null)
-
-לסיום, כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, ${contextLine}.
-
-החזר JSON בלבד:
-{"query": "${geoQuestion}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null, "recommendations": ["", "", ""]}
-
-CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
-
-    // No web_search — pure AI knowledge for true GEO test
-    const response = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-      }),
-    })
-
-    const data = await response.json()
-    if (!response.ok || !data.output) {
-      return NextResponse.json({ error: 'xAI API error', detail: data }, { status: 500 })
-    }
-
-    const text = data.output
-      .filter((item: any) => item.type === 'message')
-      .flatMap((item: any) => item.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('')
-
-    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-    const start = clean.indexOf('{')
-    const end = clean.lastIndexOf('}')
-    if (start === -1 || end <= start) {
-      return NextResponse.json({ error: 'Failed to parse response', raw: text.slice(0, 500) }, { status: 500 })
-    }
-
-    let parsed: any = {}
-    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch {
-      return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
-    }
-
-    // Post-process: enforce isOwn and isKnownCompetitor by name matching
-    const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
-    const companyNameLower = companyName.toLowerCase()
-
-    results.forEach((r: any) => {
-      const rName = (r.name || '').toLowerCase()
-      r.isOwn = companyNameLower.length >= 3 && (
-        rName.includes(companyNameLower) || companyNameLower.includes(rName)
-      )
-      r.isKnownCompetitor = !r.isOwn && competitorNames.some(n => {
-        const nLower = n.toLowerCase()
-        return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
+    const recsPrompt = `כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, ${contextLine}. החזר JSON בלבד: {"recommendations": ["", "", ""]}. No markdown.`
+    let recommendations: string[] = []
+    try {
+      const recsRes = await fetch('https://api.x.ai/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+        body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
       })
-    })
-
-    const userMentioned = parsed.userMentioned === true || results.some((r: any) => r.isOwn)
-    const userPosition = parsed.userPosition ?? (results.find((r: any) => r.isOwn)?.position ?? null)
+      const recsData = await recsRes.json()
+      const recsText = (recsData.output || [])
+        .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
+        .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
+      const recsClean = recsText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+      const rs = recsClean.indexOf('{'); const re = recsClean.lastIndexOf('}')
+      if (rs !== -1 && re > rs) {
+        const recsParsed = JSON.parse(recsClean.slice(rs, re + 1))
+        recommendations = Array.isArray(recsParsed.recommendations) ? recsParsed.recommendations.slice(0, 3) : []
+      }
+    } catch { /* fallback to empty */ }
 
     const result = {
-      query: geoQuestion,
-      results,
+      query: primaryQuestion,
+      results: primaryVariant.results,
+      queryVariants,
       userMentioned,
       userPosition,
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.slice(0, 3) : [],
+      recommendations,
       isLocal,
       scope,
       what_business_does: businessAnalysis?.what_business_does || '',
