@@ -681,32 +681,6 @@ export default function ProfilePage() {
       {/* EXISTING SECTIONS                                                    */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
 
-      {/* Business Overview */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />סקירת העסק
-            </CardTitle>
-            <Button onClick={generateOverview} disabled={generatingOverview} variant="outline" size="sm">
-              {generatingOverview ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מייצר...</> : <><RefreshCw className="ml-2 h-4 w-4" />עדכן סקירה</>}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {overview ? (
-            <p className="text-foreground leading-relaxed">{overview}</p>
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm text-muted-foreground">לחץ על "עדכן סקירה" לקבלת תיאור עסקי מ-AI</p>
-              <Button onClick={generateOverview} disabled={generatingOverview}>
-                {generatingOverview ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מייצר...</> : <><Sparkles className="ml-2 h-4 w-4" />צור סקירה עסקית</>}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* SWOT */}
       <Card>
         <CardHeader>
@@ -744,41 +718,6 @@ export default function ProfilePage() {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Geographic Presence */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2"><MapPin className="h-5 w-5 text-primary" />נוכחות גיאוגרפית</CardTitle>
-            <Button variant="ghost" size="sm" onClick={loadPlaces} disabled={loadingPlaces}>
-              {loadingPlaces ? <Loader2 className="h-4 w-4 animate-spin" /> : <><RefreshCw className="ml-1 h-4 w-4" />רענן</>}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {companyCity ? (
-            <div className="overflow-hidden rounded-lg border">
-              <iframe src={`https://maps.google.com/maps?q=${mapQuery}&output=embed`} className="h-64 w-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" title="מפה" />
-            </div>
-          ) : <p className="text-sm text-muted-foreground py-2">לא הוגדרה עיר בפרופיל</p>}
-          {!places && (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <p className="text-sm text-muted-foreground">טען כתובת, טלפון ואתר מ-Google</p>
-              <Button variant="outline" onClick={loadPlaces} disabled={loadingPlaces}>
-                {loadingPlaces ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <RefreshCw className="ml-2 h-4 w-4" />}טען נתונים
-              </Button>
-            </div>
-          )}
-          {places && (places.address || places.phone || places.website) && (
-            <div className="grid gap-2 text-sm">
-              {places.address && <div className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-4 w-4 shrink-0" /><span>{places.address}</span></div>}
-              {places.phone && <div className="flex items-center gap-2 text-muted-foreground" dir="ltr"><Phone className="h-4 w-4 shrink-0" /><span>{places.phone}</span></div>}
-              {places.website && <div className="flex items-center gap-2 text-muted-foreground"><Globe className="h-4 w-4 shrink-0" /><a href={places.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate" dir="ltr">{places.website.replace(/^https?:\/\//, '')}</a></div>}
-            </div>
-          )}
-          {places && !places.address && !places.phone && !places.website && <p className="text-sm text-muted-foreground">לא נמצאו פרטי קשר ב-Google</p>}
         </CardContent>
       </Card>
 
