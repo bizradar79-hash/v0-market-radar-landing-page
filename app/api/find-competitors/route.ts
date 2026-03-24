@@ -284,6 +284,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     const manualDomains = new Set(
       (manualComps || []).map((c: any) => extractDomain(c.website || '')).filter(Boolean)
     )
+    const manualCount = (manualComps || []).length
     steps.db = { manualKept: manualDomains.size }
 
     const { error: deleteError } = await supabase.from('competitors').delete()
@@ -293,10 +294,12 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       await supabase.from('competitors').delete().eq('company_id', userId)
     }
 
-    const deduped = mapped.filter((c: any) => {
-      const domain = extractDomain(c.website || '')
-      return !domain || !manualDomains.has(domain)
-    })
+    const deduped = mapped
+      .filter((c: any) => {
+        const domain = extractDomain(c.website || '')
+        return !domain || !manualDomains.has(domain)
+      })
+      .slice(0, Math.max(0, 10 - manualCount))
 
     if (deduped.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })

@@ -651,11 +651,11 @@ export default function CompetitorsPage() {
               )}
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)} disabled={competitors.length >= 10}>
                 <UserPlus className="ml-2 h-3.5 w-3.5" />
                 הוסף ידנית
               </Button>
-              <Button variant="outline" size="sm" onClick={discoverCompetitors} disabled={discovering}>
+              <Button variant="outline" size="sm" onClick={discoverCompetitors} disabled={discovering || competitors.length >= 10}>
                 {discovering ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
                 סרוק
               </Button>
@@ -663,6 +663,12 @@ export default function CompetitorsPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          {competitors.length >= 10 && (
+            <div className="px-4 py-2.5 mx-4 mt-3 mb-1 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-700 flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              הגעת למקסימום 10 מתחרים. מחק מתחרה כדי להוסיף חדש.
+            </div>
+          )}
           {competitors.length > 0 ? (
             <CompetitorTable items={competitors} />
           ) : (
@@ -787,8 +793,22 @@ export default function CompetitorsPage() {
                                         <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
                                       )}
                                     </div>
+                                  ) : v.topResults && v.topResults.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      {v.topResults.map((name, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-background border border-transparent">
+                                          <span className="font-mono font-bold w-6 shrink-0 text-right text-muted-foreground">#{idx + 1}</span>
+                                          <span className="flex-1 font-medium text-foreground">{name}</span>
+                                        </div>
+                                      ))}
+                                      {v.appeared && v.position != null ? (
+                                        <p className="text-xs text-green-600 mt-1.5 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />נמצאת במיקום #{v.position}</p>
+                                      ) : (
+                                        <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
+                                      )}
+                                    </div>
                                   ) : (
-                                    <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
+                                    <p className="text-xs text-muted-foreground">רענן לצפייה בתוצאות מלאות</p>
                                   )}
                                 </td>
                               </tr>
@@ -962,8 +982,22 @@ export default function CompetitorsPage() {
                                         <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
                                       )}
                                     </div>
+                                  ) : v.topResults && v.topResults.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      {v.topResults.map((name, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-background border border-transparent">
+                                          <span className="font-mono font-bold w-6 shrink-0 text-right text-muted-foreground">#{idx + 1}</span>
+                                          <span className="flex-1 font-medium text-foreground">{name}</span>
+                                        </div>
+                                      ))}
+                                      {v.appeared && v.position != null ? (
+                                        <p className="text-xs text-green-600 mt-1.5 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />נמצאת במיקום #{v.position}</p>
+                                      ) : (
+                                        <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
+                                      )}
+                                    </div>
                                   ) : (
-                                    <p className="text-xs text-muted-foreground">אין תוצאות מפורטות</p>
+                                    <p className="text-xs text-muted-foreground">רענן לצפייה בתוצאות מלאות</p>
                                   )}
                                 </td>
                               </tr>
