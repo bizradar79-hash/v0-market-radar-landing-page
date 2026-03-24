@@ -13,10 +13,27 @@ export async function getFullContext() {
   const reqHeaders = await headers()
   const authHeader = reqHeaders.get('authorization')
 
+  // Admin override: allows admin routes to run scans on behalf of any user.
+  // Requires both x-admin-user-id and x-admin-secret = SUPABASE_SERVICE_ROLE_KEY.
+  const adminUserId = reqHeaders.get('x-admin-user-id')
+  const adminSecret = reqHeaders.get('x-admin-secret')
+  const isAdminOverride = !!(
+    adminUserId &&
+    adminSecret &&
+    adminSecret === process.env.SUPABASE_SERVICE_ROLE_KEY
+  )
+
   let supabase: any
   let user: any
 
-  if (authHeader?.startsWith('Bearer ')) {
+  if (isAdminOverride) {
+    supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { cookies: { getAll: () => [], setAll: () => {} } }
+    )
+    user = { id: adminUserId }
+  } else if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7)
     supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,

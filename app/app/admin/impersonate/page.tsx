@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShieldCheck, ExternalLink, Building2 } from "lucide-react"
+import { Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw, CheckCircle2, XCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface UserRow {
@@ -30,6 +33,13 @@ export default function ImpersonatePage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [impersonating, setImpersonating] = useState<string | null>(null)
+
+  // Refresh state
+  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({})
+  const [refreshResult, setRefreshResult] = useState<Record<string, 'success' | 'error'>>({})
+  const [refreshingAll, setRefreshingAll] = useState(false)
+  const [showConfirmAll, setShowConfirmAll] = useState(false)
+
   const supabase = createClient()
   const router = useRouter()
   const { toast } = useToast()
@@ -55,7 +65,6 @@ export default function ImpersonatePage() {
   async function impersonate(targetUser: UserRow) {
     setImpersonating(targetUser.id)
     try {
-      // Save admin session before leaving — same-tab redirect preserves sessionStorage
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
         sessionStorage.setItem('admin_access_token', session.access_token)
@@ -71,7 +80,6 @@ export default function ImpersonatePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.url) {
-        // Clean up on failure
         sessionStorage.removeItem('admin_access_token')
         sessionStorage.removeItem('admin_refresh_token')
         sessionStorage.removeItem('is_impersonating')
@@ -80,7 +88,6 @@ export default function ImpersonatePage() {
         setImpersonating(null)
         return
       }
-      // Redirect in same tab — sessionStorage tokens survive navigation
       window.location.href = data.url
     } catch {
       sessionStorage.removeItem('admin_access_token')
@@ -89,6 +96,67 @@ export default function ImpersonatePage() {
       sessionStorage.removeItem('admin_email')
       toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
       setImpersonating(null)
+    }
+  }
+
+  async function refreshUser(userId: string) {
+    setRefreshing(prev => ({ ...prev, [userId]: true }))
+    setRefreshResult(prev => { const n = { ...prev }; delete n[userId]; return n })
+    try {
+      const res = await fetch('/api/admin/refresh-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      })
+      const data = await res.json()
+      const ok = res.ok && data.success
+      setRefreshResult(prev => ({ ...prev, [userId]: ok ? 'success' : 'error' }))
+      toast({
+        title: ok ? "סריקה הושלמה" : "שגיאה בסריקה",
+        description: ok
+          ? "מתחרים, SEO, GEO ומגמות עודכנו"
+          : data.results?.[userId]?.error || data.error || "אירעה שגיאה",
+        variant: ok ? "default" : "destructive",
+      })
+    } catch (e: any) {
+      setRefreshResult(prev => ({ ...prev, [userId]: 'error' }))
+      toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
+    } finally {
+      setRefreshing(prev => ({ ...prev, [userId]: false }))
+    }
+  }
+
+  async function refreshAllUsers() {
+    setShowConfirmAll(false)
+    setRefreshingAll(true)
+    const allIds = users.map(u => u.id)
+    // Clear previous results
+    setRefreshResult({})
+    try {
+      const res = await fetch('/api/admin/refresh-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds: allIds }),
+      })
+      const data = await res.json()
+      // Apply per-user results
+      if (data.results) {
+        const mapped: Record<string, 'success' | 'error'> = {}
+        for (const [uid, r] of Object.entries(data.results as Record<string, { ok: boolean }>)) {
+          mapped[uid] = r.ok ? 'success' : 'error'
+        }
+        setRefreshResult(mapped)
+      }
+      const succeeded = Object.values(data.results || {}).filter((r: any) => r.ok).length
+      toast({
+        title: data.success ? "סריקה הושלמה לכולם" : "סריקה הושלמה חלקית",
+        description: `${succeeded} מתוך ${allIds.length} משתמשים עודכנו בהצלחה`,
+        variant: data.success ? "default" : "destructive",
+      })
+    } catch (e: any) {
+      toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
+    } finally {
+      setRefreshingAll(false)
     }
   }
 
@@ -102,12 +170,24 @@ export default function ImpersonatePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <ShieldCheck className="h-7 w-7 text-primary" />
-        <div>
-          <h1 className="text-2xl font-bold">התחזות למשתמשים</h1>
-          <p className="text-muted-foreground">{users.length} משתמשים רשומים</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <ShieldCheck className="h-7 w-7 text-primary" />
+          <div>
+            <h1 className="text-2xl font-bold">התחזות למשתמשים</h1>
+            <p className="text-muted-foreground">{users.length} משתמשים רשומים</p>
+          </div>
         </div>
+        <Button
+          variant="outline"
+          onClick={() => setShowConfirmAll(true)}
+          disabled={refreshingAll || users.length === 0}
+        >
+          {refreshingAll
+            ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מרענן הכל...</>
+            : <><RefreshCw className="ml-2 h-4 w-4" />רענן כל המשתמשים</>
+          }
+        </Button>
       </div>
 
       <Card>
@@ -122,7 +202,7 @@ export default function ImpersonatePage() {
                 <TableHead className="text-right">חברה</TableHead>
                 <TableHead className="text-right hidden md:table-cell">תחום</TableHead>
                 <TableHead className="text-right hidden lg:table-cell">כניסה אחרונה</TableHead>
-                <TableHead className="text-right">פעולה</TableHead>
+                <TableHead className="text-right">פעולות</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -152,18 +232,38 @@ export default function ImpersonatePage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => impersonate(u)}
-                      disabled={impersonating === u.id}
-                    >
-                      {impersonating === u.id
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
-                      }
-                      התחבר בשמו
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {/* Refresh button */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => refreshUser(u.id)}
+                        disabled={refreshing[u.id] || refreshingAll}
+                        title="סרוק מחדש: מתחרים, SEO, GEO, מגמות"
+                      >
+                        {refreshing[u.id]
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : refreshResult[u.id] === 'success'
+                            ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                            : refreshResult[u.id] === 'error'
+                              ? <XCircle className="h-3.5 w-3.5 text-red-500" />
+                              : <RefreshCw className="h-3.5 w-3.5" />
+                        }
+                      </Button>
+                      {/* Impersonate button */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => impersonate(u)}
+                        disabled={impersonating === u.id}
+                      >
+                        {impersonating === u.id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+                        }
+                        התחבר בשמו
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -171,6 +271,27 @@ export default function ImpersonatePage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Confirm Refresh All dialog */}
+      <Dialog open={showConfirmAll} onOpenChange={setShowConfirmAll}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>רענון כל המשתמשים</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            פעולה זו תפעיל סריקה מלאה (מתחרים, SEO, GEO, מגמות) עבור כל{' '}
+            <strong>{users.length} המשתמשים</strong>. הפעולה עשויה לקחת מספר דקות.
+          </p>
+          <p className="text-sm font-medium">האם להמשיך?</p>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setShowConfirmAll(false)}>ביטול</Button>
+            <Button onClick={refreshAllUsers}>
+              <RefreshCw className="ml-2 h-4 w-4" />
+              כן, רענן הכל
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
