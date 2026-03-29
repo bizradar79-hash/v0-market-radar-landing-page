@@ -8,109 +8,87 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import {
-  TrendingUp, TrendingDown, Minus, Loader2, Sparkles,
-  Plus, Hash, ChevronDown, X, RefreshCw, AlertTriangle,
-  Zap, BarChart2, MessageSquare, Lightbulb, AlertCircle,
+  TrendingUp, TrendingDown, Minus, Loader2,
+  Plus, Hash, ChevronDown, X, RefreshCw,
+  Zap, Users, Lightbulb,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-// ─── Existing keyword trend types ───────────────────────────────────────────
-interface Trend {
-  id: string
-  company_id: string
-  name: string
-  category: string
-  direction: string
-  description: string
-  created_at: string
-}
-
+// ─── Keyword trend types (unchanged) ────────────────────────────────────────
 interface KwTrend {
   phrase: string
   trend: string
   reason: string
   trend_data: { week: string; value: number }[]
 }
-
 interface KwData {
   fetchedAt: string
   trends?: KwTrend[]
   israel?: KwTrend[]
   world?: KwTrend[]
 }
+interface KwTrendsMap { [keyword: string]: KwData }
 
-interface KwTrendsMap {
-  [keyword: string]: KwData
-}
-
-// ─── New deep-analysis types ─────────────────────────────────────────────────
-interface EmergingTrend {
-  trend_name: string
+// ─── Industry trends types ───────────────────────────────────────────────────
+interface IndustryTrend {
+  name: string
+  direction: 'rising' | 'stable' | 'declining'
   evidence: string
-  source_type: string
-  why_happening: string
-  confidence_score: number
-  hallucination_risk?: boolean
+  source: string
+  week_data: number[]
+  confidence: number
+  region: 'ישראל' | 'עולם'
 }
-
-interface KeywordEntry {
-  keyword: string
-  search_volume: string | number
-  competition_level: 'low' | 'medium' | 'high'
-  trend_direction: 'rising' | 'stable' | 'declining'
-  evidence: string
-}
-
-interface UnmetNeed {
-  pain_point: string
-  customer_quote: string
-  frequency: string
-  opportunity_size: 'low' | 'medium' | 'high'
-}
-
-interface StrategicAction {
-  action: string
-  reasoning: string
-  evidence: string
-  priority: 'immediate' | 'short_term' | 'long_term'
-  confidence_score: number
-}
-
-interface ManualKeywordAnalysis {
-  keyword: string
-  trend_assessment: string
-  competition_context: string
-  evidence: string
-  confidence_score: number
-  hallucination_risk?: boolean
-}
-
-interface TrendsAnalysis {
-  emerging_trends: EmergingTrend[]
-  keyword_map: { quick_wins: KeywordEntry[]; high_volume: KeywordEntry[] }
-  unmet_needs: UnmetNeed[]
-  strategic_actions: StrategicAction[]
-  manual_keyword_analysis: ManualKeywordAnalysis[]
-  data_quality_warning: string | null
+interface IndustryTrendsData {
+  trends: IndustryTrend[]
+  date_range: string
+  search_query: string
   fetchedAt: string
-  validation?: {
-    valid: boolean
-    hallucination_flags: { field: string; value: string; reason: string }[]
-    confidence_reduction: number
-  }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function getMomentumBadge(direction: string) {
-  if (direction === 'עולה' || direction === 'up') {
-    return <Badge className="bg-green-100 text-green-700 shrink-0"><TrendingUp className="ml-1 h-3 w-3" />עולה</Badge>
+// ─── Competitor trends types ─────────────────────────────────────────────────
+interface CompetitorTrendEntry {
+  competitor_name: string
+  competitor_website: string
+  trending_topics: string[]
+  new_activity: string
+  opportunity: string
+  has_opportunity: boolean
+}
+interface CompetitorTrendsData {
+  competitor_data: CompetitorTrendEntry[]
+  fetchedAt: string
+}
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+function DirectionBadge({ direction }: { direction: string }) {
+  if (direction === 'rising' || direction === 'עולה') {
+    return <Badge className="bg-green-100 text-green-700 border-green-200 shrink-0 text-xs"><TrendingUp className="ml-1 h-3 w-3" />עולה</Badge>
   }
-  if (direction === 'יורד' || direction === 'down') {
-    return <Badge className="bg-red-100 text-red-700 shrink-0"><TrendingDown className="ml-1 h-3 w-3" />יורד</Badge>
+  if (direction === 'declining' || direction === 'יורד') {
+    return <Badge className="bg-red-100 text-red-700 border-red-200 shrink-0 text-xs"><TrendingDown className="ml-1 h-3 w-3" />יורד</Badge>
   }
-  return <Badge className="bg-yellow-100 text-yellow-700 shrink-0"><Minus className="ml-1 h-3 w-3" />יציב</Badge>
+  return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 shrink-0 text-xs"><Minus className="ml-1 h-3 w-3" />יציב</Badge>
+}
+
+function MiniSparkline({ data, direction }: { data: number[]; direction: string }) {
+  if (!data || data.length < 2) return null
+  const W = 64, H = 24
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const range = max - min || 1
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W
+    const y = H - 2 - ((v - min) / range) * (H - 4)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  const color = direction === 'rising' ? '#16a34a' : direction === 'declining' ? '#dc2626' : '#9ca3af'
+  return (
+    <svg width={W} height={H} className="shrink-0">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 function Sparkline({ data, trend }: { data: { week: string; value: number }[]; trend: string }) {
@@ -136,47 +114,31 @@ function Sparkline({ data, trend }: { data: { week: string; value: number }[]; t
   )
 }
 
-function ConfidenceBar({ score }: { score: number }) {
-  const color = score >= 70 ? 'bg-green-500' : score >= 40 ? 'bg-yellow-500' : 'bg-red-400'
+function getMomentumBadge(direction: string) {
+  if (direction === 'עולה' || direction === 'up') {
+    return <Badge className="bg-green-100 text-green-700 shrink-0"><TrendingUp className="ml-1 h-3 w-3" />עולה</Badge>
+  }
+  if (direction === 'יורד' || direction === 'down') {
+    return <Badge className="bg-red-100 text-red-700 shrink-0"><TrendingDown className="ml-1 h-3 w-3" />יורד</Badge>
+  }
+  return <Badge className="bg-yellow-100 text-yellow-700 shrink-0"><Minus className="ml-1 h-3 w-3" />יציב</Badge>
+}
+
+function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 mt-2">
-      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${score}%` }} />
-      </div>
-      <span className="text-xs text-muted-foreground shrink-0">{score}%</span>
+    <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+      <Minus className="h-8 w-8 opacity-30" />
+      <p className="text-sm">{message}</p>
     </div>
   )
 }
 
-function competitionLabel(level: string) {
-  if (level === 'low') return { label: 'נמוכה', cls: 'text-green-600 bg-green-50 border-green-200' }
-  if (level === 'high') return { label: 'גבוהה', cls: 'text-red-600 bg-red-50 border-red-200' }
-  return { label: 'בינונית', cls: 'text-yellow-600 bg-yellow-50 border-yellow-200' }
-}
-
-function priorityConfig(p: string) {
-  if (p === 'immediate') return { label: 'מיידי', cls: 'border-red-200 bg-red-50', dot: 'bg-red-500' }
-  if (p === 'short_term') return { label: 'טווח קצר', cls: 'border-yellow-200 bg-yellow-50', dot: 'bg-yellow-500' }
-  return { label: 'טווח ארוך', cls: 'border-blue-200 bg-blue-50', dot: 'bg-blue-500' }
-}
-
-function opportunityBadge(size: string) {
-  if (size === 'high') return <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">הזדמנות גדולה</Badge>
-  if (size === 'low') return <Badge variant="outline" className="text-muted-foreground text-xs">הזדמנות קטנה</Badge>
-  return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-xs">הזדמנות בינונית</Badge>
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function TrendsPage() {
-  const [trends, setTrends] = useState<Trend[]>([])
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // Deep analysis
-  const [trendsAnalysis, setTrendsAnalysis] = useState<TrendsAnalysis | null>(null)
-  const [analyzingDeep, setAnalyzingDeep] = useState(false)
-
-  // Keyword trends state
+  // Section 1 — keyword trends (unchanged logic)
   const [keywords, setKeywords] = useState<string[]>([])
   const [kwTrends, setKwTrends] = useState<KwTrendsMap>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -187,28 +149,26 @@ export default function TrendsPage() {
   const [activeTab, setActiveTab] = useState<Record<string, 'israel' | 'world'>>({})
   const [infoExpanded, setInfoExpanded] = useState(false)
 
+  // Section 2 — industry trends
+  const [industryTrends, setIndustryTrends] = useState<IndustryTrendsData | null>(null)
+  const [loadingIndustry, setLoadingIndustry] = useState(false)
+  const [industryTab, setIndustryTab] = useState<'ישראל' | 'עולם'>('ישראל')
+
+  // Section 3 — competitor trends
+  const [competitorTrends, setCompetitorTrends] = useState<CompetitorTrendsData | null>(null)
+  const [loadingCompetitor, setLoadingCompetitor] = useState(false)
+
   const supabase = createClient()
   const { toast } = useToast()
 
-  useEffect(() => {
-    fetchAll()
-  }, [])
+  useEffect(() => { init() }, [])
 
-  async function fetchAll() {
-    const [,, hasAnalysis] = await Promise.all([fetchTrends(), fetchKeywordData(), fetchDeepAnalysis()])
+  async function init() {
+    await Promise.all([fetchKeywordData(), fetchIndustryTrends(), fetchCompetitorTrends()])
     setLoading(false)
-    // Auto-trigger deep analysis on first load if no cached result exists
-    if (!hasAnalysis) {
-      runDeepAnalysis()
-    }
   }
 
-  async function fetchTrends() {
-    const { data, error } = await supabase
-      .from("trends").select("*").order("created_at", { ascending: false })
-    if (!error && data) setTrends(data)
-  }
-
+  // ── Section 1 helpers ──────────────────────────────────────────────────────
   async function fetchKeywordData() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -217,60 +177,6 @@ export default function TrendsPage() {
     if (data?.keywords) setKeywords(data.keywords)
     if (data?.keyword_trends && Object.keys(data.keyword_trends).length > 0) {
       setKwTrends(data.keyword_trends as KwTrendsMap)
-    }
-  }
-
-  async function fetchDeepAnalysis(): Promise<boolean> {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return false
-    const { data } = await supabase
-      .from('companies').select('trends_analysis').eq('id', user.id).single()
-    const ta = data?.trends_analysis
-    // Only accept new-format data (must have emerging_trends array)
-    if (ta?.fetchedAt && Array.isArray(ta?.emerging_trends)) {
-      setTrendsAnalysis(ta as TrendsAnalysis)
-      return true
-    }
-    return false
-  }
-
-  async function generateTrends() {
-    setGenerating(true)
-    try {
-      const res = await fetch("/api/generate-trends?force=true", { method: "POST" })
-      const data = await res.json()
-      if (data.success) {
-        await fetchTrends()
-        toast({ title: "טרנדים נוספו!", description: `נמצאו ${data.count || 0} טרנדים חדשים` })
-      } else {
-        toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור טרנדים", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", variant: "destructive" })
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  async function runDeepAnalysis() {
-    setAnalyzingDeep(true)
-    try {
-      const res = await fetch('/api/analyze-trends?force=true', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ manual_keywords: keywords.length > 0 ? keywords : undefined }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setTrendsAnalysis(data as TrendsAnalysis)
-        toast({ title: "ניתוח עומק הושלם" })
-      } else {
-        toast({ title: "שגיאה בניתוח", description: data.error, variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", variant: "destructive" })
-    } finally {
-      setAnalyzingDeep(false)
     }
   }
 
@@ -292,14 +198,9 @@ export default function TrendsPage() {
         } }))
         setExpanded(prev => new Set([...prev, kw]))
         toast({ title: `טרנדים עודכנו: ${kw}` })
-      } else {
-        toast({ title: 'שגיאה', description: data.error, variant: 'destructive' })
       }
-    } catch {
-      toast({ title: 'שגיאה', variant: 'destructive' })
-    } finally {
-      setLoadingKw(prev => ({ ...prev, [kw]: false }))
-    }
+    } catch {}
+    finally { setLoadingKw(prev => ({ ...prev, [kw]: false })) }
   }
 
   async function addKeyword() {
@@ -343,6 +244,63 @@ export default function TrendsPage() {
     })
   }
 
+  // ── Section 2 helpers ──────────────────────────────────────────────────────
+  async function fetchIndustryTrends(force = false) {
+    setLoadingIndustry(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      if (!force) {
+        const { data } = await supabase
+          .from('companies').select('industry_trends').eq('id', user.id).single()
+        const cached = (data as any)?.industry_trends as IndustryTrendsData | null
+        if (cached?.fetchedAt && Array.isArray(cached?.trends)) {
+          setIndustryTrends(cached)
+          return
+        }
+      }
+      const res = await fetch(`/api/industry-trends${force ? '?force=true' : ''}`, { method: 'POST' })
+      const d = await res.json()
+      if (d.success && Array.isArray(d.trends)) setIndustryTrends(d as IndustryTrendsData)
+    } catch {}
+    finally { setLoadingIndustry(false) }
+  }
+
+  // ── Section 3 helpers ──────────────────────────────────────────────────────
+  async function fetchCompetitorTrends(force = false) {
+    setLoadingCompetitor(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      if (!force) {
+        const { data } = await supabase
+          .from('companies').select('competitor_trends').eq('id', user.id).single()
+        const cached = (data as any)?.competitor_trends as CompetitorTrendsData | null
+        if (cached?.fetchedAt && Array.isArray(cached?.competitor_data)) {
+          setCompetitorTrends(cached)
+          return
+        }
+      }
+      const res = await fetch(`/api/competitor-trends${force ? '?force=true' : ''}`, { method: 'POST' })
+      const d = await res.json()
+      if (d.success) setCompetitorTrends(d as CompetitorTrendsData)
+    } catch {}
+    finally { setLoadingCompetitor(false) }
+  }
+
+  // ── Global refresh ─────────────────────────────────────────────────────────
+  async function refreshAll() {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        fetchIndustryTrends(true),
+        fetchCompetitorTrends(true),
+      ])
+      toast({ title: "טרנדים עודכנו" })
+    } catch {}
+    finally { setRefreshing(false) }
+  }
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -351,282 +309,27 @@ export default function TrendsPage() {
     )
   }
 
-  const sourceGroups = trends.reduce((acc, t) => {
-    const src = t.category || 'אחר'
-    if (!acc[src]) acc[src] = []
-    acc[src].push(t)
-    return acc
-  }, {} as Record<string, Trend[]>)
-
-  const priorityGroups = trendsAnalysis?.strategic_actions?.length
-    ? {
-        immediate: trendsAnalysis.strategic_actions.filter(a => a.priority === 'immediate'),
-        short_term: trendsAnalysis.strategic_actions.filter(a => a.priority === 'short_term'),
-        long_term: trendsAnalysis.strategic_actions.filter(a => a.priority === 'long_term'),
-      }
-    : null
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-8">
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">טרנדים</h1>
-          <p className="text-muted-foreground">מעקב אחר מגמות שוק ותחומים מתפתחים</p>
+          <p className="text-sm text-muted-foreground">מגמות שוק, תחום, ומתחרים בזמן אמת</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={generateTrends} disabled={generating}>
-            {generating
-              ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח...</>
-              : <><RefreshCw className="ml-2 h-4 w-4" />טרנדים מהירים</>
-            }
-          </Button>
-          <Button onClick={runDeepAnalysis} disabled={analyzingDeep}>
-            {analyzingDeep
-              ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח עמוק...</>
-              : <><Sparkles className="ml-2 h-4 w-4" />ניתוח עמוק עם AI</>
-            }
-          </Button>
-        </div>
+        <Button onClick={refreshAll} disabled={refreshing || loadingIndustry || loadingCompetitor} size="sm" variant="outline">
+          {refreshing
+            ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מרענן...</>
+            : <><RefreshCw className="ml-2 h-4 w-4" />רענן טרנדים</>
+          }
+        </Button>
       </div>
 
-      {/* ─── Deep Analysis Section ───────────────────────────────────────── */}
-      {analyzingDeep && !trendsAnalysis && (
-        <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
-          <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-          <div>
-            <p className="text-sm font-medium">מריץ ניתוח שוק עמוק עם AI...</p>
-            <p className="text-xs text-muted-foreground mt-0.5">בודק טרנדים, מנתח ביקורות ומתחרים — עשוי לקחת עד דקה</p>
-          </div>
-        </div>
-      )}
-
-      {trendsAnalysis && (
-        <div className="space-y-5">
-          {/* Data quality warning */}
-          {trendsAnalysis.data_quality_warning && (
-            <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
-              <AlertTriangle className="h-5 w-5 text-orange-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-orange-800">אזהרת איכות נתונים</p>
-                <p className="text-sm text-orange-700 mt-0.5">{trendsAnalysis.data_quality_warning}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Validation flags summary */}
-          {trendsAnalysis.validation && !trendsAnalysis.validation.valid && (
-            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-700">
-                {trendsAnalysis.validation.hallucination_flags.length} תובנות סומנו כבעלות סיכון הזיה —
-                הצג תגיות כתומות על כל תובנה בסיכון.
-                אמינות הופחתה ב-{trendsAnalysis.validation.confidence_reduction}%.
-              </p>
-            </div>
-          )}
-
-          {/* Emerging Trends */}
-          {(trendsAnalysis.emerging_trends?.length ?? 0) > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                טרנדים מתפתחים
-              </h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                {trendsAnalysis.emerging_trends.map((t, i) => (
-                  <Card key={i} className="transition-shadow hover:shadow-md">
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-semibold text-sm leading-snug">{t.trend_name}</h3>
-                        <div className="flex gap-1 shrink-0">
-                          {t.hallucination_risk && (
-                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] py-0">⚠ סיכון הזיה</Badge>
-                          )}
-                          <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground">
-                            {t.source_type}
-                          </Badge>
-                        </div>
-                      </div>
-                      <blockquote className="border-r-2 border-primary/30 pr-3 text-xs text-muted-foreground italic">
-                        {t.evidence}
-                      </blockquote>
-                      <p className="text-xs text-foreground/80">{t.why_happening}</p>
-                      <ConfidenceBar score={t.confidence_score} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Keyword Map */}
-          {((trendsAnalysis.keyword_map?.quick_wins?.length ?? 0) > 0 || (trendsAnalysis.keyword_map?.high_volume?.length ?? 0) > 0) && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
-                <BarChart2 className="h-5 w-5 text-primary" />
-                מפת מילות מפתח
-              </h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Quick Wins */}
-                <div className="rounded-lg border border-green-200 bg-green-50/30 p-4 space-y-3">
-                  <h3 className="text-sm font-semibold text-green-700 flex items-center gap-1.5">
-                    <Zap className="h-4 w-4" />
-                    Quick Wins — ניצחונות מהירים
-                  </h3>
-                  {trendsAnalysis.keyword_map.quick_wins.length === 0
-                    ? <p className="text-xs text-muted-foreground">אין נתונים</p>
-                    : trendsAnalysis.keyword_map.quick_wins.map((kw, i) => {
-                        const comp = competitionLabel(kw.competition_level)
-                        return (
-                          <div key={i} className="rounded-md bg-white border border-green-100 p-3 space-y-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-medium text-sm">{kw.keyword}</span>
-                              <Badge variant="outline" className={`text-[10px] py-0 border ${comp.cls}`}>{comp.label}</Badge>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <span>נפח: {kw.search_volume}</span>
-                              <span>·</span>
-                              <span className={kw.trend_direction === 'rising' ? 'text-green-600' : kw.trend_direction === 'declining' ? 'text-red-500' : 'text-muted-foreground'}>
-                                {kw.trend_direction === 'rising' ? '↑ עולה' : kw.trend_direction === 'declining' ? '↓ יורד' : '→ יציב'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground italic">{kw.evidence}</p>
-                          </div>
-                        )
-                      })
-                  }
-                </div>
-
-                {/* High Volume */}
-                <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-4 space-y-3">
-                  <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-1.5">
-                    <BarChart2 className="h-4 w-4" />
-                    High Volume — נפח גבוה
-                  </h3>
-                  {trendsAnalysis.keyword_map.high_volume.length === 0
-                    ? <p className="text-xs text-muted-foreground">אין נתונים</p>
-                    : trendsAnalysis.keyword_map.high_volume.map((kw, i) => {
-                        const comp = competitionLabel(kw.competition_level)
-                        return (
-                          <div key={i} className="rounded-md bg-white border border-blue-100 p-3 space-y-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-medium text-sm">{kw.keyword}</span>
-                              <Badge variant="outline" className={`text-[10px] py-0 border ${comp.cls}`}>{comp.label}</Badge>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <span>נפח: {kw.search_volume}</span>
-                              <span>·</span>
-                              <span className={kw.trend_direction === 'rising' ? 'text-green-600' : kw.trend_direction === 'declining' ? 'text-red-500' : 'text-muted-foreground'}>
-                                {kw.trend_direction === 'rising' ? '↑ עולה' : kw.trend_direction === 'declining' ? '↓ יורד' : '→ יציב'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground italic">{kw.evidence}</p>
-                          </div>
-                        )
-                      })
-                  }
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Unmet Needs */}
-          {(trendsAnalysis.unmet_needs?.length ?? 0) > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
-                <MessageSquare className="h-5 w-5 text-primary" />
-                צרכים לא מסופקים
-              </h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                {trendsAnalysis.unmet_needs.map((n, i) => (
-                  <Card key={i}>
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-semibold text-sm">{n.pain_point}</h3>
-                        {opportunityBadge(n.opportunity_size)}
-                      </div>
-                      <blockquote className="border-r-4 border-muted pr-3 text-sm text-muted-foreground italic leading-relaxed">
-                        "{n.customer_quote}"
-                      </blockquote>
-                      <p className="text-xs text-muted-foreground">תדירות: {n.frequency}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Strategic Actions */}
-          {(trendsAnalysis.strategic_actions?.length ?? 0) > 0 && priorityGroups && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
-                <Lightbulb className="h-5 w-5 text-primary" />
-                פעולות אסטרטגיות
-              </h2>
-              <div className="space-y-4">
-                {(['immediate', 'short_term', 'long_term'] as const).map(p => {
-                  const actions = priorityGroups[p]
-                  if (actions.length === 0) return null
-                  const cfg = priorityConfig(p)
-                  return (
-                    <div key={p} className={`rounded-lg border p-4 space-y-3 ${cfg.cls}`}>
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <span className={`inline-block h-2 w-2 rounded-full ${cfg.dot}`} />
-                        {cfg.label}
-                      </h3>
-                      {actions.map((a, i) => (
-                        <div key={i} className="rounded-md bg-white/70 border border-white p-3 space-y-1.5">
-                          <p className="text-sm font-medium">{a.action}</p>
-                          <p className="text-xs text-muted-foreground">{a.reasoning}</p>
-                          <blockquote className="border-r-2 border-muted/50 pr-2 text-xs text-muted-foreground italic">{a.evidence}</blockquote>
-                          <ConfidenceBar score={a.confidence_score} />
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Manual Keyword Analysis */}
-          {(trendsAnalysis.manual_keyword_analysis?.length ?? 0) > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
-                <Hash className="h-5 w-5 text-primary" />
-                ניתוח ביטויים ידניים
-              </h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                {trendsAnalysis.manual_keyword_analysis.map((mk, i) => (
-                  <Card key={i}>
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-sm">#{mk.keyword}</span>
-                        <div className="flex gap-1">
-                          {mk.hallucination_risk && (
-                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] py-0">⚠ סיכון הזיה</Badge>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-xs text-foreground/80">{mk.trend_assessment}</p>
-                      <p className="text-xs text-muted-foreground">{mk.competition_context}</p>
-                      <blockquote className="border-r-2 border-primary/30 pr-2 text-xs text-muted-foreground italic">{mk.evidence}</blockquote>
-                      <ConfidenceBar score={mk.confidence_score} />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <p className="text-xs text-muted-foreground">
-            ניתוח עומק עודכן: {new Date(trendsAnalysis.fetchedAt).toLocaleDateString('he-IL')}
-          </p>
-        </div>
-      )}
-
-      {/* ─── Keyword Trends Section ───────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 1 — keyword trends (preserved as-is)                         */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-3">
         <div className="flex items-center justify-between border-b pb-2">
           <div>
@@ -650,7 +353,6 @@ export default function TrendsPage() {
             <div className="space-y-1 text-blue-800 leading-relaxed">
               <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות</p>
               <p>וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
-              <p>ניתוח העומק משתמש בנתוני מילות המפתח, ביקורות, ומתחרים שנשמרו במערכת.</p>
               <button onClick={() => setInfoExpanded(false)} className="text-blue-700 font-medium mt-1 block">
                 הצג פחות ▲
               </button>
@@ -681,7 +383,7 @@ export default function TrendsPage() {
             <Hash className="h-10 w-10 text-muted-foreground/40" />
             <div>
               <p className="font-medium text-foreground">עדיין לא הוגדרו מילות מפתח</p>
-              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח — AI יחפש מה טרנדי עכשיו ויכלול אותה בניתוח העומק</p>
+              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח — AI יחפש מה טרנדי עכשיו</p>
             </div>
             <Button onClick={() => setShowAddKw(true)}>
               <Plus className="ml-2 h-4 w-4" />הוסף מילת מפתח
@@ -773,42 +475,177 @@ export default function TrendsPage() {
         })}
       </div>
 
-      {/* ─── General Trends Section ───────────────────────────────────────── */}
-      {Object.keys(sourceGroups).map((source) => (
-        <div key={source} className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground border-b pb-2">{source}</h2>
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 2 — industry trends                                          */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-3">
+        <div className="border-b pb-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Zap className="h-5 w-5 text-primary" />
+            טרנדים חמים בתחום
+          </h2>
+          <p className="text-sm text-muted-foreground">מה קורה עכשיו בענף שלך — ישראל ועולם</p>
+        </div>
+
+        {loadingIndustry ? (
+          <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+            <p className="text-sm">מחפש טרנדים חמים בתחום שלך...</p>
+          </div>
+        ) : !industryTrends || industryTrends.trends.length === 0 ? (
+          <EmptyState message="לא נמצאו טרנדים השבוע — נסה לרענן" />
+        ) : (
+          <div className="space-y-3">
+            {/* Meta bar */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-xs text-muted-foreground">
+                מבוסס על נתוני {industryTrends.date_range} · חיפוש: "{industryTrends.search_query}"
+              </p>
+              {/* Israel / World tabs */}
+              <div className="flex gap-1 p-0.5 bg-muted/40 rounded-lg">
+                {(['ישראל', 'עולם'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setIndustryTab(tab)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      industryTab === tab
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {tab === 'ישראל' ? '🇮🇱 ישראל' : '🌍 עולם'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Trend cards */}
+            {(() => {
+              const filtered = industryTrends.trends.filter(t => t.region === industryTab)
+              if (filtered.length === 0) {
+                return <EmptyState message={`לא נמצאו טרנדים מ${industryTab} השבוע`} />
+              }
+              return (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {filtered.map((t, i) => (
+                    <Card key={i} className="hover:shadow-md transition-shadow">
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-semibold text-sm leading-snug flex-1">{t.name}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <MiniSparkline data={t.week_data} direction={t.direction} />
+                            <DirectionBadge direction={t.direction} />
+                          </div>
+                        </div>
+                        {t.evidence && (
+                          <blockquote className="border-r-2 border-primary/30 pr-3 text-xs text-muted-foreground italic leading-relaxed">
+                            {t.evidence}
+                          </blockquote>
+                        )}
+                        {t.source && (
+                          <p className="text-[10px] text-muted-foreground/60">מקור: {t.source}</p>
+                        )}
+                        {/* Confidence bar */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${t.confidence >= 70 ? 'bg-green-500' : t.confidence >= 40 ? 'bg-yellow-500' : 'bg-red-400'}`}
+                              style={{ width: `${t.confidence}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground shrink-0">{t.confidence}%</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3 — competitor trends                                        */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-3">
+        <div className="border-b pb-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            טרנדים אצל המתחרים
+          </h2>
+          <p className="text-sm text-muted-foreground">מה עושים המתחרים שלך עכשיו — וכיצד לנצל את זה</p>
+        </div>
+
+        {loadingCompetitor ? (
+          <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+            <p className="text-sm">בודק פעילות מתחרים...</p>
+          </div>
+        ) : !competitorTrends || competitorTrends.competitor_data.length === 0 ? (
+          <EmptyState message="לא נמצאו נתוני מתחרים — הוסף מתחרים או רענן" />
+        ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {sourceGroups[source].map((trend) => (
-              <Card key={trend.id} className="transition-shadow hover:shadow-md">
-                <CardContent className="p-5">
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <h3 className="text-base font-semibold text-foreground leading-snug">{trend.name}</h3>
-                    {getMomentumBadge(trend.direction)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">{trend.description}</p>
+            {competitorTrends.competitor_data.map((c, i) => (
+              <Card key={i} className={c.has_opportunity ? 'border-amber-200 shadow-sm' : ''}>
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm flex items-center justify-between">
+                    <span>{c.competitor_name}</span>
+                    {c.competitor_website && (
+                      <a
+                        href={c.competitor_website.startsWith('http') ? c.competitor_website : `https://${c.competitor_website}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline font-normal"
+                      >
+                        {c.competitor_website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
+                      </a>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-3">
+                  {/* Trending topics */}
+                  {c.trending_topics.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">נושאים שמקדמים</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.trending_topics.map((topic, ti) => (
+                          <Badge key={ti} variant="secondary" className="text-xs font-normal">{topic}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* New activity */}
+                  {c.new_activity && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">פעילות אחרונה</p>
+                      <p className="text-xs text-foreground leading-relaxed">{c.new_activity}</p>
+                    </div>
+                  )}
+
+                  {/* Opportunity box */}
+                  {c.opportunity && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+                      <p className="text-xs font-semibold text-amber-800 flex items-center gap-1">
+                        <Lightbulb className="h-3.5 w-3.5" />הזדמנות עבורך
+                      </p>
+                      <p className="text-xs text-amber-700 leading-relaxed">{c.opportunity}</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
           </div>
-        </div>
-      ))}
+        )}
 
-      {trends.length === 0 && !trendsAnalysis && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <TrendingUp className="h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
-            <div className="flex gap-2 mt-4">
-              <Button variant="outline" onClick={generateTrends} disabled={generating}>
-                <RefreshCw className="ml-2 h-4 w-4" />טרנדים מהירים
-              </Button>
-              <Button onClick={runDeepAnalysis} disabled={analyzingDeep}>
-                <Sparkles className="ml-2 h-4 w-4" />ניתוח עמוק
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+        {competitorTrends?.fetchedAt && (
+          <p className="text-xs text-muted-foreground">
+            עודכן: {new Date(competitorTrends.fetchedAt).toLocaleDateString('he-IL')}
+          </p>
+        )}
+      </div>
+
     </div>
   )
 }
