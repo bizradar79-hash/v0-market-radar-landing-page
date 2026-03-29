@@ -10,21 +10,45 @@ export const maxDuration = 60
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 function extractDomain(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+  try {
+    const hostname = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.toLowerCase()
+    // Remove www. and other common subdomains (shop., blog., m., etc.)
+    return hostname.replace(/^(www\d?|m|shop|blog|store|mail|en|he)\./i, '')
+  } catch { return '' }
+}
+
+// Extract only the registrable domain (e.g., example.co.il from sub.example.co.il)
+function baseDomain(domain: string): string {
+  if (!domain) return ''
+  // Handle common multi-part TLDs: .co.il, .org.il, .net.il, .com.au etc.
+  const parts = domain.split('.')
+  if (parts.length >= 3) {
+    const last2 = parts.slice(-2).join('.')
+    const multiPartTlds = ['co.il', 'org.il', 'net.il', 'ac.il', 'gov.il', 'co.uk', 'com.au', 'co.nz']
+    if (multiPartTlds.includes(last2)) return parts.slice(-3).join('.')
+  }
+  return parts.slice(-2).join('.')
 }
 
 function isOwnResult(r: any, companyName: string, companyDomain: string): boolean {
   const name = companyName.toLowerCase().trim()
   const domain = companyDomain.toLowerCase().trim()
+  const base = baseDomain(domain)
+  const resultRawDomain = extractDomain(r.url || '').toLowerCase().trim()
+  const resultBase = baseDomain(resultRawDomain)
   const resultTitle = (r.title || r.name || '').toLowerCase().trim()
-  const resultDomain = extractDomain(r.url || '').toLowerCase().trim()
   const resultUrl = (r.url || '').toLowerCase().trim()
-  const nameSlug = name.replace(/\s+/g, '')
-  return (
-    (domain.length >= 3 && (resultDomain.includes(domain) || resultUrl.includes(domain))) ||
+  const nameSlug = name.replace(/[\s\-_]+/g, '')
+
+  const match = (
+    (base.length >= 4 && resultBase === base) ||
+    (domain.length >= 3 && (resultRawDomain.includes(domain) || resultUrl.includes(domain))) ||
     (name.length >= 3 && resultTitle.includes(name)) ||
-    (nameSlug.length >= 3 && resultDomain.includes(nameSlug))
+    (nameSlug.length >= 4 && resultRawDomain.includes(nameSlug))
   )
+
+  console.log(`[SEO isOwnResult] company="${companyName}" domain="${domain}" base="${base}" | result="${r.name}" url="${r.url}" resultBase="${resultBase}" → ${match}`)
+  return match
 }
 
 function isLocalBusiness(overview: string, city: string, geoArea: string[]): boolean {
@@ -92,21 +116,21 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   let parsed: any = {}
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
-  const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
+  const competitorDomains = competitorWebsites.map(w => baseDomain(extractDomain(w))).filter(Boolean)
   const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
-  // Deduplicate by domain
+  // Deduplicate by base domain (handles www.foo.co.il === foo.co.il === shop.foo.co.il)
   const seenDomains = new Set<string>()
   const results: any[] = []
   for (const r of rawResults) {
-    const domain = extractDomain(r.url || '') || r.name
-    if (seenDomains.has(domain)) continue
+    const domain = baseDomain(extractDomain(r.url || '')) || (r.name || '').toLowerCase().trim()
+    if (!domain || seenDomains.has(domain)) continue
     seenDomains.add(domain)
     results.push(r)
   }
   results.forEach((r: any) => {
     r.isOwn = isOwnResult(r, companyName, companyDomain)
-    const rDomain = extractDomain(r.url || '')
-    r.isKnownCompetitor = !r.isOwn && competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
+    const rBase = baseDomain(extractDomain(r.url || ''))
+    r.isKnownCompetitor = !r.isOwn && competitorDomains.some(d => d && rBase === d)
     if (typeof r.is_sponsored !== 'boolean') r.is_sponsored = false
   })
 

@@ -347,8 +347,12 @@ export default function ProfilePage() {
       const url = force ? '/api/analyze-company-reviews?force=true' : '/api/analyze-company-reviews'
       const res = await fetch(url, { method: 'POST' })
       const data = await res.json()
-      if (data.success !== false) setReviewAnalysis(data as ReviewAnalysis)
-      else toast({ title: "שגיאה", description: data.error || "לא ניתן לטעון ניתוח ביקורות", variant: "destructive" })
+      if (data.success !== false) {
+        setReviewAnalysis(data as ReviewAnalysis)
+        // Belt-and-suspenders: save to DB in case API DB save failed
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) await supabase.from('companies').update({ review_analysis: data } as any).eq('id', user.id)
+      } else toast({ title: "שגיאה", description: data.error || "לא ניתן לטעון ניתוח ביקורות", variant: "destructive" })
     } catch {
       toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
     } finally { setLoadingReviewAnalysis(false) }

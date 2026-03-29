@@ -166,19 +166,26 @@ export default function CompetitorsPage() {
     const { data, error } = await supabase
       .from("competitors")
       .select("*")
-      .order("source", { ascending: true })   // manual first
-      .order("threat_score", { ascending: false })
 
     if (!error && data) {
+      // Manual competitors first (newest first), then auto (by threat_score desc)
+      const sorted = [
+        ...data.filter(c => c.source === 'manual').sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ),
+        ...data.filter(c => c.source !== 'manual').sort((a, b) =>
+          (b.threat_score || 0) - (a.threat_score || 0)
+        ),
+      ]
       // Trim to max 10 — delete excess auto competitors from DB
-      if (data.length > 10) {
-        const excess = data.slice(10).filter(c => c.source !== 'manual')
+      if (sorted.length > 10) {
+        const excess = sorted.slice(10).filter(c => c.source !== 'manual')
         if (excess.length > 0) {
           await supabase.from('competitors').delete().in('id', excess.map(c => c.id))
         }
-        setCompetitors(data.slice(0, 10))
+        setCompetitors(sorted.slice(0, 10))
       } else {
-        setCompetitors(data)
+        setCompetitors(sorted)
       }
     }
     setLoading(false)

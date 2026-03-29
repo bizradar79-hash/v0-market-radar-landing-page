@@ -24,6 +24,8 @@ import {
   Building2,
   Calendar,
   Newspaper,
+  Search,
+  Globe,
 } from "lucide-react"
 
 interface CompanyInfo {
@@ -33,6 +35,13 @@ interface CompanyInfo {
   website: string
   businessOverview: string
   geographicScope: string[]
+}
+
+interface SeoGeoSummary {
+  bestSeoPosition: number | null
+  bestGeoPosition: number | null
+  seoQuery: string
+  geoEngine: string
 }
 
 interface DashboardData {
@@ -48,6 +57,7 @@ interface DashboardData {
   topTrends: Array<{ name: string; direction: string; category: string }>
   lastAnalyzed: string | null
   companyInfo: CompanyInfo | null
+  seoGeo: SeoGeoSummary | null
 }
 
 export default function AppDashboardPage() {
@@ -92,8 +102,48 @@ export default function AppDashboardPage() {
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
       supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
-      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope").single(),
+      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking").single(),
     ])
+
+    // Extract best SEO / GEO positions from cached ranking data
+    let seoGeo: SeoGeoSummary | null = null
+    if (companyData) {
+      const seoData = (companyData as any).seo_ranking as any
+      const geoData = (companyData as any).geo_ranking as any
+
+      let bestSeoPosition: number | null = null
+      let seoQuery = ''
+      if (seoData?.queryVariants?.length) {
+        for (const v of seoData.queryVariants) {
+          if (v.position != null && (bestSeoPosition === null || v.position < bestSeoPosition)) {
+            bestSeoPosition = v.position
+            seoQuery = v.query || ''
+          }
+        }
+      } else if (seoData?.position != null) {
+        bestSeoPosition = seoData.position
+        seoQuery = seoData.query || ''
+      }
+
+      let bestGeoPosition: number | null = null
+      let geoEngine = ''
+      if (geoData?.engines?.length) {
+        for (const e of geoData.engines) {
+          const pos = e.position ?? e.rank
+          if (pos != null && (bestGeoPosition === null || pos < bestGeoPosition)) {
+            bestGeoPosition = pos
+            geoEngine = e.engine || e.name || ''
+          }
+        }
+      } else if (geoData?.position != null) {
+        bestGeoPosition = geoData.position
+        geoEngine = geoData.engine || ''
+      }
+
+      if (bestSeoPosition !== null || bestGeoPosition !== null) {
+        seoGeo = { bestSeoPosition, bestGeoPosition, seoQuery, geoEngine }
+      }
+    }
 
     setData({
       savedOppsCount: savedOppsCount || 0,
@@ -107,6 +157,7 @@ export default function AppDashboardPage() {
       upcomingConferences: upcomingConferences || [],
       topTrends: topTrends || [],
       lastAnalyzed: companyData?.last_analyzed || null,
+      seoGeo,
       companyInfo: companyData ? {
         name: companyData.name || '',
         industry: companyData.industry || '',
@@ -315,9 +366,6 @@ export default function AppDashboardPage() {
       {/* Weekly Actions */}
       <WeeklyActionsBlock />
 
-      {/* Niche Discovery */}
-      <NicheDiscoveryBlock />
-
       {/* Market Analysis */}
       <MarketAnalysisBlock />
 
@@ -427,6 +475,66 @@ export default function AppDashboardPage() {
               </Card>
             )}
 
+            {/* SEO / GEO Summary Widget */}
+            {data.seoGeo && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Search className="h-5 w-5 text-primary" />
+                    דירוג SEO / GEO
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {data.seoGeo.bestSeoPosition != null && (
+                      <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            <Search className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                            SEO — מיקום מוביל
+                          </p>
+                          {data.seoGeo.seoQuery && (
+                            <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">"{data.seoGeo.seoQuery}"</p>
+                          )}
+                        </div>
+                        <Badge variant="outline" className={
+                          data.seoGeo.bestSeoPosition <= 3 ? "border-green-200 text-green-600" :
+                          data.seoGeo.bestSeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
+                          "border-red-200 text-red-600"
+                        }>
+                          #{data.seoGeo.bestSeoPosition}
+                        </Badge>
+                      </div>
+                    )}
+                    {data.seoGeo.bestGeoPosition != null && (
+                      <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            <Globe className="h-3.5 w-3.5 text-teal-500 shrink-0" />
+                            GEO — מיקום מוביל
+                          </p>
+                          {data.seoGeo.geoEngine && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{data.seoGeo.geoEngine}</p>
+                          )}
+                        </div>
+                        <Badge variant="outline" className={
+                          data.seoGeo.bestGeoPosition <= 3 ? "border-green-200 text-green-600" :
+                          data.seoGeo.bestGeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
+                          "border-red-200 text-red-600"
+                        }>
+                          #{data.seoGeo.bestGeoPosition}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                  <Link href="/app/seo-geo" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בדוח מלא
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
+
             {data.upcomingConferences.length > 0 && (
               <Card>
                 <CardHeader>
@@ -501,6 +609,9 @@ export default function AppDashboardPage() {
           </div>
         )
       )}
+
+      {/* Niche Discovery — always at bottom */}
+      <NicheDiscoveryBlock />
     </div>
   )
 }

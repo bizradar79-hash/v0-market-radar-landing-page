@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       { data: leads },
       { data: conferences },
     ] = await Promise.all([
-      ctx.supabase.from('companies').select('keyword_trends, niche_opportunities').eq('id', ctx.user.id).single(),
+      ctx.supabase.from('companies').select('keyword_trends, niche_opportunities, industry_trends, competitor_trends, seo_ranking, geo_ranking').eq('id', ctx.user.id).single(),
       ctx.supabase.from('tenders').select('title, organization, deadline, link, description').eq('company_id', ctx.user.id).order('deadline', { ascending: true }).limit(10),
       ctx.supabase.from('news').select('title, source, url, summary, category, published_at').eq('company_id', ctx.user.id).order('published_at', { ascending: false }).limit(10),
       ctx.supabase.from('leads').select('name, industry, location, score').eq('company_id', ctx.user.id).order('score', { ascending: false }).limit(8),
@@ -55,6 +55,32 @@ export async function POST(request: Request) {
         for (const p of phrases.slice(0, 3)) {
           if (p.phrase) trendLines.push(`"${p.phrase}" (${p.trend || ''}) — ${p.reason || ''}`)
         }
+      }
+    }
+
+    // Industry trends from new module
+    const industryTrendsData = companyRow?.industry_trends as { trends?: any[] } | null
+    const industryTrendLines = (industryTrendsData?.trends || []).slice(0, 5).map((t: any) =>
+      `"${t.name}" (${t.direction || ''}, ${t.region || ''}) — ${t.evidence || ''} [מקור: ${t.source || ''}]`
+    )
+
+    // Competitor trends from new module
+    const competitorTrendsData = companyRow?.competitor_trends as { competitor_data?: any[] } | null
+    const competitorTrendLines = (competitorTrendsData?.competitor_data || []).flatMap((c: any) => {
+      const lines: string[] = []
+      if (c.new_activity) lines.push(`${c.competitor_name}: ${c.new_activity}`)
+      if (c.has_opportunity) lines.push(`הזדמנות מול ${c.competitor_name}: ${c.opportunity}`)
+      return lines
+    })
+
+    // SEO/GEO gaps
+    const seoData = companyRow?.seo_ranking as any
+    const geoData = companyRow?.geo_ranking as any
+    const seoLines: string[] = []
+    if (seoData?.queryVariants) {
+      for (const v of seoData.queryVariants) {
+        if (!v.appeared) seoLines.push(`לא מופיע בחיפוש: "${v.query}"`)
+        else if (v.position > 5) seoLines.push(`מיקום ${v.position} בחיפוש: "${v.query}"`)
       }
     }
 
@@ -107,8 +133,17 @@ ${profile}${profileSummary}
 ## מתחרים (${competitorNames.length}):
 ${competitorNames.length > 0 ? competitorNames.join(', ') : 'אין נתונים'}
 
-## טרנדים עולים בתחום (${trendLines.length}):
+## פעילות מתחרים לאחרונה (${competitorTrendLines.length}):
+${competitorTrendLines.length > 0 ? competitorTrendLines.join('\n') : 'אין נתונים'}
+
+## טרנדים בתעשייה — real-time (${industryTrendLines.length}):
+${industryTrendLines.length > 0 ? industryTrendLines.join('\n') : 'אין נתונים'}
+
+## טרנדים עולים — keyword trends (${trendLines.length}):
 ${trendLines.length > 0 ? trendLines.join('\n') : 'אין נתונים'}
+
+## פערי SEO (${seoLines.length}):
+${seoLines.length > 0 ? seoLines.join('\n') : 'אין נתונים'}
 
 ## מכרזים פתוחים (${tenderLines.length}):
 ${tenderLines.length > 0 ? tenderLines.join('\n') : 'אין מכרזים'}

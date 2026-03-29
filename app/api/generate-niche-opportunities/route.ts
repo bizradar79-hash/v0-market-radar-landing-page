@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       { data: marketTrends },
     ] = await Promise.all([
       ctx.supabase.from('companies')
-        .select('keyword_trends, seo_ranking, geo_ranking, weekly_actions, niche_opportunities')
+        .select('keyword_trends, seo_ranking, geo_ranking, weekly_actions, niche_opportunities, industry_trends, competitor_trends')
         .eq('id', ctx.user.id).single(),
       ctx.supabase.from('tenders')
         .select('title, organization, deadline, link, description')
@@ -77,6 +77,28 @@ export async function POST(request: Request) {
     const usedSignalLabels: string[] = (weeklyActions?.actions || [])
       .flatMap((a: any) => (a.signals || []).map((s: any) => s.label || ''))
       .filter(Boolean)
+
+    // Industry trends from new module
+    const industryTrendsData = companyRow?.industry_trends as { trends?: any[] } | null
+    const industryTrendLines = (industryTrendsData?.trends || []).slice(0, 6).map((t: any) =>
+      `"${t.name}" (${t.direction || ''}, ${t.region || ''}, ביטחון ${t.confidence || ''}%) — ${t.evidence || ''}`
+    )
+
+    // Competitor trends — opportunities found
+    const competitorTrendsData = companyRow?.competitor_trends as { competitor_data?: any[] } | null
+    const competitorOpportunityLines = (competitorTrendsData?.competitor_data || [])
+      .filter((c: any) => c.has_opportunity)
+      .map((c: any) => `הזדמנות מול ${c.competitor_name}: ${c.opportunity}`)
+
+    // SEO/GEO gaps — queries where we don't appear
+    const seoData = companyRow?.seo_ranking as any
+    const seoGapLines: string[] = []
+    if (seoData?.queryVariants) {
+      for (const v of seoData.queryVariants) {
+        if (!v.appeared) seoGapLines.push(`SEO gap: "${v.query}" — לא מופיעים`)
+        else if (v.position > 7) seoGapLines.push(`SEO weak: "${v.query}" — מיקום ${v.position}`)
+      }
+    }
 
     const competitorLines = (ctx.competitors || []).map((c: any) =>
       `"${c.name}" | ${c.services || ''} | threat: ${c.threat_score || 0}`
@@ -126,8 +148,17 @@ ${profile}${profileEdge}
 ## מתחרים (${competitorLines.length}):
 ${competitorLines.length > 0 ? competitorLines.join('\n') : 'אין'}
 
+## הזדמנויות מול מתחרים (${competitorOpportunityLines.length}):
+${competitorOpportunityLines.length > 0 ? competitorOpportunityLines.join('\n') : 'אין'}
+
+## טרנדים בתעשייה — real-time (${industryTrendLines.length}):
+${industryTrendLines.length > 0 ? industryTrendLines.join('\n') : 'אין'}
+
 ## טרנדים עולים — keyword trends (${trendLines.length}):
 ${trendLines.length > 0 ? trendLines.join('\n') : 'אין'}
+
+## פערי SEO (מקום לנצל) (${seoGapLines.length}):
+${seoGapLines.length > 0 ? seoGapLines.join('\n') : 'אין'}
 
 ## מגמות שוק כלליות (${marketTrendLines.length}):
 ${marketTrendLines.length > 0 ? marketTrendLines.join('\n') : 'אין'}

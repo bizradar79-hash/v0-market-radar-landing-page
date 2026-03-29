@@ -138,6 +138,28 @@ export async function POST(request: Request) {
       return true
     })
 
+    // URL validation: filter out 404s and unreachable URLs using HEAD requests
+    const validationResults = await Promise.allSettled(
+      list.map(async (n: any) => {
+        const url = n.url || ''
+        if (!url.startsWith('http')) return { n, valid: false }
+        try {
+          const res = await fetch(url, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(5000),
+            redirect: 'follow',
+          })
+          return { n, valid: res.ok || res.status === 405 } // 405 = Method Not Allowed but URL exists
+        } catch {
+          return { n, valid: false }
+        }
+      })
+    )
+    list = validationResults
+      .filter((r): r is PromiseFulfilledResult<{ n: any; valid: boolean }> => r.status === 'fulfilled' && r.value.valid)
+      .map(r => r.value.n)
+    steps.urlValidation = { count: list.length }
+
     steps.db = 'starting'
     await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
 
