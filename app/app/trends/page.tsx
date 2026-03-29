@@ -4,16 +4,19 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Progress } from "@/components/ui/progress"
 import {
   TrendingUp, TrendingDown, Minus, Loader2, Sparkles,
-  Plus, Hash, ChevronDown, X, RefreshCw,
+  Plus, Hash, ChevronDown, X, RefreshCw, AlertTriangle,
+  Zap, BarChart2, MessageSquare, Lightbulb, AlertCircle,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
+// ─── Existing keyword trend types ───────────────────────────────────────────
 interface Trend {
   id: string
   company_id: string
@@ -33,7 +36,7 @@ interface KwTrend {
 
 interface KwData {
   fetchedAt: string
-  trends?: KwTrend[]  // backward-compat (old records without israel/world)
+  trends?: KwTrend[]
   israel?: KwTrend[]
   world?: KwTrend[]
 }
@@ -42,6 +45,64 @@ interface KwTrendsMap {
   [keyword: string]: KwData
 }
 
+// ─── New deep-analysis types ─────────────────────────────────────────────────
+interface EmergingTrend {
+  trend_name: string
+  evidence: string
+  source_type: string
+  why_happening: string
+  confidence_score: number
+  hallucination_risk?: boolean
+}
+
+interface KeywordEntry {
+  keyword: string
+  search_volume: string | number
+  competition_level: 'low' | 'medium' | 'high'
+  trend_direction: 'rising' | 'stable' | 'declining'
+  evidence: string
+}
+
+interface UnmetNeed {
+  pain_point: string
+  customer_quote: string
+  frequency: string
+  opportunity_size: 'low' | 'medium' | 'high'
+}
+
+interface StrategicAction {
+  action: string
+  reasoning: string
+  evidence: string
+  priority: 'immediate' | 'short_term' | 'long_term'
+  confidence_score: number
+}
+
+interface ManualKeywordAnalysis {
+  keyword: string
+  trend_assessment: string
+  competition_context: string
+  evidence: string
+  confidence_score: number
+  hallucination_risk?: boolean
+}
+
+interface TrendsAnalysis {
+  emerging_trends: EmergingTrend[]
+  keyword_map: { quick_wins: KeywordEntry[]; high_volume: KeywordEntry[] }
+  unmet_needs: UnmetNeed[]
+  strategic_actions: StrategicAction[]
+  manual_keyword_analysis: ManualKeywordAnalysis[]
+  data_quality_warning: string | null
+  fetchedAt: string
+  validation?: {
+    valid: boolean
+    hallucination_flags: { field: string; value: string; reason: string }[]
+    confidence_reduction: number
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function getMomentumBadge(direction: string) {
   if (direction === 'עולה' || direction === 'up') {
     return <Badge className="bg-green-100 text-green-700 shrink-0"><TrendingUp className="ml-1 h-3 w-3" />עולה</Badge>
@@ -75,10 +136,45 @@ function Sparkline({ data, trend }: { data: { week: string; value: number }[]; t
   )
 }
 
+function ConfidenceBar({ score }: { score: number }) {
+  const color = score >= 70 ? 'bg-green-500' : score >= 40 ? 'bg-yellow-500' : 'bg-red-400'
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${score}%` }} />
+      </div>
+      <span className="text-xs text-muted-foreground shrink-0">{score}%</span>
+    </div>
+  )
+}
+
+function competitionLabel(level: string) {
+  if (level === 'low') return { label: 'נמוכה', cls: 'text-green-600 bg-green-50 border-green-200' }
+  if (level === 'high') return { label: 'גבוהה', cls: 'text-red-600 bg-red-50 border-red-200' }
+  return { label: 'בינונית', cls: 'text-yellow-600 bg-yellow-50 border-yellow-200' }
+}
+
+function priorityConfig(p: string) {
+  if (p === 'immediate') return { label: 'מיידי', cls: 'border-red-200 bg-red-50', dot: 'bg-red-500' }
+  if (p === 'short_term') return { label: 'טווח קצר', cls: 'border-yellow-200 bg-yellow-50', dot: 'bg-yellow-500' }
+  return { label: 'טווח ארוך', cls: 'border-blue-200 bg-blue-50', dot: 'bg-blue-500' }
+}
+
+function opportunityBadge(size: string) {
+  if (size === 'high') return <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">הזדמנות גדולה</Badge>
+  if (size === 'low') return <Badge variant="outline" className="text-muted-foreground text-xs">הזדמנות קטנה</Badge>
+  return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-xs">הזדמנות בינונית</Badge>
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function TrendsPage() {
   const [trends, setTrends] = useState<Trend[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+
+  // Deep analysis
+  const [trendsAnalysis, setTrendsAnalysis] = useState<TrendsAnalysis | null>(null)
+  const [analyzingDeep, setAnalyzingDeep] = useState(false)
 
   // Keyword trends state
   const [keywords, setKeywords] = useState<string[]>([])
@@ -95,15 +191,18 @@ export default function TrendsPage() {
   const { toast } = useToast()
 
   useEffect(() => {
-    fetchTrends()
-    fetchKeywordData()
+    fetchAll()
   }, [])
+
+  async function fetchAll() {
+    await Promise.all([fetchTrends(), fetchKeywordData(), fetchDeepAnalysis()])
+    setLoading(false)
+  }
 
   async function fetchTrends() {
     const { data, error } = await supabase
       .from("trends").select("*").order("created_at", { ascending: false })
     if (!error && data) setTrends(data)
-    setLoading(false)
   }
 
   async function fetchKeywordData() {
@@ -114,6 +213,16 @@ export default function TrendsPage() {
     if (data?.keywords) setKeywords(data.keywords)
     if (data?.keyword_trends && Object.keys(data.keyword_trends).length > 0) {
       setKwTrends(data.keyword_trends as KwTrendsMap)
+    }
+  }
+
+  async function fetchDeepAnalysis() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase
+      .from('companies').select('trends_analysis').eq('id', user.id).single()
+    if (data?.trends_analysis?.fetchedAt) {
+      setTrendsAnalysis(data.trends_analysis as TrendsAnalysis)
     }
   }
 
@@ -129,9 +238,31 @@ export default function TrendsPage() {
         toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור טרנדים", variant: "destructive" })
       }
     } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
+      toast({ title: "שגיאה", variant: "destructive" })
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function runDeepAnalysis() {
+    setAnalyzingDeep(true)
+    try {
+      const res = await fetch('/api/analyze-trends?force=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_keywords: keywords.length > 0 ? keywords : undefined }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTrendsAnalysis(data as TrendsAnalysis)
+        toast({ title: "ניתוח עומק הושלם" })
+      } else {
+        toast({ title: "שגיאה בניתוח", description: data.error, variant: "destructive" })
+      }
+    } catch {
+      toast({ title: "שגיאה", variant: "destructive" })
+    } finally {
+      setAnalyzingDeep(false)
     }
   }
 
@@ -152,11 +283,7 @@ export default function TrendsPage() {
           world: data.world,
         } }))
         setExpanded(prev => new Set([...prev, kw]))
-        if (data.saveError) {
-          toast({ title: `טרנדים נטענו אך לא נשמרו`, description: data.saveError, variant: 'destructive' })
-        } else {
-          toast({ title: `טרנדים עודכנו: ${kw}` })
-        }
+        toast({ title: `טרנדים עודכנו: ${kw}` })
       } else {
         toast({ title: 'שגיאה', description: data.error, variant: 'destructive' })
       }
@@ -190,7 +317,6 @@ export default function TrendsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const newList = keywords.filter(k => k !== kw)
-    // Also prune from keyword_trends
     const newTrends = { ...kwTrends }
     delete newTrends[kw]
     await supabase.from('companies')
@@ -224,7 +350,13 @@ export default function TrendsPage() {
     return acc
   }, {} as Record<string, Trend[]>)
 
-  const sources = Object.keys(sourceGroups)
+  const priorityGroups = trendsAnalysis
+    ? {
+        immediate: trendsAnalysis.strategic_actions.filter(a => a.priority === 'immediate'),
+        short_term: trendsAnalysis.strategic_actions.filter(a => a.priority === 'short_term'),
+        long_term: trendsAnalysis.strategic_actions.filter(a => a.priority === 'long_term'),
+      }
+    : null
 
   return (
     <div className="space-y-6">
@@ -234,15 +366,249 @@ export default function TrendsPage() {
           <h1 className="text-2xl font-bold text-foreground">טרנדים</h1>
           <p className="text-muted-foreground">מעקב אחר מגמות שוק ותחומים מתפתחים</p>
         </div>
-        <Button onClick={generateTrends} disabled={generating}>
-          {generating
-            ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח טרנדים...</>
-            : <><Sparkles className="ml-2 h-4 w-4" />גלה טרנדים עם AI</>
-          }
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={generateTrends} disabled={generating}>
+            {generating
+              ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח...</>
+              : <><RefreshCw className="ml-2 h-4 w-4" />טרנדים מהירים</>
+            }
+          </Button>
+          <Button onClick={runDeepAnalysis} disabled={analyzingDeep}>
+            {analyzingDeep
+              ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח עמוק...</>
+              : <><Sparkles className="ml-2 h-4 w-4" />ניתוח עמוק עם AI</>
+            }
+          </Button>
+        </div>
       </div>
 
-      {/* ─── Keyword Trends Section ─── */}
+      {/* ─── Deep Analysis Section ───────────────────────────────────────── */}
+      {trendsAnalysis && (
+        <div className="space-y-5">
+          {/* Data quality warning */}
+          {trendsAnalysis.data_quality_warning && (
+            <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
+              <AlertTriangle className="h-5 w-5 text-orange-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-orange-800">אזהרת איכות נתונים</p>
+                <p className="text-sm text-orange-700 mt-0.5">{trendsAnalysis.data_quality_warning}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Validation flags summary */}
+          {trendsAnalysis.validation && !trendsAnalysis.validation.valid && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-700">
+                {trendsAnalysis.validation.hallucination_flags.length} תובנות סומנו כבעלות סיכון הזיה —
+                הצג תגיות כתומות על כל תובנה בסיכון.
+                אמינות הופחתה ב-{trendsAnalysis.validation.confidence_reduction}%.
+              </p>
+            </div>
+          )}
+
+          {/* Emerging Trends */}
+          {trendsAnalysis.emerging_trends.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                טרנדים מתפתחים
+              </h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {trendsAnalysis.emerging_trends.map((t, i) => (
+                  <Card key={i} className="transition-shadow hover:shadow-md">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-semibold text-sm leading-snug">{t.trend_name}</h3>
+                        <div className="flex gap-1 shrink-0">
+                          {t.hallucination_risk && (
+                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] py-0">⚠ סיכון הזיה</Badge>
+                          )}
+                          <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground">
+                            {t.source_type}
+                          </Badge>
+                        </div>
+                      </div>
+                      <blockquote className="border-r-2 border-primary/30 pr-3 text-xs text-muted-foreground italic">
+                        {t.evidence}
+                      </blockquote>
+                      <p className="text-xs text-foreground/80">{t.why_happening}</p>
+                      <ConfidenceBar score={t.confidence_score} />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Keyword Map */}
+          {(trendsAnalysis.keyword_map.quick_wins.length > 0 || trendsAnalysis.keyword_map.high_volume.length > 0) && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
+                <BarChart2 className="h-5 w-5 text-primary" />
+                מפת מילות מפתח
+              </h2>
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Quick Wins */}
+                <div className="rounded-lg border border-green-200 bg-green-50/30 p-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-green-700 flex items-center gap-1.5">
+                    <Zap className="h-4 w-4" />
+                    Quick Wins — ניצחונות מהירים
+                  </h3>
+                  {trendsAnalysis.keyword_map.quick_wins.length === 0
+                    ? <p className="text-xs text-muted-foreground">אין נתונים</p>
+                    : trendsAnalysis.keyword_map.quick_wins.map((kw, i) => {
+                        const comp = competitionLabel(kw.competition_level)
+                        return (
+                          <div key={i} className="rounded-md bg-white border border-green-100 p-3 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{kw.keyword}</span>
+                              <Badge variant="outline" className={`text-[10px] py-0 border ${comp.cls}`}>{comp.label}</Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>נפח: {kw.search_volume}</span>
+                              <span>·</span>
+                              <span className={kw.trend_direction === 'rising' ? 'text-green-600' : kw.trend_direction === 'declining' ? 'text-red-500' : 'text-muted-foreground'}>
+                                {kw.trend_direction === 'rising' ? '↑ עולה' : kw.trend_direction === 'declining' ? '↓ יורד' : '→ יציב'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground italic">{kw.evidence}</p>
+                          </div>
+                        )
+                      })
+                  }
+                </div>
+
+                {/* High Volume */}
+                <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-1.5">
+                    <BarChart2 className="h-4 w-4" />
+                    High Volume — נפח גבוה
+                  </h3>
+                  {trendsAnalysis.keyword_map.high_volume.length === 0
+                    ? <p className="text-xs text-muted-foreground">אין נתונים</p>
+                    : trendsAnalysis.keyword_map.high_volume.map((kw, i) => {
+                        const comp = competitionLabel(kw.competition_level)
+                        return (
+                          <div key={i} className="rounded-md bg-white border border-blue-100 p-3 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{kw.keyword}</span>
+                              <Badge variant="outline" className={`text-[10px] py-0 border ${comp.cls}`}>{comp.label}</Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>נפח: {kw.search_volume}</span>
+                              <span>·</span>
+                              <span className={kw.trend_direction === 'rising' ? 'text-green-600' : kw.trend_direction === 'declining' ? 'text-red-500' : 'text-muted-foreground'}>
+                                {kw.trend_direction === 'rising' ? '↑ עולה' : kw.trend_direction === 'declining' ? '↓ יורד' : '→ יציב'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground italic">{kw.evidence}</p>
+                          </div>
+                        )
+                      })
+                  }
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Unmet Needs */}
+          {trendsAnalysis.unmet_needs.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
+                <MessageSquare className="h-5 w-5 text-primary" />
+                צרכים לא מסופקים
+              </h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {trendsAnalysis.unmet_needs.map((n, i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-semibold text-sm">{n.pain_point}</h3>
+                        {opportunityBadge(n.opportunity_size)}
+                      </div>
+                      <blockquote className="border-r-4 border-muted pr-3 text-sm text-muted-foreground italic leading-relaxed">
+                        "{n.customer_quote}"
+                      </blockquote>
+                      <p className="text-xs text-muted-foreground">תדירות: {n.frequency}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Strategic Actions */}
+          {trendsAnalysis.strategic_actions.length > 0 && priorityGroups && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
+                <Lightbulb className="h-5 w-5 text-primary" />
+                פעולות אסטרטגיות
+              </h2>
+              <div className="space-y-4">
+                {(['immediate', 'short_term', 'long_term'] as const).map(p => {
+                  const actions = priorityGroups[p]
+                  if (actions.length === 0) return null
+                  const cfg = priorityConfig(p)
+                  return (
+                    <div key={p} className={`rounded-lg border p-4 space-y-3 ${cfg.cls}`}>
+                      <h3 className="text-sm font-semibold flex items-center gap-2">
+                        <span className={`inline-block h-2 w-2 rounded-full ${cfg.dot}`} />
+                        {cfg.label}
+                      </h3>
+                      {actions.map((a, i) => (
+                        <div key={i} className="rounded-md bg-white/70 border border-white p-3 space-y-1.5">
+                          <p className="text-sm font-medium">{a.action}</p>
+                          <p className="text-xs text-muted-foreground">{a.reasoning}</p>
+                          <blockquote className="border-r-2 border-muted/50 pr-2 text-xs text-muted-foreground italic">{a.evidence}</blockquote>
+                          <ConfidenceBar score={a.confidence_score} />
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Manual Keyword Analysis */}
+          {trendsAnalysis.manual_keyword_analysis.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
+                <Hash className="h-5 w-5 text-primary" />
+                ניתוח ביטויים ידניים
+              </h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {trendsAnalysis.manual_keyword_analysis.map((mk, i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-sm">#{mk.keyword}</span>
+                        <div className="flex gap-1">
+                          {mk.hallucination_risk && (
+                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] py-0">⚠ סיכון הזיה</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-foreground/80">{mk.trend_assessment}</p>
+                      <p className="text-xs text-muted-foreground">{mk.competition_context}</p>
+                      <blockquote className="border-r-2 border-primary/30 pr-2 text-xs text-muted-foreground italic">{mk.evidence}</blockquote>
+                      <ConfidenceBar score={mk.confidence_score} />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            ניתוח עומק עודכן: {new Date(trendsAnalysis.fetchedAt).toLocaleDateString('he-IL')}
+          </p>
+        </div>
+      )}
+
+      {/* ─── Keyword Trends Section ───────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between border-b pb-2">
           <div>
@@ -259,22 +625,15 @@ export default function TrendsPage() {
         {/* Data source info box */}
         <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-sm">
           {!infoExpanded ? (
-            <button
-              onClick={() => setInfoExpanded(true)}
-              className="text-blue-700 font-medium"
-            >
+            <button onClick={() => setInfoExpanded(true)} className="text-blue-700 font-medium">
               📡 מאיפה מגיעים הנתונים? ▼
             </button>
           ) : (
             <div className="space-y-1 text-blue-800 leading-relaxed">
               <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות</p>
               <p>וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
-              <p>הנתונים מתעדכנים אחת לשבוע ומשקפים את מה שאנשים מחפשים ומדברים עליו</p>
-              <p>בתחום שלך ממש עכשיו.</p>
-              <button
-                onClick={() => setInfoExpanded(false)}
-                className="text-blue-700 font-medium mt-1 block"
-              >
+              <p>ניתוח העומק משתמש בנתוני מילות המפתח, ביקורות, ומתחרים שנשמרו במערכת.</p>
+              <button onClick={() => setInfoExpanded(false)} className="text-blue-700 font-medium mt-1 block">
                 הצג פחות ▲
               </button>
             </div>
@@ -304,7 +663,7 @@ export default function TrendsPage() {
             <Hash className="h-10 w-10 text-muted-foreground/40" />
             <div>
               <p className="font-medium text-foreground">עדיין לא הוגדרו מילות מפתח</p>
-              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח ו-AI יחפש מה טרנדי עכשיו בישראל</p>
+              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח — AI יחפש מה טרנדי עכשיו ויכלול אותה בניתוח העומק</p>
             </div>
             <Button onClick={() => setShowAddKw(true)}>
               <Plus className="ml-2 h-4 w-4" />הוסף מילת מפתח
@@ -317,8 +676,6 @@ export default function TrendsPage() {
           const kwData = kwTrends[kw]
           const isExpanded = expanded.has(kw)
           const isLoading = !!loadingKw[kw]
-
-          // Resolve trend lists — support both old format (trends) and new (israel/world)
           const israelTrends = kwData?.israel || kwData?.trends || []
           const worldTrends = kwData?.world || []
           const hasWorld = worldTrends.length > 0
@@ -328,44 +685,23 @@ export default function TrendsPage() {
           return (
             <Card key={kw}>
               <CardContent className="p-4">
-                {/* Card header row */}
                 <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => toggleExpanded(kw)}
-                    className="flex items-center gap-2 text-right"
-                  >
+                  <button onClick={() => toggleExpanded(kw)} className="flex items-center gap-2 text-right">
                     <Hash className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span className="font-medium">{kw}</span>
-                    {kwData && (
-                      <span className="text-xs text-muted-foreground">
-                        {israelTrends.length} טרנדים
-                      </span>
-                    )}
+                    {kwData && <span className="text-xs text-muted-foreground">{israelTrends.length} טרנדים</span>}
                     <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>
                   <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost" size="icon" className="h-7 w-7"
-                      onClick={() => refreshKeywordTrend(kw)}
-                      disabled={isLoading}
-                      title="רענן טרנדים"
-                    >
-                      {isLoading
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <RefreshCw className="h-3.5 w-3.5" />
-                      }
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refreshKeywordTrend(kw)} disabled={isLoading} title="רענן טרנדים">
+                      {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                     </Button>
-                    <Button
-                      variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeKeyword(kw)}
-                      title="הסר מילת מפתח"
-                    >
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeKeyword(kw)} title="הסר מילת מפתח">
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
 
-                {/* Loading state */}
                 {isLoading && (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -373,35 +709,21 @@ export default function TrendsPage() {
                   </div>
                 )}
 
-                {/* Expanded trends list */}
                 {isExpanded && !isLoading && kwData && (
                   <div className="mt-3">
-                    {/* Israel / World tabs — only shown when world data exists */}
                     {hasWorld && (
                       <div className="flex border-b mb-3">
-                        <button
-                          onClick={() => setActiveTab(prev => ({ ...prev, [kw]: 'israel' }))}
-                          className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
-                            tab === 'israel'
-                              ? 'border-primary text-primary'
-                              : 'border-transparent text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          🇮🇱 ישראל
-                        </button>
-                        <button
-                          onClick={() => setActiveTab(prev => ({ ...prev, [kw]: 'world' }))}
-                          className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
-                            tab === 'world'
-                              ? 'border-primary text-primary'
-                              : 'border-transparent text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          🌍 עולם
-                        </button>
+                        {(['israel', 'world'] as const).map(t => (
+                          <button
+                            key={t}
+                            onClick={() => setActiveTab(prev => ({ ...prev, [kw]: t }))}
+                            className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                          >
+                            {t === 'israel' ? '🇮🇱 ישראל' : '🌍 עולם'}
+                          </button>
+                        ))}
                       </div>
                     )}
-
                     <div className="space-y-2">
                       {displayTrends.map((t, i) => (
                         <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
@@ -412,20 +734,16 @@ export default function TrendsPage() {
                             </div>
                             <p className="text-xs text-muted-foreground">{t.reason}</p>
                           </div>
-                          {t.trend_data?.length >= 2 && (
-                            <Sparkline data={t.trend_data} trend={t.trend} />
-                          )}
+                          {t.trend_data?.length >= 2 && <Sparkline data={t.trend_data} trend={t.trend} />}
                         </div>
                       ))}
                     </div>
-
                     <p className="text-xs text-muted-foreground pt-2">
                       עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
                     </p>
                   </div>
                 )}
 
-                {/* Empty state when expanded but no data */}
                 {isExpanded && !isLoading && !kwData && (
                   <div className="mt-3 text-center py-4 text-sm text-muted-foreground">
                     <p>לחץ רענן כדי לטעון טרנדים עבור &quot;{kw}&quot;</p>
@@ -437,8 +755,8 @@ export default function TrendsPage() {
         })}
       </div>
 
-      {/* ─── General Trends Section ─── */}
-      {sources.map((source) => (
+      {/* ─── General Trends Section ───────────────────────────────────────── */}
+      {Object.keys(sourceGroups).map((source) => (
         <div key={source} className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground border-b pb-2">{source}</h2>
           <div className="grid gap-4 md:grid-cols-2">
@@ -457,14 +775,19 @@ export default function TrendsPage() {
         </div>
       ))}
 
-      {trends.length === 0 && (
+      {trends.length === 0 && !trendsAnalysis && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <TrendingUp className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-muted-foreground">לא נמצאו טרנדים</p>
-            <Button className="mt-4" onClick={generateTrends} disabled={generating}>
-              <Sparkles className="ml-2 h-4 w-4" />גלה טרנדים עם AI
-            </Button>
+            <div className="flex gap-2 mt-4">
+              <Button variant="outline" onClick={generateTrends} disabled={generating}>
+                <RefreshCw className="ml-2 h-4 w-4" />טרנדים מהירים
+              </Button>
+              <Button onClick={runDeepAnalysis} disabled={analyzingDeep}>
+                <Sparkles className="ml-2 h-4 w-4" />ניתוח עמוק
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
