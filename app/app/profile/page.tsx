@@ -39,7 +39,6 @@ import {
   ExternalLink,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { BusinessProfileConfirmation } from "@/components/onboarding/BusinessProfileConfirmation"
 import type { BusinessProfile } from "@/types/business-profile"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -160,9 +159,7 @@ export default function ProfilePage() {
   const [generatingSwot, setGeneratingSwot] = useState(false)
   const [loadingPlaces, setLoadingPlaces] = useState(false)
   const [analyzingDeep, setAnalyzingDeep] = useState(false)
-  const [deepProfile, setDeepProfile] = useState<BusinessProfile | null>(null)
-  const [showDeepConfirm, setShowDeepConfirm] = useState(false)
-  const [savingDeepProfile, setSavingDeepProfile] = useState(false)
+  const [updatingAll, setUpdatingAll] = useState(false)
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
@@ -307,8 +304,13 @@ export default function ProfilePage() {
     try {
       const res = await fetch('/api/generate-overview', { method: 'POST' })
       const data = await res.json()
-      if (data.success) { setOverview(data.overview); toast({ title: "הסקירה עודכנה בהצלחה" }) }
-      else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור סקירה", variant: "destructive" })
+      if (data.success && data.overview) {
+        setOverview(data.overview)
+        // Belt-and-suspenders: ensure it's saved to DB
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) await supabase.from('companies').update({ business_overview: data.overview }).eq('id', user.id)
+        toast({ title: "הסקירה עודכנה בהצלחה" })
+      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור סקירה", variant: "destructive" })
     } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
     finally { setGeneratingOverview(false) }
   }
@@ -318,8 +320,13 @@ export default function ProfilePage() {
     try {
       const res = await fetch('/api/generate-swot', { method: 'POST' })
       const data = await res.json()
-      if (data.success) { setSwot(data.swot); toast({ title: "ניתוח SWOT נוצר בהצלחה" }) }
-      else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור ניתוח", variant: "destructive" })
+      if (data.success && data.swot) {
+        setSwot(data.swot)
+        // Ensure saved to DB even if API DB save failed
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) await supabase.from('companies').update({ swot: data.swot }).eq('id', user.id)
+        toast({ title: "ניתוח SWOT נוצר בהצלחה" })
+      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור ניתוח", variant: "destructive" })
     } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
     finally { setGeneratingSwot(false) }
   }
@@ -347,6 +354,17 @@ export default function ProfilePage() {
     } finally { setLoadingReviewAnalysis(false) }
   }
 
+  async function updateAll() {
+    setUpdatingAll(true)
+    try {
+      await analyzeDeep()
+      await generateSwot()
+      await loadReviewAnalysis(true)
+      toast({ title: "הכל עודכן בהצלחה" })
+    } catch { toast({ title: "שגיאה בעדכון", variant: "destructive" }) }
+    finally { setUpdatingAll(false) }
+  }
+
   async function analyzeDeep() {
     setAnalyzingDeep(true)
     try {
@@ -359,28 +377,15 @@ export default function ProfilePage() {
         body: JSON.stringify({ companyName: company?.name || '', website: company?.website || '', shortDescription: company?.description || '' }),
       })
       const data = await res.json()
-      if (data.success && data.profile) { setDeepProfile(data.profile); setShowDeepConfirm(true) }
-      else toast({ title: "שגיאה", description: data.error || "לא הצלחנו לנתח את העסק", variant: "destructive" })
+      if (data.success && data.profile) {
+        setBusinessProfile(data.profile)
+        // API already saves to DB; also save directly for reliability
+        await supabase.from('companies').update({ business_profile: data.profile }).eq('id', user.id)
+        toast({ title: "פרופיל עסקי עודכן", description: "המידע ישמש לשיפור כל הניתוחים" })
+      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו לנתח את העסק", variant: "destructive" })
     } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
     finally { setAnalyzingDeep(false) }
   }
-
-  async function handleConfirmDeepProfile(confirmed: BusinessProfile) {
-    setSavingDeepProfile(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      await supabase.from('companies').update({ business_profile: confirmed }).eq('id', user.id)
-      setBusinessProfile(confirmed)
-      setShowDeepConfirm(false)
-      toast({ title: "פרופיל עסקי עודכן", description: "המידע ישמש לשיפור כל הניתוחים" })
-    } catch { toast({ title: "שגיאה בשמירה", variant: "destructive" }) }
-    finally { setSavingDeepProfile(false) }
-  }
-
-  const mapQuery = encodeURIComponent(`${companyName} ${companyCity}`.trim())
-  const bestReviews = places?.reviews?.length ? [...places.reviews].sort((a, b) => b.rating - a.rating).slice(0, 3) : []
-  const worstReviews = places?.reviews?.length ? [...places.reviews].sort((a, b) => a.rating - b.rating).filter(r => r.rating < 4).slice(0, 3) : []
 
   if (loading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
@@ -401,24 +406,15 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Overlay: deep-profile confirmation after re-analyze */}
-      {showDeepConfirm && deepProfile && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 shadow-xl my-8">
-            <BusinessProfileConfirmation
-              profile={deepProfile}
-              onConfirm={handleConfirmDeepProfile}
-              onRetry={() => setShowDeepConfirm(false)}
-              isConfirming={savingDeepProfile}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Page title */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
-        <p className="text-muted-foreground">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
+          <p className="text-muted-foreground text-sm">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
+        </div>
+        <Button onClick={updateAll} disabled={updatingAll || analyzingDeep} variant="outline" size="sm" className="gap-2">
+          {updatingAll ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />מעדכן...</> : <><RefreshCw className="h-3.5 w-3.5" />עדכן הכל</>}
+        </Button>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -543,9 +539,6 @@ export default function ProfilePage() {
                     </div>
                   )}
                 </div>
-                <Button onClick={analyzeDeep} disabled={analyzingDeep} variant="outline" size="sm" className="shrink-0 gap-2">
-                  {analyzingDeep ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />מנתח...</> : <><Search className="h-3.5 w-3.5" />נתח מחדש</>}
-                </Button>
               </div>
 
               {/* Badges row */}
@@ -865,19 +858,14 @@ export default function ProfilePage() {
       {/* SWOT */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" />ניתוח SWOT
-            </CardTitle>
-            <Button onClick={generateSwot} disabled={generatingSwot} variant="outline" size="sm">
-              {generatingSwot ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח...</> : <><Sparkles className="ml-2 h-4 w-4" />{swot ? 'עדכן ניתוח' : 'צור ניתוח AI'}</>}
-            </Button>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-primary" />ניתוח SWOT
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {!swot ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">לחץ על "צור ניתוח AI" לקבלת ניתוח SWOT</p>
+              <p className="text-sm text-muted-foreground">לחץ "עדכן הכל" לקבלת ניתוח SWOT</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
@@ -902,88 +890,19 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Google Rating */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Star className="h-5 w-5 text-primary" />דירוג גוגל וביקורות</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!places ? (
-            <div className="flex flex-col items-center gap-3 py-6">
-              <p className="text-sm text-muted-foreground">טען דירוג וביקורות מ-Google</p>
-              <Button variant="outline" onClick={loadPlaces} disabled={loadingPlaces}>
-                {loadingPlaces ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Star className="ml-2 h-4 w-4" />}טען מ-Google
-              </Button>
-            </div>
-          ) : !places.rating ? (
-            <p className="text-sm text-muted-foreground text-center py-6">אין ביקורות זמינות</p>
-          ) : (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <span className="text-4xl font-bold">{places.rating.toFixed(1)}</span>
-                <div><StarRating rating={places.rating} /><p className="text-xs text-muted-foreground mt-1">{places.reviewCount} ביקורות ב-Google</p></div>
-              </div>
-              {bestReviews.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-sm font-semibold text-green-700">ביקורות טובות</p>
-                  {bestReviews.map((review, i) => (
-                    <div key={i} className="rounded-lg border border-green-100 bg-green-50/50 p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium">{review.author || 'לקוח'}</span>
-                        <div className="flex items-center gap-2"><StarRating rating={review.rating} />{review.time && <span className="text-xs text-muted-foreground">{review.time}</span>}</div>
-                      </div>
-                      {review.text && <p className="text-sm text-muted-foreground line-clamp-3">{review.text}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {worstReviews.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-sm font-semibold text-red-700">ביקורות שליליות</p>
-                  {worstReviews.map((review, i) => (
-                    <div key={i} className="rounded-lg border border-red-100 bg-red-50/50 p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium">{review.author || 'לקוח'}</span>
-                        <div className="flex items-center gap-2"><StarRating rating={review.rating} />{review.time && <span className="text-xs text-muted-foreground">{review.time}</span>}</div>
-                      </div>
-                      {review.text && <p className="text-sm text-muted-foreground line-clamp-3">{review.text}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {bestReviews.length === 0 && <p className="text-sm text-muted-foreground">אין ביקורות זמינות</p>}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* REVIEW ANALYSIS                                                      */}
+      {/* REVIEW ANALYSIS (includes Google Maps as first source)              */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />ניתוח ביקורות
-            </CardTitle>
-            <Button
-              variant="outline" size="sm"
-              onClick={() => loadReviewAnalysis(!!reviewAnalysis)}
-              disabled={loadingReviewAnalysis}
-            >
-              {loadingReviewAnalysis
-                ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח...</>
-                : reviewAnalysis
-                  ? <><RefreshCw className="ml-2 h-4 w-4" />רענן</>
-                  : <><Sparkles className="ml-2 h-4 w-4" />נתח ביקורות</>
-              }
-            </Button>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />ניתוח ביקורות
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {!reviewAnalysis ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">לחץ "נתח ביקורות" לקבלת ניתוח מקיף מכל המקורות</p>
+              <p className="text-sm text-muted-foreground">לחץ "עדכן הכל" לניתוח ביקורות מכל המקורות</p>
             </div>
           ) : (
             <div className="space-y-5">
@@ -1015,44 +934,60 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Per-source breakdown */}
-              {reviewAnalysis.sources.length > 0 && (
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/40">
-                        <th className="text-right py-2 px-3 font-medium">מקור</th>
-                        <th className="text-right py-2 px-3 font-medium">דירוג</th>
-                        <th className="text-right py-2 px-3 font-medium">ביקורות</th>
-                        <th className="py-2 px-3" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reviewAnalysis.sources.map((s, i) => (
-                        <tr key={i} className="border-b border-border last:border-0">
-                          <td className="py-2 px-3 font-medium">{s.name}</td>
-                          <td className="py-2 px-3">
-                            {s.rating != null ? (
-                              <span className="flex items-center gap-1">
-                                <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-                                {s.rating.toFixed(1)}
-                              </span>
-                            ) : '—'}
-                          </td>
-                          <td className="py-2 px-3 text-muted-foreground">{s.review_count ?? '—'}</td>
-                          <td className="py-2 px-3">
-                            {s.url && (
-                              <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-xs">
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                          </td>
+              {/* Per-source breakdown — Google Maps always first if available */}
+              {(() => {
+                const baseSources = reviewAnalysis.sources || []
+                // Inject Google Maps from geo_data as the first source
+                let mergedSources = [...baseSources]
+                if (places?.rating) {
+                  const googleEntry: ReviewSource = {
+                    name: 'Google Maps',
+                    rating: places.rating,
+                    review_count: places.reviewCount,
+                    url: `https://www.google.com/maps/search/${encodeURIComponent(`${companyName} ${companyCity}`.trim())}`,
+                  }
+                  const existingGoogleIdx = mergedSources.findIndex(s => s.name.toLowerCase().includes('google'))
+                  if (existingGoogleIdx >= 0) mergedSources[existingGoogleIdx] = googleEntry
+                  else mergedSources = [googleEntry, ...mergedSources]
+                }
+                return mergedSources.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40">
+                          <th className="text-right py-2 px-3 font-medium">מקור</th>
+                          <th className="text-right py-2 px-3 font-medium">דירוג</th>
+                          <th className="text-right py-2 px-3 font-medium">ביקורות</th>
+                          <th className="py-2 px-3" />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {mergedSources.map((s, i) => (
+                          <tr key={i} className="border-b border-border last:border-0">
+                            <td className="py-2 px-3 font-medium">{s.name}</td>
+                            <td className="py-2 px-3">
+                              {s.rating != null ? (
+                                <span className="flex items-center gap-1">
+                                  <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                                  {s.rating.toFixed(1)}
+                                </span>
+                              ) : '—'}
+                            </td>
+                            <td className="py-2 px-3 text-muted-foreground">{s.review_count ?? '—'}</td>
+                            <td className="py-2 px-3">
+                              {s.url && (
+                                <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-xs">
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null
+              })()}
 
               {/* Summary */}
               {reviewAnalysis.summary && (

@@ -21,15 +21,21 @@ async function fetchNews(businessOverview: string, days: number, geoContext: str
   const cutoffStr = toDateStr(cutoff)
   const todayStr = toDateStr(new Date())
 
-  const prompt = `בהתבסס על תחום העסק: ${businessOverview}
-היקף גיאוגרפי: ${geoContext}
-מצא 10 חדשות רלוונטיות מ-${days} הימים האחרונים בלבד (מתאריך ${cutoffStr} עד היום ${todayStr}).
-${geoContext.includes('בינלאומי') ? 'כלול חדשות מישראל ומהעולם, עם משקל גבוה יותר לחדשות בינלאומיות.' : 'כלול חדשות מישראל ומהעולם.'}
-דחה כל חדשה שפורסמה לפני ${cutoffStr}.
+  const prompt = `חפש חדשות עסקיות רלוונטיות מהימים האחרונים.
 
-לכל חדשה תן relevance_score 0-100 ו-region: 'ישראל' או 'עולם'.
+תחום העסק: ${businessOverview}
+טווח תאריכים: ${cutoffStr} עד ${todayStr} (${days} ימים בלבד)
+היקף גיאוגרפי: ${geoContext}
+
+הוראות:
+- מצא בדיוק 5 חדשות ישראליות + 5 חדשות בינלאומיות (region: "ישראל" / region: "עולם")
+- רק חדשות שפורסמו החל מ-${cutoffStr} — דחה כל חדשה ישנה יותר
+- כל חדשה חייבת להיות רלוונטית ישירות לתחום העסקי שתואר — לא חדשות כלליות
+- ציין relevance_score 0-100 (קבל רק חדשות שציונן מעל 65)
+- summary: משפט אחד שמסביר למה החדשה רלוונטית לעסק
+
 החזר JSON בלבד:
-[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "relevance_score": 0, "region": "ישראל/עולם"}]
+[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "relevance_score": 0, "region": "ישראל"}]
 
 CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
@@ -71,7 +77,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
 function filterNews(raw: any[], days: number): any[] {
   const cutoff = cutoffDate(days)
   return raw.filter((n: any) => {
-    if ((n.relevance_score ?? 0) < 80) return false
+    if ((n.relevance_score ?? 0) < 65) return false
     if (!n.date) return false
     const published = new Date(n.date)
     return !isNaN(published.getTime()) && published >= cutoff
@@ -108,17 +114,17 @@ export async function POST(request: Request) {
       ? `${businessOverview}\nתגיות תעשייה: ${businessProfile.industryTags.join(', ')}. שאילתות מפתח: ${businessProfile.searchQueries.slice(0, 5).join(', ')}.`
       : businessOverview
 
-    // Step 1 — 30 days
-    const raw30 = await fetchNews(newsSearchContext, 30, geoContext)
-    let list = filterNews(raw30, 30)
-    steps.window30 = { raw: raw30.length, filtered: list.length }
+    // Step 1 — 7 days
+    const raw7 = await fetchNews(newsSearchContext, 7, geoContext)
+    let list = filterNews(raw7, 7)
+    steps.window7 = { raw: raw7.length, filtered: list.length }
 
-    // Step 2 — expand to 60 days if fewer than 5 results
-    if (list.length < 5) {
-      const raw60 = await fetchNews(newsSearchContext, 60, geoContext)
-      const list60 = filterNews(raw60, 60)
-      steps.window60 = { raw: raw60.length, filtered: list60.length }
-      if (list60.length > list.length) list = list60
+    // Step 2 — expand to 30 days if fewer than 10 results
+    if (list.length < 10) {
+      const raw30 = await fetchNews(newsSearchContext, 30, geoContext)
+      const list30 = filterNews(raw30, 30)
+      steps.window30 = { raw: raw30.length, filtered: list30.length }
+      if (list30.length > list.length) list = list30
     }
 
     steps.ai = { ok: true, count: list.length }
