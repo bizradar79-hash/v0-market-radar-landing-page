@@ -195,8 +195,12 @@ export default function TrendsPage() {
   }, [])
 
   async function fetchAll() {
-    await Promise.all([fetchTrends(), fetchKeywordData(), fetchDeepAnalysis()])
+    const [,, hasAnalysis] = await Promise.all([fetchTrends(), fetchKeywordData(), fetchDeepAnalysis()])
     setLoading(false)
+    // Auto-trigger deep analysis on first load if no cached result exists
+    if (!hasAnalysis) {
+      runDeepAnalysis()
+    }
   }
 
   async function fetchTrends() {
@@ -216,14 +220,18 @@ export default function TrendsPage() {
     }
   }
 
-  async function fetchDeepAnalysis() {
+  async function fetchDeepAnalysis(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) return false
     const { data } = await supabase
       .from('companies').select('trends_analysis').eq('id', user.id).single()
-    if (data?.trends_analysis?.fetchedAt) {
-      setTrendsAnalysis(data.trends_analysis as TrendsAnalysis)
+    const ta = data?.trends_analysis
+    // Only accept new-format data (must have emerging_trends array)
+    if (ta?.fetchedAt && Array.isArray(ta?.emerging_trends)) {
+      setTrendsAnalysis(ta as TrendsAnalysis)
+      return true
     }
+    return false
   }
 
   async function generateTrends() {
@@ -350,7 +358,7 @@ export default function TrendsPage() {
     return acc
   }, {} as Record<string, Trend[]>)
 
-  const priorityGroups = trendsAnalysis
+  const priorityGroups = trendsAnalysis?.strategic_actions?.length
     ? {
         immediate: trendsAnalysis.strategic_actions.filter(a => a.priority === 'immediate'),
         short_term: trendsAnalysis.strategic_actions.filter(a => a.priority === 'short_term'),
@@ -383,6 +391,16 @@ export default function TrendsPage() {
       </div>
 
       {/* ─── Deep Analysis Section ───────────────────────────────────────── */}
+      {analyzingDeep && !trendsAnalysis && (
+        <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+          <div>
+            <p className="text-sm font-medium">מריץ ניתוח שוק עמוק עם AI...</p>
+            <p className="text-xs text-muted-foreground mt-0.5">בודק טרנדים, מנתח ביקורות ומתחרים — עשוי לקחת עד דקה</p>
+          </div>
+        </div>
+      )}
+
       {trendsAnalysis && (
         <div className="space-y-5">
           {/* Data quality warning */}
@@ -409,7 +427,7 @@ export default function TrendsPage() {
           )}
 
           {/* Emerging Trends */}
-          {trendsAnalysis.emerging_trends.length > 0 && (
+          {(trendsAnalysis.emerging_trends?.length ?? 0) > 0 && (
             <div className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
@@ -443,7 +461,7 @@ export default function TrendsPage() {
           )}
 
           {/* Keyword Map */}
-          {(trendsAnalysis.keyword_map.quick_wins.length > 0 || trendsAnalysis.keyword_map.high_volume.length > 0) && (
+          {((trendsAnalysis.keyword_map?.quick_wins?.length ?? 0) > 0 || (trendsAnalysis.keyword_map?.high_volume?.length ?? 0) > 0) && (
             <div className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
                 <BarChart2 className="h-5 w-5 text-primary" />
@@ -514,7 +532,7 @@ export default function TrendsPage() {
           )}
 
           {/* Unmet Needs */}
-          {trendsAnalysis.unmet_needs.length > 0 && (
+          {(trendsAnalysis.unmet_needs?.length ?? 0) > 0 && (
             <div className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
                 <MessageSquare className="h-5 w-5 text-primary" />
@@ -540,7 +558,7 @@ export default function TrendsPage() {
           )}
 
           {/* Strategic Actions */}
-          {trendsAnalysis.strategic_actions.length > 0 && priorityGroups && (
+          {(trendsAnalysis.strategic_actions?.length ?? 0) > 0 && priorityGroups && (
             <div className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
                 <Lightbulb className="h-5 w-5 text-primary" />
@@ -573,7 +591,7 @@ export default function TrendsPage() {
           )}
 
           {/* Manual Keyword Analysis */}
-          {trendsAnalysis.manual_keyword_analysis.length > 0 && (
+          {(trendsAnalysis.manual_keyword_analysis?.length ?? 0) > 0 && (
             <div className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2 border-b pb-2">
                 <Hash className="h-5 w-5 text-primary" />
