@@ -25,9 +25,14 @@ export async function PATCH(request: Request) {
     const existing = (company?.business_profile ?? {}) as Partial<BusinessProfile>
     const updated: Partial<BusinessProfile> = { ...existing, ...partial }
 
+    const updatePayload: any = { business_profile: updated }
+    if (Array.isArray(partial.distributionChannels)) {
+      updatePayload.distribution_channels = partial.distributionChannels
+    }
+
     const { error } = await supabase
       .from('companies')
-      .update({ business_profile: updated })
+      .update(updatePayload)
       .eq('id', user.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

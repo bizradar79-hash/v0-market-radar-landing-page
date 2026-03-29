@@ -34,6 +34,9 @@ import {
   Trophy,
   ChevronDown,
   ChevronUp,
+  Truck,
+  MessageSquare,
+  ExternalLink,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { BusinessProfileConfirmation } from "@/components/onboarding/BusinessProfileConfirmation"
@@ -57,6 +60,27 @@ interface PlacesData {
   website?: string
   source?: string
   error?: string
+}
+
+interface ReviewSource {
+  name: string
+  rating: number | null
+  review_count: number | null
+  url: string | null
+}
+
+interface ReviewAnalysis {
+  sources: ReviewSource[]
+  weighted_average: number | null
+  sentiment_score: number | null
+  overallSentiment: string
+  totalReviewsFound: number
+  positiveThemes: string[]
+  negativeThemes: string[]
+  recurringComplaints: string[]
+  opportunities: string[]
+  summary: string
+  fetchedAt?: string
 }
 
 function StarRating({ rating }: { rating: number }) {
@@ -167,7 +191,10 @@ export default function ProfilePage() {
   const [editPrimaryKw, setEditPrimaryKw] = useState<string[]>([])
   const [editSecondaryKw, setEditSecondaryKw] = useState<string[]>([])
   const [editProducts, setEditProducts] = useState<BusinessProfile['products']>([])
+  const [editDistributionChannels, setEditDistributionChannels] = useState<string[]>([])
   const [searchExpanded, setSearchExpanded] = useState(false)
+  const [reviewAnalysis, setReviewAnalysis] = useState<ReviewAnalysis | null>(null)
+  const [loadingReviewAnalysis, setLoadingReviewAnalysis] = useState(false)
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -180,7 +207,7 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('companies')
-      .select('name, city, phone, website, industry, description, swot, business_overview, geo_data, business_profile')
+      .select('name, city, phone, website, industry, description, swot, business_overview, geo_data, business_profile, review_analysis, distribution_channels')
       .eq('id', user.id)
       .single()
 
@@ -196,7 +223,17 @@ export default function ProfilePage() {
       if (data.geo_data && typeof data.geo_data === 'object' && Object.keys(data.geo_data).length > 0) {
         setPlaces(data.geo_data as PlacesData)
       }
-      if (data.business_profile) setBusinessProfile(data.business_profile as BusinessProfile)
+      if (data.business_profile) {
+        const bp = data.business_profile as BusinessProfile
+        // Merge top-level distribution_channels into profile if not already there
+        if (!bp.distributionChannels?.length && Array.isArray(data.distribution_channels)) {
+          bp.distributionChannels = data.distribution_channels
+        }
+        setBusinessProfile(bp)
+      }
+      if (data.review_analysis && typeof data.review_analysis === 'object') {
+        setReviewAnalysis(data.review_analysis as ReviewAnalysis)
+      }
     }
     setLoading(false)
   }
@@ -259,6 +296,7 @@ export default function ProfilePage() {
       case 'competitors': setEditCompetitors([...businessProfile.directCompetitors]); break
       case 'keywords': setEditPrimaryKw([...businessProfile.primaryKeywords]); setEditSecondaryKw([...businessProfile.secondaryKeywords]); break
       case 'products': setEditProducts(businessProfile.products.map(p => ({ ...p }))); break
+      case 'distribution': setEditDistributionChannels([...(businessProfile.distributionChannels || [])]); break
     }
   }
 
@@ -294,6 +332,19 @@ export default function ProfilePage() {
     } catch {
       setPlaces({ rating: null, reviewCount: 0, reviews: [], error: 'שגיאה בטעינת נתוני Google' })
     } finally { setLoadingPlaces(false) }
+  }
+
+  async function loadReviewAnalysis(force = false) {
+    setLoadingReviewAnalysis(true)
+    try {
+      const url = force ? '/api/analyze-company-reviews?force=true' : '/api/analyze-company-reviews'
+      const res = await fetch(url, { method: 'POST' })
+      const data = await res.json()
+      if (data.success !== false) setReviewAnalysis(data as ReviewAnalysis)
+      else toast({ title: "שגיאה", description: data.error || "לא ניתן לטעון ניתוח ביקורות", variant: "destructive" })
+    } catch {
+      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
+    } finally { setLoadingReviewAnalysis(false) }
   }
 
   async function analyzeDeep() {
@@ -667,6 +718,32 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
+          {/* ── 5b. Distribution Channels ───────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Truck className="h-4 w-4 text-primary" />ערוצי הפצה
+                </CardTitle>
+                {editSection !== 'distribution' && (
+                  <Button variant="ghost" size="sm" onClick={() => startEdit('distribution')} className="h-7 gap-1 text-xs">
+                    <Pencil className="h-3 w-3" />ערוך
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <TagList
+                tags={editSection === 'distribution' ? editDistributionChannels : (businessProfile.distributionChannels || [])}
+                onChange={setEditDistributionChannels}
+                editing={editSection === 'distribution'}
+              />
+              {editSection === 'distribution' && (
+                <EditBar onSave={() => patchProfile({ distributionChannels: editDistributionChannels })} />
+              )}
+            </CardContent>
+          </Card>
+
           {/* ── 6. Competitive Advantage ────────────────────────────────────── */}
           <Card>
             <CardHeader className="pb-3">
@@ -875,6 +952,160 @@ export default function ProfilePage() {
                 </div>
               )}
               {bestReviews.length === 0 && <p className="text-sm text-muted-foreground">אין ביקורות זמינות</p>}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* REVIEW ANALYSIS                                                      */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />ניתוח ביקורות
+            </CardTitle>
+            <Button
+              variant="outline" size="sm"
+              onClick={() => loadReviewAnalysis(!!reviewAnalysis)}
+              disabled={loadingReviewAnalysis}
+            >
+              {loadingReviewAnalysis
+                ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מנתח...</>
+                : reviewAnalysis
+                  ? <><RefreshCw className="ml-2 h-4 w-4" />רענן</>
+                  : <><Sparkles className="ml-2 h-4 w-4" />נתח ביקורות</>
+              }
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!reviewAnalysis ? (
+            <div className="flex flex-col items-center gap-3 py-8">
+              <p className="text-sm text-muted-foreground">לחץ "נתח ביקורות" לקבלת ניתוח מקיף מכל המקורות</p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Summary scores */}
+              <div className="flex flex-wrap gap-4">
+                {reviewAnalysis.weighted_average != null && (
+                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-2xl font-bold">{reviewAnalysis.weighted_average.toFixed(1)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">ממוצע משוקלל</p>
+                  </div>
+                )}
+                {reviewAnalysis.sentiment_score != null && (
+                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-2xl font-bold">{reviewAnalysis.sentiment_score.toFixed(1)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">ציון סנטימנט</p>
+                  </div>
+                )}
+                {reviewAnalysis.totalReviewsFound > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-2xl font-bold">{reviewAnalysis.totalReviewsFound}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">ביקורות סה&quot;כ</p>
+                  </div>
+                )}
+                {reviewAnalysis.overallSentiment && (
+                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-lg font-semibold">{reviewAnalysis.overallSentiment}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">סנטימנט כולל</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Per-source breakdown */}
+              {reviewAnalysis.sources.length > 0 && (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        <th className="text-right py-2 px-3 font-medium">מקור</th>
+                        <th className="text-right py-2 px-3 font-medium">דירוג</th>
+                        <th className="text-right py-2 px-3 font-medium">ביקורות</th>
+                        <th className="py-2 px-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reviewAnalysis.sources.map((s, i) => (
+                        <tr key={i} className="border-b border-border last:border-0">
+                          <td className="py-2 px-3 font-medium">{s.name}</td>
+                          <td className="py-2 px-3">
+                            {s.rating != null ? (
+                              <span className="flex items-center gap-1">
+                                <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                                {s.rating.toFixed(1)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-muted-foreground">{s.review_count ?? '—'}</td>
+                          <td className="py-2 px-3">
+                            {s.url && (
+                              <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-xs">
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Summary */}
+              {reviewAnalysis.summary && (
+                <p className="text-sm text-muted-foreground leading-relaxed">{reviewAnalysis.summary}</p>
+              )}
+
+              {/* Themes */}
+              {(reviewAnalysis.positiveThemes.length > 0 || reviewAnalysis.negativeThemes.length > 0) && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {reviewAnalysis.positiveThemes.length > 0 && (
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                      <p className="text-xs font-semibold text-green-800 mb-2">חוזקות לפי ביקורות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.positiveThemes.map((t, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-sm text-green-700">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{t}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {reviewAnalysis.negativeThemes.length > 0 && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                      <p className="text-xs font-semibold text-red-800 mb-2">חולשות לפי ביקורות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.negativeThemes.map((t, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-sm text-red-700">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />{t}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Opportunities from reviews */}
+              {reviewAnalysis.opportunities.length > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <p className="text-xs font-semibold text-blue-800 mb-2">הזדמנויות שזוהו</p>
+                  <ul className="space-y-1">
+                    {reviewAnalysis.opportunities.map((o, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-sm text-blue-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />{o}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {reviewAnalysis.fetchedAt && (
+                <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
+              )}
             </div>
           )}
         </CardContent>

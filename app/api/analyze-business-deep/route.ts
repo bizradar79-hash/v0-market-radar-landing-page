@@ -58,6 +58,7 @@ function normalizeProfile(raw: any): BusinessProfile {
     primaryKeywords: Array.isArray(raw.primaryKeywords) ? raw.primaryKeywords.map(String) : [],
     secondaryKeywords: Array.isArray(raw.secondaryKeywords) ? raw.secondaryKeywords.map(String) : [],
     searchQueries: Array.isArray(raw.searchQueries) ? raw.searchQueries.map(String) : [],
+    distributionChannels: Array.isArray(raw.distributionChannels) ? raw.distributionChannels.map(String) : [],
     confidenceScore: typeof raw.confidenceScore === 'number' ? Math.min(100, Math.max(0, raw.confidenceScore)) : 70,
     sourcesUsed: Array.isArray(raw.sourcesUsed) ? raw.sourcesUsed.map(String) : [],
     generatedAt: raw.generatedAt || new Date().toISOString(),
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
 7. תגיות תעשייה מדויקות
 8. מילות מפתח לחיפוש בעברית ואנגלית
 9. שאילתות מוכנות לחיפוש מתחרים, טרנדים, הזדמנויות
+10. ערוצי הפצה — כיצד העסק מגיע ללקוחות שלו (אתר אינטרנט, מכירה ישירה, רשתות חברתיות, מפיצים, שותפים עסקיים, חנויות, B2B פגישות, קטלוגים, פלטפורמות מקוונות וכו')
 
 החזר JSON בלבד בפורמט הבא — ללא טקסט נוסף, ללא markdown:
 {
@@ -117,6 +119,7 @@ export async function POST(request: Request) {
   "primaryKeywords": ["..."],
   "secondaryKeywords": ["..."],
   "searchQueries": ["..."],
+  "distributionChannels": ["..."],
   "confidenceScore": 0-100,
   "sourcesUsed": ["..."],
   "generatedAt": "${new Date().toISOString()}"
@@ -161,10 +164,10 @@ export async function POST(request: Request) {
 
     const profile = normalizeProfile(raw)
 
-    // Save to companies.business_profile (upsert in case row doesn't exist yet)
+    // Save to companies.business_profile + distribution_channels column
     await supabase
       .from('companies')
-      .upsert({ id: user.id, business_profile: profile }, { onConflict: 'id' })
+      .upsert({ id: user.id, business_profile: profile, distribution_channels: profile.distributionChannels }, { onConflict: 'id' })
 
     return NextResponse.json({ success: true, profile })
   } catch (e: any) {

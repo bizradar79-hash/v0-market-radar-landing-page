@@ -17,6 +17,7 @@ export type BusinessProfile = {
   primaryKeywords: string[]
   secondaryKeywords: string[]
   searchQueries: string[]
+  distributionChannels: string[]
   confidenceScore: number
   sourcesUsed: string[]
   generatedAt: string

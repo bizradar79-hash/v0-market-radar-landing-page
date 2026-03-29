@@ -4,6 +4,16 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+// Fuzzy match: check if at least `threshold` fraction of companyName words
+// appear in the candidate string (case-insensitive).
+function fuzzyMatchName(candidate: string, companyName: string, threshold = 0.6): boolean {
+  const cand = candidate.toLowerCase()
+  const words = companyName.toLowerCase().split(/\s+/).filter(w => w.length >= 2)
+  if (words.length === 0) return false
+  const matched = words.filter(w => cand.includes(w)).length
+  return matched / words.length >= threshold
+}
+
 export async function GET() {
   try {
     const ctx = await getFullContext()
@@ -11,15 +21,25 @@ export async function GET() {
 
     const companyName = ctx.company?.name || ''
     const city = ctx.company?.city || ''
+    const website = ctx.company?.website || ''
+    const domain = website ? (() => { try { return new URL(website.startsWith('http') ? website : `https://${website}`).hostname.replace(/^www\./, '') } catch { return '' } })() : ''
+
     if (!companyName) {
       return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '' })
     }
 
-    const prompt = `חפש את הפרטים הבאים על העסק: ${companyName} בעיר ${city}
-מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
-לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
+    // Strict query: name + domain + city to minimise wrong-business matches
+    const domainHint = domain ? ` (אתר: ${domain})` : ''
+    const prompt = `חפש מידע על העסק הספציפי הזה בלבד: "${companyName}"${domainHint}${city ? ` בעיר ${city}` : ''}.
+
+חשוב מאוד: חזור רק על מידע על העסק שתואם בדיוק את השם "${companyName}"${domain ? ` ו/או הדומיין ${domain}` : ''}. אל תחזיר מידע על עסקים אחרים עם שם דומה.
+אם יש ספק לגבי זיהוי העסק — ציין confidence_score נמוך.
+
+מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות.
+לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת.
+
 החזר JSON בלבד:
-{"address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
+{"matched_name": "", "confidence_score": 0, "address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
 
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
@@ -53,6 +73,18 @@ export async function GET() {
     let parsed: any = {}
     if (start !== -1 && end > start) {
       try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch {}
+    }
+
+    // Validate: reject if AI confidence is low OR matched name doesn't pass fuzzy check
+    const confidence = typeof parsed.confidence_score === 'number' ? parsed.confidence_score : 100
+    const matchedName = parsed.matched_name || ''
+    const nameIsValid = matchedName
+      ? fuzzyMatchName(matchedName, companyName, 0.6) || fuzzyMatchName(companyName, matchedName, 0.6)
+      : true // if AI didn't return matched_name, trust confidence_score alone
+
+    if (confidence < 60 || !nameIsValid) {
+      console.warn(`[google-places] low confidence (${confidence}) or name mismatch ("${matchedName}" vs "${companyName}") — returning empty`)
+      return NextResponse.json({ rating: null, reviewCount: 0, reviews: [], address: '', phone: '', source: 'xai', noMatch: true })
     }
 
     const reviews = [
