@@ -55,11 +55,12 @@ async function runSeoQuery(
 ${competitorListText}
 
 CRITICAL: דווח רק על URLs אמיתיים מהחיפוש. אל תבדה תוצאות.
+סמן תוצאות ממומנות (מודעות/sponsored) עם is_sponsored: true.
 
-לכל תוצאה ציין: position(1-10), name, url, title, isOwn(true אם דומיין מכיל "${companyDomain}"), isKnownCompetitor
+לכל תוצאה ציין: position(1-10), name, url, title, isOwn(true אם דומיין מכיל "${companyDomain}"), isKnownCompetitor, is_sponsored(true אם מודעה ממומנת)
 
 החזר JSON בלבד:
-{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false, "isKnownCompetitor": false}], "recommendations": []}
+{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "title": "", "isOwn": false, "isKnownCompetitor": false, "is_sponsored": false}], "recommendations": []}
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
@@ -92,11 +93,21 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
   const competitorDomains = competitorWebsites.map(extractDomain).filter(Boolean)
-  const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+  const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+  // Deduplicate by domain
+  const seenDomains = new Set<string>()
+  const results: any[] = []
+  for (const r of rawResults) {
+    const domain = extractDomain(r.url || '') || r.name
+    if (seenDomains.has(domain)) continue
+    seenDomains.add(domain)
+    results.push(r)
+  }
   results.forEach((r: any) => {
     r.isOwn = isOwnResult(r, companyName, companyDomain)
     const rDomain = extractDomain(r.url || '')
     r.isKnownCompetitor = !r.isOwn && competitorDomains.some(d => d && (rDomain === d || rDomain.includes(d)))
+    if (typeof r.is_sponsored !== 'boolean') r.is_sponsored = false
   })
 
   const ownResult = results.find(r => r.isOwn)

@@ -27,7 +27,7 @@ function isOwnResult(r: any, companyName: string, companyDomain: string): boolea
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-const ENGINES = ['general', 'chatgpt', 'gemini', 'grok', 'perplexity'] as const
+const ENGINES = ['general', 'chatgpt', 'gemini', 'grok'] as const
 type Engine = typeof ENGINES[number]
 
 function buildEnginePrompt(
@@ -58,10 +58,6 @@ function buildEnginePrompt(
     grok: `חפש בזמן אמת: "${question}" בישראל.
 השתמש בחיפוש האינטרנט החי שלך כדי למצוא את העסקים הרלוונטיים ביותר כיום.
 העדף מקורות עדכניים וידיעות אחרונות.`,
-
-    perplexity: `חפש באינטרנט: מה Perplexity AI מצטט ומפנה אליו כאשר שואלים אותו "${question}"?
-חפש מקורות, פורומים ו-Reddit המתעדים תשובות של Perplexity לשאלה זו.
-גלה אילו עסקים ישראליים Perplexity מציין ומקשר אליהם.`,
   }
 
   return `${bases[engine]}
@@ -114,8 +110,17 @@ async function runGeoQuestion(
   let parsed: any = {}
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
-  const results: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
   const companyDomainForGeo = extractDomain(website)
+  const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
+  // Deduplicate by domain
+  const seenDomains = new Set<string>()
+  const results: any[] = []
+  for (const r of rawResults) {
+    const domain = extractDomain(r.url || '') || r.name
+    if (seenDomains.has(domain)) continue
+    seenDomains.add(domain)
+    results.push(r)
+  }
   results.forEach((r: any) => {
     r.isOwn = isOwnResult(r, companyName, companyDomainForGeo)
     const rName = (r.name || '').toLowerCase()

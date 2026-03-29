@@ -19,6 +19,7 @@ import {
   Calendar,
   UserCircle,
   ShieldCheck,
+  BarChart2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -56,6 +57,7 @@ const getNavGroups = (counts: NavCounts) => [
     title: "📊 מודיעין שוק",
     items: [
       { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
+      { href: "/app/seo-geo", label: "דירוג SEO/GEO", icon: BarChart2 },
       { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
       { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
     ],
