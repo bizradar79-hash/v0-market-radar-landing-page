@@ -227,6 +227,9 @@ export default function ProfilePage() {
       }
       if (data.review_analysis && typeof data.review_analysis === 'object') {
         setReviewAnalysis(data.review_analysis as ReviewAnalysis)
+      } else {
+        // Auto-trigger review analysis if not yet available
+        loadReviewAnalysis(false)
       }
     }
     setLoading(false)
@@ -887,7 +890,14 @@ export default function ProfilePage() {
         <CardContent>
           {!reviewAnalysis ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">ניתוח הביקורות יתעדכן בסנכרון השבועי</p>
+              {loadingReviewAnalysis ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>מנתח ביקורות...</span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground py-4">לא נמצאו ביקורות לעסק זה</p>
+              )}
             </div>
           ) : (
             <div className="space-y-5">
