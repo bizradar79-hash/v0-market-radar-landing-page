@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
 import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
@@ -20,7 +19,6 @@ import {
   Activity,
   ArrowLeft,
   Loader2,
-  RefreshCw,
   Building2,
   Calendar,
   Newspaper,
@@ -63,18 +61,11 @@ interface DashboardData {
 export default function AppDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [scanning, setScanning] = useState(false)
-  const [scanProgress, setScanProgress] = useState("")
-  const [bothExhausted, setBothExhausted] = useState(false)
+  const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
   const supabase = createClient()
-  const { toast } = useToast()
 
   useEffect(() => {
     fetchDashboardData()
-    fetch('/api/usage-stats')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.bothExhausted) setBothExhausted(true) })
-      .catch(() => {})
   }, [])
 
   async function fetchDashboardData() {
@@ -102,7 +93,7 @@ export default function AppDashboardPage() {
       supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
       supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
-      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking").single(),
+      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at").single(),
     ])
 
     // Extract best SEO / GEO positions from cached ranking data
@@ -169,53 +160,8 @@ export default function AppDashboardPage() {
           : [companyData.geographic_scope || 'national'],
       } : null,
     })
+    if (companyData) setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
     setLoading(false)
-  }
-
-  async function runFirstScan() {
-    setScanning(true)
-    const results = { competitors: 0, leads: 0, tenders: 0 }
-
-    const steps = [
-      { api: '/api/find-competitors', label: 'מחפש מתחרים...', key: 'competitors' },
-      { api: '/api/generate-leads', label: 'מגלה לידים...', key: 'leads' },
-      { api: '/api/generate-tenders', label: 'סורק מכרזים...', key: 'tenders' },
-    ]
-
-    try {
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i]
-        setScanProgress(`${step.label} (${i + 1}/${steps.length})`)
-        try {
-          const res = await fetch(step.api, { method: 'POST' })
-          const data = await res.json()
-          results[step.key as keyof typeof results] = data.count || 0
-        } catch (e) {
-          console.error(`Error in ${step.api}:`, e)
-        }
-        if (i < steps.length - 1) await new Promise(resolve => setTimeout(resolve, 5000))
-      }
-
-      setScanProgress("מעדכן נתונים...")
-      await fetchDashboardData()
-
-      ;(window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts?.()
-
-      toast({
-        title: "הסריקה הושלמה בהצלחה!",
-        description: `נמצאו ${results.leads} לידים ו-${results.competitors} מתחרים`,
-      })
-    } catch (error) {
-      console.error("Error running scan:", error)
-      toast({
-        title: "שגיאה",
-        description: "אירעה שגיאה בעת הסריקה, נסה שוב",
-        variant: "destructive",
-      })
-    } finally {
-      setScanning(false)
-      setScanProgress("")
-    }
   }
 
   function formatTimeAgo(dateStr: string | null): string {
@@ -264,28 +210,11 @@ export default function AppDashboardPage() {
           <h1 className="text-2xl font-bold text-foreground">דשבורד</h1>
           <p className="text-muted-foreground">סקירה כללית של הפעילות העסקית שלך</p>
         </div>
-        <div className="flex items-center gap-3">
-          {data?.lastAnalyzed && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Activity className="h-4 w-4" />
-              <span>ניתוח אחרון: {formatTimeAgo(data.lastAnalyzed)}</span>
-            </div>
-          )}
-          {(data?.competitorsCount || 0) > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={runFirstScan}
-              disabled={scanning}
-            >
-              {scanning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-        </div>
+        {syncDates && (
+          <p className="text-xs text-muted-foreground">
+            עודכן: {syncDates.last_sync_at ? new Date(syncDates.last_sync_at).toLocaleDateString('he-IL') : '—'} | עדכון הבא: {syncDates.next_sync_at ? new Date(syncDates.next_sync_at).toLocaleDateString('he-IL') : '—'}
+          </p>
+        )}
       </div>
 
       {/* Profile Summary Card */}
@@ -369,17 +298,6 @@ export default function AppDashboardPage() {
       {/* Market Analysis */}
       <MarketAnalysisBlock />
 
-      {/* AI exhaustion banner */}
-      {bothExhausted && (
-        <div className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 p-4">
-          <span className="text-sm font-medium text-red-700">
-            מכסת AI יומית מוצתה (Groq + Gemini) — ניתוחים חדשים יתאפשרו לאחר איפוס המכסה (24 שעות)
-          </span>
-          <Link href="/admin/usage" className="text-xs text-red-600 underline whitespace-nowrap mr-3">
-            צפה בפרטים
-          </Link>
-        </div>
-      )}
 
       {/* Smart Bottom Widgets */}
       {data && (
@@ -391,19 +309,8 @@ export default function AppDashboardPage() {
               </div>
               <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-North Star Radar!</h3>
               <p className="text-muted-foreground max-w-md mb-4">
-                המערכת שלך מוכנה לפעולה. הפעל סריקה ראשונה כדי להתחיל לקבל מודיעין עסקי.
+                המערכת שלך מוכנה לפעולה. הנתונים יתעדכנו אוטומטית בסנכרון הראשון.
               </p>
-              {scanning ? (
-                <div className="flex flex-col items-center gap-3">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm text-muted-foreground">{scanProgress}</p>
-                </div>
-              ) : (
-                <Button onClick={runFirstScan} size="lg">
-                  <BarChart3 className="ml-2 h-5 w-5" />
-                  הפעל סריקה ראשונה
-                </Button>
-              )}
             </CardContent>
           </Card>
         ) : (
@@ -602,7 +509,7 @@ export default function AppDashboardPage() {
              data.upcomingConferences.length === 0 && data.topTrends.length === 0 && (
               <Card className="md:col-span-2">
                 <CardContent className="flex items-center justify-center py-8 text-center">
-                  <p className="text-muted-foreground text-sm">אין עדיין נתונים. לחץ רענן בכל מודול כדי להתחיל.</p>
+                  <p className="text-muted-foreground text-sm">הנתונים יתעדכנו אוטומטית בסנכרון השבועי.</p>
                 </CardContent>
               </Card>
             )}

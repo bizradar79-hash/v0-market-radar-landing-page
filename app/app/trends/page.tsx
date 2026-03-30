@@ -137,6 +137,8 @@ function EmptyState({ message }: { message: string }) {
 export default function TrendsPage() {
   const [loading, setLoading] = useState(true)
 
+  const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
+
   // Section 1 — keyword trends (unchanged logic)
   const [keywords, setKeywords] = useState<string[]>([])
   const [kwTrends, setKwTrends] = useState<KwTrendsMap>({})
@@ -172,11 +174,12 @@ export default function TrendsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data } = await supabase
-      .from('companies').select('keywords, keyword_trends').eq('id', user.id).single()
+      .from('companies').select('keywords, keyword_trends, last_sync_at, next_sync_at').eq('id', user.id).single()
     if (data?.keywords) setKeywords(data.keywords)
     if (data?.keyword_trends && Object.keys(data.keyword_trends).length > 0) {
       setKwTrends(data.keyword_trends as KwTrendsMap)
     }
+    if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
   }
 
   async function refreshKeywordTrend(kw: string) {
@@ -304,6 +307,11 @@ export default function TrendsPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">טרנדים</h1>
         <p className="text-sm text-muted-foreground">מגמות שוק, תחום, ומתחרים בזמן אמת</p>
+        {syncDates && (
+          <p className="text-xs text-muted-foreground mt-1">
+            עודכן: {syncDates.last_sync_at ? new Date(syncDates.last_sync_at).toLocaleDateString('he-IL') : '—'} | עדכון הבא: {syncDates.next_sync_at ? new Date(syncDates.next_sync_at).toLocaleDateString('he-IL') : '—'}
+          </p>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
@@ -445,7 +453,7 @@ export default function TrendsPage() {
 
                 {isExpanded && !isLoading && !kwData && (
                   <div className="mt-3 text-center py-4 text-sm text-muted-foreground">
-                    <p>לחץ רענן כדי לטעון טרנדים עבור &quot;{kw}&quot;</p>
+                    <p>לחץ על כפתור הרענון כדי לטעון טרנדים עבור &quot;{kw}&quot;</p>
                   </div>
                 )}
               </CardContent>
@@ -472,7 +480,7 @@ export default function TrendsPage() {
             <p className="text-sm">מחפש טרנדים חמים בתחום שלך...</p>
           </div>
         ) : !industryTrends || industryTrends.trends.length === 0 ? (
-          <EmptyState message="לא נמצאו טרנדים השבוע — נסה לרענן" />
+          <EmptyState message="לא נמצאו טרנדים השבוע — הנתונים יתעדכנו בסנכרון הבא" />
         ) : (
           <div className="space-y-3">
             {/* Meta bar */}
@@ -562,7 +570,7 @@ export default function TrendsPage() {
             <p className="text-sm">בודק פעילות מתחרים...</p>
           </div>
         ) : !competitorTrends || competitorTrends.competitor_data.length === 0 ? (
-          <EmptyState message="לא נמצאו נתוני מתחרים — הוסף מתחרים או רענן" />
+          <EmptyState message="לא נמצאו נתוני מתחרים — הנתונים יתעדכנו בסנכרון הבא" />
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {competitorTrends.competitor_data.map((c, i) => (

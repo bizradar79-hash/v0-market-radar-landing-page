@@ -34,7 +34,6 @@ import {
   Target,
   AlertTriangle,
   Loader2,
-  Sparkles,
   MoreHorizontal,
   Eye,
   Trash2,
@@ -45,7 +44,6 @@ import {
   Lightbulb,
   ShieldAlert,
   Pencil,
-  RefreshCw,
   UserPlus,
   Bot,
   Star,
@@ -118,7 +116,7 @@ type ModalTab = 'details' | 'ai' | 'reviews'
 export default function CompetitorsPage() {
   const [competitors, setCompetitors] = useState<Competitor[]>([])
   const [loading, setLoading] = useState(true)
-  const [discovering, setDiscovering] = useState(false)
+  const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
   const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null)
   const [analyzing, setAnalyzing] = useState<string | null>(null)
   const [analysis, setAnalysis] = useState<CompetitorAnalysis | null>(null)
@@ -151,8 +149,16 @@ export default function CompetitorsPage() {
   const { toast } = useToast()
 
   useEffect(() => {
+    fetchSyncDates()
     syncProfileCompetitors().then(() => fetchCompetitors())
   }, [])
+
+  async function fetchSyncDates() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('companies').select('last_sync_at, next_sync_at').eq('id', user.id).single()
+    if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
+  }
 
   async function syncProfileCompetitors() {
     try {
@@ -189,24 +195,6 @@ export default function CompetitorsPage() {
       }
     }
     setLoading(false)
-  }
-
-  async function discoverCompetitors() {
-    setDiscovering(true)
-    try {
-      const response = await fetch("/api/find-competitors", { method: "POST" })
-      const data = await response.json()
-      if (data.success) {
-        await fetchCompetitors()
-        toast({ title: "גילוי הושלם!", description: `נמצאו ${data.count || 0} מתחרים חדשים` })
-      } else {
-        toast({ title: "שגיאה", description: data.error || "לא הצלחנו לגלות מתחרים", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה בעת הגילוי", variant: "destructive" })
-    } finally {
-      setDiscovering(false)
-    }
   }
 
   function openModal(competitor: Competitor, tab: ModalTab = 'details') {
@@ -542,26 +530,22 @@ export default function CompetitorsPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">מתחרים</h1>
-          <p className="text-muted-foreground">{competitors.length} מתחרים במעקב</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-            <span className="text-muted-foreground">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-bold text-foreground">מתחרים</h1>
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <span>{competitors.length} מתחרים במעקב</span>
+          {competitors.filter(c => c.threat_score >= 80).length > 0 && (
+            <span className="flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
               {competitors.filter(c => c.threat_score >= 80).length} ברמת איום גבוהה
             </span>
-          </div>
-          <Button onClick={discoverCompetitors} disabled={discovering}>
-            {discovering ? (
-              <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מגלה מתחרים...</>
-            ) : (
-              <><Sparkles className="ml-2 h-4 w-4" />גלה מתחרים עם AI</>
-            )}
-          </Button>
+          )}
         </div>
+        {syncDates && (
+          <p className="text-xs text-muted-foreground">
+            עודכן: {syncDates.last_sync_at ? new Date(syncDates.last_sync_at).toLocaleDateString('he-IL') : '—'} | עדכון הבא: {syncDates.next_sync_at ? new Date(syncDates.next_sync_at).toLocaleDateString('he-IL') : '—'}
+          </p>
+        )}
       </div>
 
       {/* Unified competitors list */}
@@ -575,16 +559,10 @@ export default function CompetitorsPage() {
                 <Badge variant="secondary">{competitors.length}</Badge>
               )}
             </CardTitle>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)} disabled={competitors.length >= 10}>
-                <UserPlus className="ml-2 h-3.5 w-3.5" />
-                הוסף ידנית
-              </Button>
-              <Button variant="outline" size="sm" onClick={discoverCompetitors} disabled={discovering || competitors.length >= 10}>
-                {discovering ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
-                סרוק
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)} disabled={competitors.length >= 10}>
+              <UserPlus className="ml-2 h-3.5 w-3.5" />
+              הוסף ידנית
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -598,7 +576,7 @@ export default function CompetitorsPage() {
             <CompetitorTable items={competitors} />
           ) : (
             <div className="px-6 py-8 text-center text-sm text-muted-foreground">
-              לא נמצאו מתחרים. לחץ "סרוק" לגילוי אוטומטי או "הוסף ידנית".
+              לא נמצאו מתחרים עדיין. הגילוי האוטומטי יתבצע בסנכרון הבא, או הוסף ידנית.
             </div>
           )}
         </CardContent>
@@ -903,14 +881,6 @@ export default function CompetitorsPage() {
                                 </ul>
                               </div>
                             )}
-                            <Button variant="outline" size="sm" onClick={() => {
-                              const cacheKey = `reviews_${selectedCompetitor.id}`
-                              sessionStorage.removeItem(cacheKey)
-                              setReviews(prev => { const n = { ...prev }; delete n[selectedCompetitor.id]; return n })
-                              fetchReviews(selectedCompetitor)
-                            }}>
-                              <RefreshCw className="ml-2 h-3.5 w-3.5" />רענן ניתוח
-                            </Button>
                           </div>
                         )
                       })()

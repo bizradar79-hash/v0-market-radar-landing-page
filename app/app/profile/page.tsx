@@ -13,8 +13,6 @@ import {
   Building2,
   Loader2,
   Star,
-  RefreshCw,
-  Sparkles,
   Plus,
   TrendingUp,
   TrendingDown,
@@ -159,7 +157,6 @@ export default function ProfilePage() {
   const [generatingSwot, setGeneratingSwot] = useState(false)
   const [loadingPlaces, setLoadingPlaces] = useState(false)
   const [analyzingDeep, setAnalyzingDeep] = useState(false)
-  const [updatingAll, setUpdatingAll] = useState(false)
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
@@ -356,17 +353,6 @@ export default function ProfilePage() {
     } catch {
       toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
     } finally { setLoadingReviewAnalysis(false) }
-  }
-
-  async function updateAll() {
-    setUpdatingAll(true)
-    try {
-      await analyzeDeep()
-      await generateSwot()
-      await loadReviewAnalysis(true)
-      toast({ title: "הכל עודכן בהצלחה" })
-    } catch { toast({ title: "שגיאה בעדכון", variant: "destructive" }) }
-    finally { setUpdatingAll(false) }
   }
 
   async function analyzeDeep() {

@@ -91,6 +91,7 @@ export default function SeoGeoPage() {
   const [loadingSeo, setLoadingSeo] = useState(false)
   const [loadingGeo, setLoadingGeo] = useState(false)
 
+  const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
   const [showAllSeo, setShowAllSeo] = useState(false)
   const [expandedSeoRow, setExpandedSeoRow] = useState<number | null>(null)
 
@@ -107,9 +108,10 @@ export default function SeoGeoPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data } = await supabase
-      .from('companies').select('seo_ranking, geo_ranking').eq('id', user.id).single()
+      .from('companies').select('seo_ranking, geo_ranking, last_sync_at, next_sync_at').eq('id', user.id).single()
     if (data?.seo_ranking?.fetchedAt) setSeoRanking(data.seo_ranking as SEORanking)
     if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
+    if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
   }
 
 
@@ -135,6 +137,11 @@ export default function SeoGeoPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">דירוג SEO/GEO</h1>
         <p className="text-muted-foreground">היכן העסק שלך מופיע בגוגל ובמנועי AI</p>
+        {syncDates && (
+          <p className="text-xs text-muted-foreground mt-1">
+            עודכן: {syncDates.last_sync_at ? new Date(syncDates.last_sync_at).toLocaleDateString('he-IL') : '—'} | עדכון הבא: {syncDates.next_sync_at ? new Date(syncDates.next_sync_at).toLocaleDateString('he-IL') : '—'}
+          </p>
+        )}
       </div>
 
       {/* SEO Ranking */}

@@ -21,6 +21,7 @@ export default function AppLayout({
 
   useEffect(() => {
     setImpersonating(sessionStorage.getItem('is_impersonating') === 'true')
+    fetch('/api/sync/check').catch(() => {})
   }, [])
 
   return (
