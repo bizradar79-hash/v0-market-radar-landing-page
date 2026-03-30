@@ -303,6 +303,15 @@ export default function SeoGeoPage() {
                             </>
                           )
                         })}
+                        {filterVariants(seoRanking.queryVariants).length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="text-center py-6 text-sm text-muted-foreground">
+                              {seoFilter === 'sponsored'
+                                ? 'לא נמצאו תוצאות ממומנות לשאילתות אלו'
+                                : 'לא נמצאו תוצאות אורגניות'}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
