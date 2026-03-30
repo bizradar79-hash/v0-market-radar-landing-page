@@ -14,6 +14,7 @@ import {
   Zap, Users, Lightbulb,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 // ─── Keyword trend types (unchanged) ────────────────────────────────────────
 interface KwTrend {
@@ -133,6 +134,16 @@ function EmptyState({ message }: { message: string }) {
   )
 }
 
+function getTrendInsight(name: string, direction: string): string {
+  if (direction === 'rising' || direction === 'עולה') {
+    return `"${name}" בעלייה — שקול להתמקד בתחום זה עכשיו כדי לנצל את הגל`
+  }
+  if (direction === 'declining' || direction === 'יורד') {
+    return `"${name}" בירידה — בחן האם להפחית השקעה בתחום זה`
+  }
+  return `"${name}" יציב — שמור על הנוכחות הקיימת שלך בתחום זה`
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function TrendsPage() {
   const [loading, setLoading] = useState(true)
@@ -149,6 +160,15 @@ export default function TrendsPage() {
   const [addingKw, setAddingKw] = useState(false)
   const [activeTab, setActiveTab] = useState<Record<string, 'israel' | 'world'>>({})
   const [infoExpanded, setInfoExpanded] = useState(false)
+
+  const [selectedTrend, setSelectedTrend] = useState<{
+    name: string
+    direction: string
+    evidence?: string
+    source?: string
+    week_data?: number[]
+    trend_data?: { week: string; value: number }[]
+  } | null>(null)
 
   // Section 2 — industry trends
   const [industryTrends, setIndustryTrends] = useState<IndustryTrendsData | null>(null)
@@ -441,7 +461,15 @@ export default function TrendsPage() {
                             </div>
                             <p className="text-xs text-muted-foreground">{t.reason}</p>
                           </div>
-                          {t.trend_data?.length >= 2 && <Sparkline data={t.trend_data} trend={t.trend} />}
+                          {t.trend_data?.length >= 2 && (
+                            <button
+                              onClick={() => setSelectedTrend({ name: t.phrase, direction: t.trend, trend_data: t.trend_data })}
+                              className="cursor-pointer hover:opacity-80 transition-opacity"
+                              title="לחץ לפרטים"
+                            >
+                              <Sparkline data={t.trend_data} trend={t.trend} />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -520,7 +548,13 @@ export default function TrendsPage() {
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-semibold text-sm leading-snug flex-1">{t.name}</span>
                           <div className="flex items-center gap-2 shrink-0">
-                            <MiniSparkline data={t.week_data} direction={t.direction} />
+                            <button
+                              onClick={() => setSelectedTrend({ name: t.name, direction: t.direction, evidence: t.evidence, source: t.source, week_data: t.week_data })}
+                              className="cursor-pointer hover:opacity-80 transition-opacity"
+                              title="לחץ לפרטים"
+                            >
+                              <MiniSparkline data={t.week_data} direction={t.direction} />
+                            </button>
                             <DirectionBadge direction={t.direction} />
                           </div>
                         </div>
@@ -632,6 +666,56 @@ export default function TrendsPage() {
           </p>
         )}
       </div>
+
+      {/* Trend detail modal */}
+      <Dialog open={!!selectedTrend} onOpenChange={open => { if (!open) setSelectedTrend(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-right">{selectedTrend?.name}</DialogTitle>
+          </DialogHeader>
+          {selectedTrend && (
+            <div className="space-y-4">
+              {/* Large graph */}
+              <div className="flex justify-center py-2">
+                {selectedTrend.week_data ? (
+                  <svg width={280} height={80}>
+                    {(() => {
+                      const data = selectedTrend.week_data!
+                      const W = 280, H = 80
+                      const min = Math.min(...data), max = Math.max(...data)
+                      const range = max - min || 1
+                      const pts = data.map((v, i) => {
+                        const x = (i / (data.length - 1)) * W
+                        const y = H - 8 - ((v - min) / range) * (H - 16)
+                        return `${x.toFixed(1)},${y.toFixed(1)}`
+                      }).join(' ')
+                      const color = selectedTrend.direction === 'rising' ? '#16a34a' : selectedTrend.direction === 'declining' ? '#dc2626' : '#9ca3af'
+                      return <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    })()}
+                  </svg>
+                ) : selectedTrend.trend_data ? (
+                  <Sparkline data={selectedTrend.trend_data} trend={selectedTrend.direction} />
+                ) : null}
+              </div>
+
+              {selectedTrend.evidence && (
+                <blockquote className="border-r-2 border-primary/30 pr-3 text-sm text-muted-foreground italic">
+                  {selectedTrend.evidence}
+                </blockquote>
+              )}
+
+              {selectedTrend.source && (
+                <p className="text-xs text-muted-foreground">מקור: {selectedTrend.source}</p>
+              )}
+
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+                <p className="text-xs font-medium text-primary mb-1">מה זה אומר לעסק שלך</p>
+                <p className="text-sm text-foreground">{getTrendInsight(selectedTrend.name, selectedTrend.direction)}</p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   )
