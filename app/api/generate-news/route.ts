@@ -138,18 +138,25 @@ export async function POST(request: Request) {
       return true
     })
 
-    // URL validation: filter out 404s and unreachable URLs using HEAD requests
+    // URL validation: filter out definitely broken URLs
     const validationResults = await Promise.allSettled(
       list.map(async (n: any) => {
         const url = n.url || ''
         if (!url.startsWith('http')) return { n, valid: false }
+        // Skip validation for well-known reliable domains
+        const knownDomains = ['reuters.com', 'bbc.com', 'ynet.co.il', 'haaretz.com', 'calcalist.co.il', 'globes.co.il', 'techcrunch.com', 'wsj.com', 'bloomberg.com', 'themarker.com', 'maariv.co.il']
+        const host = (() => { try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' } })()
+        if (knownDomains.some(d => host.endsWith(d))) return { n, valid: true }
         try {
           const res = await fetch(url, {
             method: 'HEAD',
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(3000),
             redirect: 'follow',
+            credentials: 'omit',
           })
-          return { n, valid: res.ok || res.status === 405 } // 405 = Method Not Allowed but URL exists
+          // 200, 301, 302, 405 (blocks HEAD but URL exists), 403 (paywall but exists) = valid
+          const valid = res.ok || res.status === 405 || res.status === 403 || res.status === 301 || res.status === 302
+          return { n, valid }
         } catch {
           return { n, valid: false }
         }

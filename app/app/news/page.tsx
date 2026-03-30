@@ -6,6 +6,7 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
 import { ExternalLink, Clock, Loader2, Newspaper } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface NewsItem {
   id: string
@@ -53,6 +54,7 @@ export default function NewsPage() {
   const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
+  const { toast } = useToast()
 
   useEffect(() => { fetchNews() }, [])
 
@@ -103,6 +105,9 @@ export default function NewsPage() {
               target="_blank"
               rel="noopener noreferrer"
               className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-shadow hover:shadow-md hover:border-primary/20"
+              onClick={(e) => {
+                if (!item.url) { e.preventDefault(); toast({ title: "הקישור אינו זמין", variant: "destructive" }) }
+              }}
             >
               {/* Top row: region badge + date */}
               <div className="flex items-center justify-between">
