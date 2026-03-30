@@ -138,34 +138,53 @@ export async function POST(request: Request) {
       return true
     })
 
-    // URL validation: filter out definitely broken URLs
-    const validationResults = await Promise.allSettled(
-      list.map(async (n: any) => {
-        const url = n.url || ''
-        if (!url.startsWith('http')) return { n, valid: false }
-        // Skip validation for well-known reliable domains
-        const knownDomains = ['reuters.com', 'bbc.com', 'ynet.co.il', 'haaretz.com', 'calcalist.co.il', 'globes.co.il', 'techcrunch.com', 'wsj.com', 'bloomberg.com', 'themarker.com', 'maariv.co.il']
-        const host = (() => { try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' } })()
-        if (knownDomains.some(d => host.endsWith(d))) return { n, valid: true }
-        try {
-          const res = await fetch(url, {
-            method: 'HEAD',
-            signal: AbortSignal.timeout(3000),
-            redirect: 'follow',
-            credentials: 'omit',
-          })
-          // 200, 301, 302, 405 (blocks HEAD but URL exists), 403 (paywall but exists) = valid
-          const valid = res.ok || res.status === 405 || res.status === 403 || res.status === 301 || res.status === 302
-          return { n, valid }
-        } catch {
-          return { n, valid: false }
-        }
-      })
-    )
-    list = validationResults
-      .filter((r): r is PromiseFulfilledResult<{ n: any; valid: boolean }> => r.status === 'fulfilled' && r.value.valid)
-      .map(r => r.value.n)
+    // URL validation: only accept URLs from known reliable domains, reject homepages
+    const VALID_DOMAINS = [
+      'ynet.co.il', 'haaretz.co.il', 'haaretz.com', 'mako.co.il', 'calcalist.co.il',
+      'globes.co.il', 'walla.co.il', 'n12.co.il', 'kan.org.il', 'themarker.com',
+      'maariv.co.il', 'inn.co.il', 'srugim.co.il', 'ice.co.il',
+      'techcrunch.com', 'reuters.com', 'bbc.com', 'bbc.co.uk', 'theverge.com',
+      'bloomberg.com', 'wsj.com', 'ft.com', 'forbes.com', 'nytimes.com',
+      'washingtonpost.com', 'theguardian.com', 'apnews.com', 'cnbc.com', 'wired.com',
+    ]
+    function extractDomain(url: string): string {
+      try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+    }
+    function isHomepage(url: string): boolean {
+      try {
+        const u = new URL(url)
+        return u.pathname === '/' || u.pathname === ''
+      } catch { return true }
+    }
+    list = list.filter((n: any) => {
+      const url = n.url || ''
+      if (!url.startsWith('http')) return false
+      if (isHomepage(url)) return false
+      const host = extractDomain(url)
+      return VALID_DOMAINS.some(d => host === d || host.endsWith('.' + d))
+    })
     steps.urlValidation = { count: list.length }
+
+    // If fewer than 8 valid items, run a second broader search
+    if (list.length < 8) {
+      const broader = businessProfile?.industryTags?.slice(0, 2).join(' ') || businessOverview.split(' ').slice(0, 4).join(' ')
+      const raw2 = await fetchNews(`${broader} עסקים ישראל חדשות`, 30, geoContext)
+      const list2 = filterNews(raw2, 30).filter((n: any) => {
+        const url = n.url || ''
+        if (!url.startsWith('http') || isHomepage(url)) return false
+        const host = extractDomain(url)
+        return VALID_DOMAINS.some(d => host === d || host.endsWith('.' + d))
+      })
+      // Merge deduped
+      const existingUrls = new Set(list.map((n: any) => (n.url || '').toLowerCase()))
+      for (const item of list2) {
+        if (!existingUrls.has((item.url || '').toLowerCase())) {
+          list.push(item)
+          existingUrls.add((item.url || '').toLowerCase())
+        }
+      }
+      steps.broadenedSearch = { extra: list2.length, total: list.length }
+    }
 
     steps.db = 'starting'
     await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)

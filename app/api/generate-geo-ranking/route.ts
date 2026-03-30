@@ -47,17 +47,11 @@ function buildEnginePrompt(
 השתמש בחיפוש אינטרנט כדי למצוא תוצאות גוגל אמיתיות ועדכניות לשאלה זו.
 הצג רשימה ממוינת לפי חשיבות/דירוג בגוגל.`,
 
-    chatgpt: `חפש באינטרנט: מה ChatGPT (של OpenAI) ממליץ כאשר שואלים אותו "${question}"?
-חפש פורומים, Reddit, מאמרים וסקירות שמתעדים תשובות של ChatGPT לשאלה זו.
-גלה אילו עסקים ישראליים ChatGPT מציין בתשובותיו.`,
+    chatgpt: `Use web search to find: what businesses appear when people ask ChatGPT about "${question}" in Israel? Search for "ChatGPT ${question} ישראל המלצות" and list the top 10 businesses or websites that ChatGPT mentions in its answers based on what you find online. Focus specifically on what ChatGPT recommends, not general Google results.`,
 
-    gemini: `חפש באינטרנט: מה Google Gemini מציג כשמישהו שואל אותו בעברית "${question}" בישראל?
-חפש screenshots, פוסטים, תיעוד של תשובות Gemini לשאלה זו בהקשר ישראלי.
-גלה אילו עסקים ישראליים Google Gemini ממליץ עליהם ספציפית — לא תוצאות גוגל רגילות.`,
+    gemini: `Use web search to find: what does Google Gemini recommend for "${question}" in Israel? Search for "Gemini ${question} ישראל תוצאות" and list the top 10 businesses or websites that appear in Gemini's responses based on what you find online. Focus specifically on what Gemini recommends, not general Google results.`,
 
-    grok: `השתמש בחיפוש האינטרנט החי שלך עכשיו: מה העסקים הטובים ביותר בישראל עבור "${question}"?
-חפש מידע עדכני ביותר — 2024-2025. עדיפות לידיעות חדשות, סקירות, ואתרים ישראליים.
-זה חיפוש שלך — לא מה שמנוע אחר ממליץ.`,
+    grok: `Search directly for "${question}" in Israel and list the top 10 most relevant businesses or websites you find. Use your live web search. Return fresh, current results from 2024-2025. Do not copy results from other AI engines — this is your own independent search.`,
   }
 
   return `${bases[engine]}
@@ -206,20 +200,32 @@ export async function POST(request: Request) {
       }
     })
 
-    // Overlap detection — if gemini and grok share >60% results, retry grok with enhanced query
-    const geminiNames = new Set((engines.gemini?.results || []).map((r: any) => (r.name || '').toLowerCase()))
-    const grokNames = (engines.grok?.results || []).map((r: any) => (r.name || '').toLowerCase())
-    if (geminiNames.size > 0 && grokNames.length > 0) {
-      const overlap = grokNames.filter(n => geminiNames.has(n)).length / grokNames.length
+    // Overlap detection — if any two engines share >60% results, retry the second one with an exclusion hint
+    const enginePairs: [Engine, Engine][] = [
+      ['chatgpt', 'gemini'],
+      ['chatgpt', 'grok'],
+      ['gemini', 'grok'],
+    ]
+    for (const [refEngine, targetEngine] of enginePairs) {
+      const refNames = new Set((engines[refEngine]?.results || []).map((r: any) => (r.name || '').toLowerCase()))
+      const targetNamesList = (engines[targetEngine]?.results || []).map((r: any) => (r.name || '').toLowerCase())
+      if (refNames.size === 0 || targetNamesList.length === 0) continue
+      const overlap = targetNamesList.filter(n => refNames.has(n)).length / targetNamesList.length
       if (overlap > 0.6) {
-        const specificQuestion = `${primaryQuestion} ישראל 2025 מובילים`
-        const retryGrok = await runGeoQuestion(specificQuestion, companyName, website, competitorNames, 'grok')
-        engines.grok = {
-          results: retryGrok.results,
-          appeared: retryGrok.appeared,
-          position: retryGrok.position,
-          topResults: retryGrok.topResults,
+        const overlappingDomains = (engines[targetEngine]?.results || [])
+          .filter((r: any) => refNames.has((r.name || '').toLowerCase()))
+          .map((r: any) => r.name || '')
+          .slice(0, 5)
+          .join(', ')
+        const retryPrompt = `${primaryQuestion} — Return different results from: ${overlappingDomains}`
+        const retryResult = await runGeoQuestion(retryPrompt, companyName, website, competitorNames, targetEngine)
+        engines[targetEngine] = {
+          results: retryResult.results,
+          appeared: retryResult.appeared,
+          position: retryResult.position,
+          topResults: retryResult.topResults,
         }
+        break // only retry once
       }
     }
 

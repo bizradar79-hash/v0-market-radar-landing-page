@@ -115,10 +115,14 @@ export default function SeoGeoPage() {
   }
 
 
+  function allResults(variants: QueryVariant[] | undefined): QueryVariantResult[] {
+    return (variants ?? []).flatMap(v => v.results ?? [])
+  }
+
   function filterResults(results: QueryVariantResult[] | undefined): QueryVariantResult[] {
     if (!results) return []
-    if (seoFilter === 'organic') return results.filter(r => !r.is_sponsored)
-    if (seoFilter === 'sponsored') return results.filter(r => r.is_sponsored)
+    if (seoFilter === 'organic') return results.filter(r => r.is_sponsored === false || r.is_sponsored === undefined)
+    if (seoFilter === 'sponsored') return results.filter(r => r.is_sponsored === true)
     return results
   }
 
@@ -129,6 +133,14 @@ export default function SeoGeoPage() {
       ...v,
       results: filterResults(v.results),
     })).filter(v => (v.results?.length ?? 0) > 0)
+  }
+
+  function getTabCount(filter: SeoFilter): number {
+    if (!seoRanking?.queryVariants) return 0
+    const all = allResults(seoRanking.queryVariants)
+    if (filter === 'all') return all.length
+    if (filter === 'organic') return all.filter(r => r.is_sponsored === false || r.is_sponsored === undefined).length
+    return all.filter(r => r.is_sponsored === true).length
   }
 
   return (
@@ -178,10 +190,10 @@ export default function SeoGeoPage() {
                   {/* Filter toggle */}
                   <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit">
                     {([
-                      { id: 'all', label: 'הכל' },
-                      { id: 'organic', label: 'אורגני בלבד' },
-                      { id: 'sponsored', label: 'ממומן בלבד' },
-                    ] as const).map(f => (
+                      { id: 'all' as SeoFilter, label: 'הכל' },
+                      { id: 'organic' as SeoFilter, label: 'אורגני' },
+                      { id: 'sponsored' as SeoFilter, label: 'ממומן' },
+                    ]).map(f => (
                       <button
                         key={f.id}
                         onClick={() => setSeoFilter(f.id)}
@@ -191,7 +203,7 @@ export default function SeoGeoPage() {
                             : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
-                        {f.label}
+                        {f.label} ({getTabCount(f.id)})
                       </button>
                     ))}
                   </div>

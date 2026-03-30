@@ -243,7 +243,7 @@ export default function OpportunitiesPage() {
       {/* ── Collaboration Recommendations (Leads) ──────────────────────── */}
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">ערוצי הפצה פוטנציאליים</h2>
+          <h2 className="text-lg font-semibold">שותפים ולידים פוטנציאליים</h2>
           <p className="text-sm text-muted-foreground">לידים פוטנציאליים שזוהו על ידי AI</p>
         </div>
 

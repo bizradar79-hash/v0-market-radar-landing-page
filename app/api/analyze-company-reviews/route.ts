@@ -41,8 +41,11 @@ export async function POST(request: Request) {
 
     const domainHint = domain ? ` (אתר: ${domain})` : ''
     const cityHint = city ? ` בעיר ${city}` : ''
+    const searchQuery = domain
+      ? `"${companyName}" ${domain} ביקורות`
+      : `"${companyName}" ביקורות${cityHint}`
 
-    const prompt = `אתה מומחה ניתוח שוק ישראלי. השתמש ב-web_search כדי למצוא ביקורות על "${companyName}"${domainHint}${cityHint}.
+    const prompt = `אתה מומחה ניתוח שוק ישראלי. השתמש ב-web_search עם השאילתה: ${searchQuery}
 
 חשוב מאוד: חפש רק את העסק "${companyName}"${domain ? ` עם הדומיין ${domain}` : ''}. אל תחזיר מידע על עסקים אחרים עם שם דומה.
 
@@ -108,6 +111,15 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
     }
 
+    // Strict business matching: reject results that don't mention the company
+    function isValidMatch(result: any): boolean {
+      const companyWords = companyName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2)
+      if (companyWords.length === 0) return true
+      const resultText = [result.name || '', result.url || '', result.snippet || ''].join(' ').toLowerCase()
+      const matchCount = companyWords.filter((w: string) => resultText.includes(w)).length
+      return matchCount / companyWords.length >= 0.5
+    }
+
     // Normalize and validate sources — reject sources whose name doesn't match company or known platform
     const KNOWN_PLATFORMS = ['google', 'facebook', 'zap', 'izi', 'yad2', 'moovit', 'tripadvisor', 'yelp', 'walla', 'אתר', 'מדריך']
     const rawSources = Array.isArray(parsed.sources) ? parsed.sources : []
@@ -124,7 +136,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
         const matchesCompany = fuzzyNameMatch(s.name, companyName, 0.4)
         // Accept if URL contains company domain
         const urlMatchesDomain = domain && s.url && (s.url as string).toLowerCase().includes(domain)
-        return isKnownPlatform || matchesCompany || urlMatchesDomain
+        // Strict match: result text must reference the company
+        const strictMatch = isValidMatch(s)
+        return strictMatch && (isKnownPlatform || matchesCompany || urlMatchesDomain)
       })
 
     const totalFromSources = sources.reduce((sum: number, s: any) => sum + (s.review_count || 0), 0)

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Truck, CheckCircle2, Circle, Loader2, Info } from "lucide-react"
+import { Truck, CheckCircle2, Circle, Loader2, Info, Sparkles } from "lucide-react"
 
 const CHANNEL_META: Record<string, { description: string; potential: 'גבוה' | 'בינוני' | 'נמוך' }> = {
   "אתר אינטרנט": { description: "נוכחות דיגיטלית ישירה — לקוחות מוצאים אתכם בגוגל ומבצעים פעולה", potential: "גבוה" },
@@ -50,6 +50,7 @@ function saveActive(active: Set<string>) {
 export default function DistributionChannelsPage() {
   const [channels, setChannels] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [extracting, setExtracting] = useState(false)
   const [active, setActive] = useState<Set<string>>(new Set())
   const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
   const supabase = createClient()
@@ -59,16 +60,31 @@ export default function DistributionChannelsPage() {
     loadChannels()
   }, [])
 
+  async function extractWithAI() {
+    setExtracting(true)
+    try {
+      const res = await fetch('/api/extract-distribution-channels', { method: 'POST' })
+      const data = await res.json()
+      if (data.channels?.length) {
+        setChannels(data.channels)
+      }
+    } catch { /* silent */ }
+    setExtracting(false)
+  }
+
   async function loadChannels() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setLoading(false); return }
     const { data } = await supabase
       .from('companies')
-      .select('distribution_channels, last_sync_at, next_sync_at')
+      .select('distribution_channels, business_profile, business_overview, last_sync_at, next_sync_at')
       .eq('id', user.id)
       .single()
-    if (data?.distribution_channels) {
-      setChannels(Array.isArray(data.distribution_channels) ? data.distribution_channels : [])
+    if (data?.distribution_channels && Array.isArray(data.distribution_channels) && data.distribution_channels.length > 0) {
+      setChannels(data.distribution_channels)
+    } else if ((data as any)?.business_profile?.distributionChannels?.length) {
+      // Fallback: read from business_profile JSONB
+      setChannels((data as any).business_profile.distributionChannels)
     }
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
     setLoading(false)
@@ -114,9 +130,20 @@ export default function DistributionChannelsPage() {
             <div>
               <p className="font-medium">ערוצי הפצה לא זוהו עדיין</p>
               <p className="text-sm text-muted-foreground mt-1">
-                ערוצי ההפצה מזוהים אוטומטית בעת ניתוח הפרופיל העסקי
+                ערוצי ההפצה מזוהים אוטומטית מהפרופיל העסקי שלך
               </p>
             </div>
+            <Button
+              onClick={extractWithAI}
+              disabled={extracting}
+              variant="outline"
+              className="mt-2"
+            >
+              {extracting
+                ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מחלץ...</>
+                : <><Sparkles className="ml-2 h-4 w-4" />זהה ערוצי הפצה עם AI</>
+              }
+            </Button>
           </CardContent>
         </Card>
       ) : (
