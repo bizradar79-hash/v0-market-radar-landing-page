@@ -51,13 +51,13 @@ function buildEnginePrompt(
 חפש פורומים, Reddit, מאמרים וסקירות שמתעדים תשובות של ChatGPT לשאלה זו.
 גלה אילו עסקים ישראליים ChatGPT מציין בתשובותיו.`,
 
-    gemini: `חפש באינטרנט: מה Google Gemini ממליץ כאשר שואלים אותו "${question}"?
-חפש פורומים, Reddit, מאמרים וסקירות שמתעדים תשובות של Gemini לשאלה זו.
-גלה אילו עסקים ישראליים Gemini מציין בתשובותיו.`,
+    gemini: `חפש באינטרנט: מה Google Gemini מציג כשמישהו שואל אותו בעברית "${question}" בישראל?
+חפש screenshots, פוסטים, תיעוד של תשובות Gemini לשאלה זו בהקשר ישראלי.
+גלה אילו עסקים ישראליים Google Gemini ממליץ עליהם ספציפית — לא תוצאות גוגל רגילות.`,
 
-    grok: `חפש בזמן אמת: "${question}" בישראל.
-השתמש בחיפוש האינטרנט החי שלך כדי למצוא את העסקים הרלוונטיים ביותר כיום.
-העדף מקורות עדכניים וידיעות אחרונות.`,
+    grok: `השתמש בחיפוש האינטרנט החי שלך עכשיו: מה העסקים הטובים ביותר בישראל עבור "${question}"?
+חפש מידע עדכני ביותר — 2024-2025. עדיפות לידיעות חדשות, סקירות, ואתרים ישראליים.
+זה חיפוש שלך — לא מה שמנוע אחר ממליץ.`,
   }
 
   return `${bases[engine]}
@@ -205,6 +205,23 @@ export async function POST(request: Request) {
         topResults: engineResults[i].topResults,
       }
     })
+
+    // Overlap detection — if gemini and grok share >60% results, retry grok with enhanced query
+    const geminiNames = new Set((engines.gemini?.results || []).map((r: any) => (r.name || '').toLowerCase()))
+    const grokNames = (engines.grok?.results || []).map((r: any) => (r.name || '').toLowerCase())
+    if (geminiNames.size > 0 && grokNames.length > 0) {
+      const overlap = grokNames.filter(n => geminiNames.has(n)).length / grokNames.length
+      if (overlap > 0.6) {
+        const specificQuestion = `${primaryQuestion} ישראל 2025 מובילים`
+        const retryGrok = await runGeoQuestion(specificQuestion, companyName, website, competitorNames, 'grok')
+        engines.grok = {
+          results: retryGrok.results,
+          appeared: retryGrok.appeared,
+          position: retryGrok.position,
+          topResults: retryGrok.topResults,
+        }
+      }
+    }
 
     // Primary (general) for backward-compat fields
     const primary = engineResults[0]

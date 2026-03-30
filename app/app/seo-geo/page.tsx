@@ -407,6 +407,21 @@ export default function SeoGeoPage() {
                     ))}
                   </div>
 
+                  {/* Engine info box */}
+                  {(() => {
+                    const ENGINE_INFO: Record<string, string> = {
+                      general: "תוצאות אורגניות בגוגל לשאילתה זו",
+                      chatgpt: "מה ChatGPT ממליץ כשמישהו שואל שאלה זו",
+                      gemini: "מה Google Gemini מציג בתשובה לשאלה זו",
+                      grok: "תוצאות חיפוש בזמן אמת של Grok לשאילתה זו",
+                    }
+                    return ENGINE_INFO[selectedGeoEngine] ? (
+                      <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2 border">
+                        📡 {ENGINE_INFO[selectedGeoEngine]}
+                      </p>
+                    ) : null
+                  })()}
+
                   {/* Selected engine results */}
                   {(() => {
                     const eng = geoRanking.engines![selectedGeoEngine]
