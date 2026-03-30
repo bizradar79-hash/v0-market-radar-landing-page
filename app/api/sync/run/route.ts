@@ -236,6 +236,13 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── 11. Weekly report — always regenerate ────────────────────────────────
+    {
+      const r = await callModule(origin, '/api/generate-weekly-report', companyId)
+      addLog('weekly_report', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.report?.sections?.length ?? 0} sections` : (r.body?.error ?? `HTTP ${r.status}`))
+      await new Promise(res => setTimeout(res, 2000))
+    }
+
     // ── Done ──────────────────────────────────────────────────────────────────
     const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS)
     await adminDb.from('companies').update({

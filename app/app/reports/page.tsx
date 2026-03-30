@@ -93,6 +93,18 @@ interface Conference {
   url: string
 }
 
+interface WeeklyReportSection {
+  title: string
+  content: string[]
+  meta?: string
+}
+
+interface WeeklyReport {
+  generated_at: string
+  company_name: string
+  sections: WeeklyReportSection[]
+}
+
 interface ReportData {
   weekRange: string
   generatedAt: string
@@ -145,6 +157,7 @@ function StarRating({ rating }: { rating: number }) {
 export default function ReportsPage() {
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [highlights, setHighlights] = useState<Record<string, string>>({})
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const supabase = createClient()
@@ -189,7 +202,7 @@ export default function ReportsPage() {
       supabase.from("trends").select("name, description, score, direction, category").order("created_at", { ascending: false }),
       supabase.from("news").select("title, source, summary, category, sentiment, published_at").order("published_at", { ascending: false }),
       supabase.from("conferences").select("name, date, location, description, url").gte("date", today).order("date", { ascending: true }),
-      supabase.from("companies").select("name, industry, website, city, description, business_overview, swot, geo_data").single(),
+      supabase.from("companies").select("name, industry, website, city, description, business_overview, swot, geo_data, last_report").single(),
     ])
 
     const now = new Date()
@@ -202,6 +215,8 @@ export default function ReportsPage() {
     if ((competitorsCount || 0) > 0) recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
     if ((tendersCount || 0) > 0) recommendations.push("לבחון את המכרזים הפתוחים ולפעול בהתאם")
     recommendations.push("להמשיך לעדכן את פרופיל החברה לתוצאות מדויקות יותר")
+
+    if ((company as any)?.last_report) setWeeklyReport((company as any).last_report as WeeklyReport)
 
     setReportData({
       weekRange,
@@ -476,6 +491,36 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Weekly structured report */}
+      {weeklyReport && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileText className="h-5 w-5 text-primary" />
+              דו&quot;ח שבועי
+              <span className="text-xs text-muted-foreground font-normal">
+                {new Date(weeklyReport.generated_at).toLocaleDateString('he-IL')}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {weeklyReport.sections.map((section, i) => (
+              <div key={i} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-sm">{section.title}</h3>
+                  {section.meta && <Badge variant="secondary" className="text-xs">{section.meta}</Badge>}
+                </div>
+                <ul className="space-y-1">
+                  {section.content.map((line, j) => (
+                    <li key={j} className="text-sm text-muted-foreground">{line}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

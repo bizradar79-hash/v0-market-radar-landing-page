@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -50,6 +50,10 @@ export async function POST() {
   "conferences": "...",
   "tenders": "..."
 }`)
+
+    // Also trigger full structured report generation (fire-and-forget)
+    const origin = new URL(request.url).origin
+    fetch(`${origin}/api/generate-weekly-report`, { method: 'POST', headers: { 'Cookie': request.headers.get('cookie') || '' } }).catch(() => {})
 
     return NextResponse.json({ success: true, highlights: highlights || {} })
   } catch (error: any) {
