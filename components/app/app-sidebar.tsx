@@ -20,6 +20,7 @@ import {
   UserCircle,
   ShieldCheck,
   BarChart2,
+  Truck,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -46,11 +47,11 @@ interface NavCounts {
 
 const getNavGroups = (counts: NavCounts) => [
   {
-    title: "🚀 מנוע צמיחה",
+    title: "💼 פרופיל",
     items: [
       { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
-      { href: "/app/leads", label: "מרכז הזדמנויות", icon: Users, badge: counts.leads || undefined },
       { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
+      { href: "/app/distribution-channels", label: "ערוצי הפצה", icon: Truck },
     ],
   },
   {
@@ -60,6 +61,12 @@ const getNavGroups = (counts: NavCounts) => [
       { href: "/app/seo-geo", label: "דירוג SEO/GEO", icon: BarChart2 },
       { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
       { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
+    ],
+  },
+  {
+    title: "🌱 מנוע צמיחה",
+    items: [
+      { href: "/app/leads", label: "מרכז הזדמנויות", icon: Users, badge: counts.leads || undefined },
     ],
   },
   {
