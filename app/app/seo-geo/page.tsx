@@ -6,10 +6,8 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Loader2,
-  RefreshCw,
   Search,
   Bot,
   CheckCircle2,
@@ -19,7 +17,6 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
 
 interface RankingResult {
   position: number
@@ -101,7 +98,6 @@ export default function SeoGeoPage() {
   const [selectedGeoEngine, setSelectedGeoEngine] = useState<'general' | 'chatgpt' | 'gemini' | 'grok'>('general')
 
   const supabase = createClient()
-  const { toast } = useToast()
 
   useEffect(() => {
     fetchRankings()
@@ -116,41 +112,6 @@ export default function SeoGeoPage() {
     if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
   }
 
-  async function refreshSeo() {
-    setLoadingSeo(true)
-    try {
-      const res = await fetch('/api/generate-seo-ranking?force=true', { method: 'POST' })
-      const data = await res.json()
-      if (data.success) {
-        setSeoRanking(data as SEORanking)
-        toast({ title: "דירוג SEO עודכן" })
-      } else {
-        toast({ title: "שגיאה בטעינת SEO", description: data.error, variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", variant: "destructive" })
-    } finally {
-      setLoadingSeo(false)
-    }
-  }
-
-  async function refreshGeo() {
-    setLoadingGeo(true)
-    try {
-      const res = await fetch('/api/generate-geo-ranking?force=true', { method: 'POST' })
-      const data = await res.json()
-      if (data.success) {
-        setGeoRanking(data as GEORanking)
-        toast({ title: "דירוג GEO עודכן" })
-      } else {
-        toast({ title: "שגיאה בטעינת GEO", description: data.error, variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", variant: "destructive" })
-    } finally {
-      setLoadingGeo(false)
-    }
-  }
 
   function filterResults(results: QueryVariantResult[] | undefined): QueryVariantResult[] {
     if (!results) return []
@@ -192,10 +153,6 @@ export default function SeoGeoPage() {
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע בגוגל לעומת המתחרים</p>
             </div>
-            <Button variant="outline" size="sm" onClick={refreshSeo} disabled={loadingSeo}>
-              {loadingSeo ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
-              רענן
-            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -331,7 +288,7 @@ export default function SeoGeoPage() {
                                         )}
                                       </div>
                                     ) : (
-                                      <p className="text-xs text-muted-foreground">רענן לצפייה בתוצאות מלאות</p>
+                                      <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
                                     )}
                                   </td>
                                 </tr>
@@ -375,7 +332,7 @@ export default function SeoGeoPage() {
             </div>
           ) : (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              לחץ "רענן" כדי לבדוק היכן העסק שלך מופיע בתוצאות גוגל לעומת המתחרים
+              הנתונים יתעדכנו אוטומטית בסנכרון השבועי
             </div>
           )}
         </CardContent>
@@ -397,10 +354,6 @@ export default function SeoGeoPage() {
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">היכן אני מופיע במנועי AI לעומת המתחרים</p>
             </div>
-            <Button variant="outline" size="sm" onClick={refreshGeo} disabled={loadingGeo}>
-              {loadingGeo ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="ml-2 h-3.5 w-3.5" />}
-              רענן
-            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -441,7 +394,7 @@ export default function SeoGeoPage() {
                   {/* Selected engine results */}
                   {(() => {
                     const eng = geoRanking.engines![selectedGeoEngine]
-                    if (!eng) return <p className="text-sm text-muted-foreground py-4 text-center">אין נתונים למנוע זה — לחץ רענן</p>
+                    if (!eng) return <p className="text-sm text-muted-foreground py-4 text-center">אין נתונים למנוע זה</p>
                     return (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
@@ -459,7 +412,7 @@ export default function SeoGeoPage() {
                               {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
                             </div>
                           )) : (
-                            <p className="text-xs text-muted-foreground">רענן לצפייה בתוצאות</p>
+                            <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
                           )}
                         </div>
                       </div>
@@ -499,7 +452,7 @@ export default function SeoGeoPage() {
             </div>
           ) : (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              לחץ "רענן" כדי לבדוק האם העסק שלך מוזכר כשמנועי AI נשאלים על תחומך
+              הנתונים יתעדכנו אוטומטית בסנכרון השבועי
             </div>
           )}
         </CardContent>

@@ -24,7 +24,6 @@ import {
   ExternalLink,
   Loader2,
   AlertTriangle,
-  Sparkles,
   Trash2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
@@ -45,7 +44,6 @@ interface Tender {
 export default function TendersPage() {
   const [tenders, setTenders] = useState<Tender[]>([])
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
   const [selectedTender, setSelectedTender] = useState<Tender | null>(null)
   const supabase = createClient()
   const { toast } = useToast()
@@ -66,36 +64,6 @@ export default function TendersPage() {
     setLoading(false)
   }
 
-  async function generateTenders() {
-    setGenerating(true)
-    try {
-      const response = await fetch("/api/generate-tenders", { method: "POST" })
-      const data = await response.json()
-      
-      if (data.success) {
-        await fetchTenders()
-        toast({
-          title: "מכרזים נוספו!",
-          description: `נמצאו ${data.count || 0} מכרזים חדשים`,
-        })
-      } else {
-        toast({
-          title: "שגיאה",
-          description: data.error || "לא הצלחנו לאתר מכרזים",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error generating tenders:", error)
-      toast({
-        title: "שגיאה",
-        description: "אירעה שגיאה בעת איתור המכרזים",
-        variant: "destructive",
-      })
-    } finally {
-      setGenerating(false)
-    }
-  }
 
   async function deleteTender(id: string) {
     const { error } = await supabase
@@ -174,19 +142,6 @@ export default function TendersPage() {
               {tenders.filter(t => { const d = getDaysUntilDeadline(t.deadline); return d !== null && d <= 7 && d >= 0 }).length} עם דדליין קרוב
             </span>
           </div>
-          <Button onClick={generateTenders} disabled={generating}>
-            {generating ? (
-              <>
-                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                מחפש מכרזים...
-              </>
-            ) : (
-              <>
-                <Sparkles className="ml-2 h-4 w-4" />
-                חפש מכרזים עם AI
-              </>
-            )}
-          </Button>
         </div>
       </div>
 
@@ -292,10 +247,7 @@ export default function TendersPage() {
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FileText className="h-12 w-12 text-muted-foreground/50" />
             <p className="mt-4 text-muted-foreground">לא נמצאו מכרזים פעילים</p>
-            <Button className="mt-4" onClick={generateTenders} disabled={generating}>
-              <Sparkles className="ml-2 h-4 w-4" />
-              חפש מכרזים עם AI
-            </Button>
+            <p className="mt-1 text-xs text-muted-foreground">המכרזים יתעדכנו אוטומטית בסנכרון השבועי</p>
           </CardContent>
         </Card>
       )}

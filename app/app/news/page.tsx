@@ -5,9 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { ExternalLink, Clock, Loader2, Newspaper, Sparkles } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { ExternalLink, Clock, Loader2, Newspaper } from "lucide-react"
 
 interface NewsItem {
   id: string
@@ -54,9 +52,7 @@ function RegionBadge({ region }: { region: string }) {
 export default function NewsPage() {
   const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
   const supabase = createClient()
-  const { toast } = useToast()
 
   useEffect(() => { fetchNews() }, [])
 
@@ -67,24 +63,6 @@ export default function NewsPage() {
       .order("published_at", { ascending: false })
     if (!error && data) setNews(data)
     setLoading(false)
-  }
-
-  async function generateNews() {
-    setGenerating(true)
-    try {
-      const response = await fetch("/api/generate-news?force=true", { method: "POST" })
-      const data = await response.json()
-      if (data.success) {
-        await fetchNews()
-        toast({ title: "חדשות עודכנו", description: `נמצאו ${data.count || 0} כתבות` })
-      } else {
-        toast({ title: "שגיאה", description: data.error || "לא הצלחנו לטעון חדשות", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
-    } finally {
-      setGenerating(false)
-    }
   }
 
   if (loading) {
@@ -104,18 +82,9 @@ export default function NewsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">חדשות</h1>
-          <p className="text-muted-foreground text-sm">עדכונים רלוונטיים לעסק שלך מישראל ומהעולם</p>
-        </div>
-        <Button onClick={generateNews} disabled={generating} size="sm">
-          {generating ? (
-            <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מעדכן...</>
-          ) : (
-            <><Sparkles className="ml-2 h-4 w-4" />עדכן חדשות</>
-          )}
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">חדשות</h1>
+        <p className="text-muted-foreground text-sm">עדכונים רלוונטיים לעסק שלך מישראל ומהעולם</p>
       </div>
 
       {/* News feed */}
@@ -123,11 +92,7 @@ export default function NewsPage() {
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
           <Newspaper className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">אין חדשות עדיין</p>
-          <p className="text-xs text-muted-foreground mt-1">לחץ "עדכן חדשות" לטעינת חדשות רלוונטיות לעסק שלך</p>
-          <Button onClick={generateNews} disabled={generating} variant="outline" size="sm" className="mt-4">
-            {generating ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Sparkles className="ml-2 h-4 w-4" />}
-            {generating ? 'מחפש חדשות...' : 'טען חדשות עם AI'}
-          </Button>
+          <p className="text-xs text-muted-foreground mt-1">החדשות יתעדכנו אוטומטית בסנכרון השבועי</p>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

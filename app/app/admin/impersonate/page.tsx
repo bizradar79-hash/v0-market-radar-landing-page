@@ -26,6 +26,10 @@ interface UserRow {
     name: string
     industry: string
     website: string
+    last_sync_at: string | null
+    next_sync_at: string | null
+    sync_status: string | null
+    sync_log: any[] | null
   } | null
 }
 
@@ -103,19 +107,21 @@ export default function ImpersonatePage() {
     setRefreshing(prev => ({ ...prev, [userId]: true }))
     setRefreshResult(prev => { const n = { ...prev }; delete n[userId]; return n })
     try {
-      const res = await fetch('/api/admin/refresh-user', {
+      const res = await fetch('/api/sync/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ company_id: userId, force: true }),
       })
       const data = await res.json()
       const ok = res.ok && data.success
       setRefreshResult(prev => ({ ...prev, [userId]: ok ? 'success' : 'error' }))
+      // Refresh user list to show updated sync_status
+      checkAdminAndLoad()
       toast({
-        title: ok ? "סריקה הושלמה" : "שגיאה בסריקה",
+        title: ok ? "סנכרון הושלם" : "שגיאה בסנכרון",
         description: ok
-          ? "מתחרים, SEO, GEO ומגמות עודכנו"
-          : data.results?.[userId]?.error || data.error || "אירעה שגיאה",
+          ? `${data.log?.filter((l: any) => l.status === 'ok').length ?? 0} מודולים עודכנו`
+          : data.error || "אירעה שגיאה",
         variant: ok ? "default" : "destructive",
       })
     } catch (e: any) {
@@ -129,30 +135,20 @@ export default function ImpersonatePage() {
   async function refreshAllUsers() {
     setShowConfirmAll(false)
     setRefreshingAll(true)
-    const allIds = users.map(u => u.id)
-    // Clear previous results
     setRefreshResult({})
     try {
-      const res = await fetch('/api/admin/refresh-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userIds: allIds }),
-      })
-      const data = await res.json()
-      // Apply per-user results
-      if (data.results) {
-        const mapped: Record<string, 'success' | 'error'> = {}
-        for (const [uid, r] of Object.entries(data.results as Record<string, { ok: boolean }>)) {
-          mapped[uid] = r.ok ? 'success' : 'error'
-        }
-        setRefreshResult(mapped)
+      for (const u of users) {
+        // Trigger sync one at a time with 2s gap to avoid rate limits
+        fetch('/api/sync/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: u.id, force: true }),
+        }).catch(() => {})
+        await new Promise(r => setTimeout(r, 2000))
       }
-      const succeeded = Object.values(data.results || {}).filter((r: any) => r.ok).length
-      toast({
-        title: data.success ? "סריקה הושלמה לכולם" : "סריקה הושלמה חלקית",
-        description: `${succeeded} מתוך ${allIds.length} משתמשים עודכנו בהצלחה`,
-        variant: data.success ? "default" : "destructive",
-      })
+      toast({ title: "סנכרון הופעל לכולם", description: `${users.length} משתמשים בתהליך סנכרון` })
+      // Refresh list after a few seconds
+      setTimeout(() => checkAdminAndLoad(), 5000)
     } catch (e: any) {
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
     } finally {
@@ -201,12 +197,20 @@ export default function ImpersonatePage() {
                 <TableHead className="text-right">אימייל</TableHead>
                 <TableHead className="text-right">חברה</TableHead>
                 <TableHead className="text-right hidden md:table-cell">תחום</TableHead>
-                <TableHead className="text-right hidden lg:table-cell">כניסה אחרונה</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">סנכרון אחרון</TableHead>
+                <TableHead className="text-right hidden lg:table-cell">סנכרון הבא</TableHead>
                 <TableHead className="text-right">פעולות</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
+              {users.map((u) => {
+                const syncStatus = u.company?.sync_status
+                const syncStatusBadge =
+                  syncStatus === 'running' ? <Badge className="bg-blue-100 text-blue-700 text-xs">מסנכרן</Badge> :
+                  syncStatus === 'done' ? <Badge className="bg-green-100 text-green-700 text-xs">עדכני</Badge> :
+                  syncStatus === 'error' ? <Badge className="bg-red-100 text-red-700 text-xs">שגיאה</Badge> :
+                  null
+                return (
                 <TableRow key={u.id}>
                   <TableCell>
                     <span className="font-mono text-sm">{u.email}</span>
@@ -216,6 +220,7 @@ export default function ImpersonatePage() {
                       <div className="flex items-center gap-2">
                         <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="font-medium">{u.company.name}</span>
+                        {syncStatusBadge}
                       </div>
                     ) : (
                       <Badge variant="outline" className="text-xs text-muted-foreground">אין חברה</Badge>
@@ -226,20 +231,27 @@ export default function ImpersonatePage() {
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <span className="text-sm text-muted-foreground">
-                      {u.last_sign_in_at
-                        ? new Date(u.last_sign_in_at).toLocaleDateString('he-IL')
+                      {u.company?.last_sync_at
+                        ? new Date(u.company.last_sync_at).toLocaleDateString('he-IL')
+                        : '—'}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell">
+                    <span className="text-sm text-muted-foreground">
+                      {u.company?.next_sync_at
+                        ? new Date(u.company.next_sync_at).toLocaleDateString('he-IL')
                         : '—'}
                     </span>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      {/* Refresh button */}
+                      {/* Sync button */}
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => refreshUser(u.id)}
-                        disabled={refreshing[u.id] || refreshingAll}
-                        title="סרוק מחדש: מתחרים, SEO, GEO, מגמות"
+                        disabled={refreshing[u.id] || refreshingAll || syncStatus === 'running'}
+                        title="סנכרן עכשיו: כל המודולים"
                       >
                         {refreshing[u.id]
                           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -266,7 +278,8 @@ export default function ImpersonatePage() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                )
+              })}
             </TableBody>
           </Table>
         </CardContent>

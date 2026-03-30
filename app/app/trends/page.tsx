@@ -136,7 +136,6 @@ function EmptyState({ message }: { message: string }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function TrendsPage() {
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
 
   // Section 1 — keyword trends (unchanged logic)
   const [keywords, setKeywords] = useState<string[]>([])
@@ -288,18 +287,6 @@ export default function TrendsPage() {
     finally { setLoadingCompetitor(false) }
   }
 
-  // ── Global refresh ─────────────────────────────────────────────────────────
-  async function refreshAll() {
-    setRefreshing(true)
-    try {
-      await Promise.all([
-        fetchIndustryTrends(true),
-        fetchCompetitorTrends(true),
-      ])
-      toast({ title: "טרנדים עודכנו" })
-    } catch {}
-    finally { setRefreshing(false) }
-  }
 
   if (loading) {
     return (
@@ -314,17 +301,9 @@ export default function TrendsPage() {
     <div className="space-y-8">
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">טרנדים</h1>
-          <p className="text-sm text-muted-foreground">מגמות שוק, תחום, ומתחרים בזמן אמת</p>
-        </div>
-        <Button onClick={refreshAll} disabled={refreshing || loadingIndustry || loadingCompetitor} size="sm" variant="outline">
-          {refreshing
-            ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מרענן...</>
-            : <><RefreshCw className="ml-2 h-4 w-4" />רענן טרנדים</>
-          }
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">טרנדים</h1>
+        <p className="text-sm text-muted-foreground">מגמות שוק, תחום, ומתחרים בזמן אמת</p>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}

@@ -411,14 +411,9 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6" dir="rtl">
       {/* Page title */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
-          <p className="text-muted-foreground text-sm">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
-        </div>
-        <Button onClick={updateAll} disabled={updatingAll || analyzingDeep} variant="outline" size="sm" className="gap-2">
-          {updatingAll ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />מעדכן...</> : <><RefreshCw className="h-3.5 w-3.5" />עדכן הכל</>}
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
+        <p className="text-muted-foreground text-sm">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
@@ -869,7 +864,7 @@ export default function ProfilePage() {
         <CardContent>
           {!swot ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">לחץ "עדכן הכל" לקבלת ניתוח SWOT</p>
+              <p className="text-sm text-muted-foreground">הניתוח יתעדכן בסנכרון השבועי</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
@@ -906,7 +901,7 @@ export default function ProfilePage() {
         <CardContent>
           {!reviewAnalysis ? (
             <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">לחץ "עדכן הכל" לניתוח ביקורות מכל המקורות</p>
+              <p className="text-sm text-muted-foreground">ניתוח הביקורות יתעדכן בסנכרון השבועי</p>
             </div>
           ) : (
             <div className="space-y-5">

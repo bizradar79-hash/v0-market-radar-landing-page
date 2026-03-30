@@ -165,9 +165,18 @@ export async function POST(request: Request) {
     const profile = normalizeProfile(raw)
 
     // Save to companies.business_profile + distribution_channels column
+    // Also set next_sync_at = now() + 7 days (first sync after onboarding)
+    const nextSync = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
     await supabase
       .from('companies')
-      .upsert({ id: user.id, business_profile: profile, distribution_channels: profile.distributionChannels }, { onConflict: 'id' })
+      .upsert({
+        id: user.id,
+        business_profile: profile,
+        distribution_channels: profile.distributionChannels,
+        last_sync_at: new Date().toISOString(),
+        next_sync_at: nextSync,
+        sync_status: 'idle',
+      }, { onConflict: 'id' })
 
     return NextResponse.json({ success: true, profile })
   } catch (e: any) {

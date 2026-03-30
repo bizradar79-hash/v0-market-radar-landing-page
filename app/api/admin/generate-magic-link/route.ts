@@ -50,7 +50,7 @@ export async function GET() {
   // Get all companies
   const { data: companies } = await admin
     .from('companies')
-    .select('id, name, industry, website, created_at')
+    .select('id, name, industry, website, created_at, last_sync_at, next_sync_at, sync_status, sync_log')
 
   const companiesById = Object.fromEntries((companies || []).map((c: any) => [c.id, c]))
 

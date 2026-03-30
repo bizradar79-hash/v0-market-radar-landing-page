@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import AppSidebar from "@/components/app/app-sidebar"
 import AppHeader from "@/components/app/app-header"
 import ImpersonationBanner from "@/components/admin/ImpersonationBanner"
+import SyncBanner from "@/components/app/SyncBanner"
 
 export default function AppLayout({
   children,
@@ -40,6 +41,7 @@ export default function AppLayout({
       {/* Main content */}
       <div className="flex flex-1 flex-col min-w-0 overflow-x-hidden">
         <AppHeader onMenuClick={() => setSidebarOpen(true)} />
+        <SyncBanner />
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
           {children}
         </main>

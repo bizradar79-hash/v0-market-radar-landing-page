@@ -43,7 +43,6 @@ import {
   Loader2,
   Filter,
   Building2,
-  Sparkles,
   Trash2,
   ExternalLink,
   Star,
@@ -93,7 +92,6 @@ export default function OpportunitiesPage() {
   // Leads state
   const [leads, setLeads] = useState<Lead[]>([])
   const [leadsLoading, setLeadsLoading] = useState(true)
-  const [discovering, setDiscovering] = useState(false)
   const [industryFilter, setIndustryFilter] = useState<string>("all")
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
 
@@ -150,23 +148,6 @@ export default function OpportunitiesPage() {
 
   // ── Leads handlers ──────────────────────────────────────────────────────
 
-  async function discoverWithAI() {
-    setDiscovering(true)
-    try {
-      const response = await fetch("/api/generate-leads", { method: "POST" })
-      const data = await response.json()
-      if (data.success) {
-        await fetchLeads()
-        toast({ title: "גילוי הושלם!", description: `נמצאו ${data.count || 0} לידים חדשים` })
-      } else {
-        toast({ title: "לא נמצאו לידים", description: data.error || "נסה לעדכן את פרטי החברה בהגדרות", variant: "destructive" })
-      }
-    } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה בעת הגילוי", variant: "destructive" })
-    } finally {
-      setDiscovering(false)
-    }
-  }
 
   async function deleteLead(id: string) {
     const { error } = await supabase.from("leads").delete().eq("id", id)
@@ -266,16 +247,7 @@ export default function OpportunitiesPage() {
           <p className="text-sm text-muted-foreground">לידים פוטנציאליים שזוהו על ידי AI</p>
         </div>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">{filteredLeads.length} לידים פוטנציאליים</p>
-          <Button onClick={discoverWithAI} disabled={discovering} size="sm">
-            {discovering ? (
-              <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מחפש לידים...</>
-            ) : (
-              <><Sparkles className="ml-2 h-4 w-4" />גלה לידים חדשים עם AI</>
-            )}
-          </Button>
-        </div>
+        <p className="text-sm text-muted-foreground">{filteredLeads.length} לידים פוטנציאליים</p>
 
         {/* Industry filter */}
         <Card>
@@ -393,9 +365,7 @@ export default function OpportunitiesPage() {
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <Users className="h-12 w-12 text-muted-foreground/50" />
                   <p className="mt-4 text-muted-foreground">לא נמצאו לידים מתאימים</p>
-                  <Button className="mt-4" onClick={discoverWithAI} disabled={discovering}>
-                    <Sparkles className="ml-2 h-4 w-4" />גלה לידים עם AI
-                  </Button>
+                  <p className="mt-1 text-xs text-muted-foreground">הלידים יתעדכנו אוטומטית בסנכרון השבועי</p>
                 </CardContent>
               </Card>
             )}
