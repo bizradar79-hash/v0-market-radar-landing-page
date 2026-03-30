@@ -18,16 +18,20 @@ function extractJSON(text: string): any {
 
 function buildSearchQuery(bp: BusinessProfile | null, company: any): string {
   const year = new Date().getFullYear()
-  if (bp) {
-    const activity = bp.coreActivity || ''
-    const tag = bp.industryTags?.[0] || ''
-    const base = activity || tag || company?.industry || company?.description || 'עסקים'
-    // Take first 4 words to avoid location duplication
-    const words = base.split(/\s+/).slice(0, 4).join(' ')
-    return `${words} טרנד ${year} ישראל`
+  if (!bp) {
+    const base = company?.industry || company?.description || 'עסקים'
+    return `${base} טרנד ${year} ישראל`
   }
-  const base = company?.industry || company?.description || 'עסקים'
-  return `${base} טרנד ${year} ישראל`
+
+  // Build a rich, specific query
+  const parts: string[] = []
+  if (bp.coreActivity) parts.push(bp.coreActivity.split(/\s+/).slice(0, 5).join(' '))
+  if (bp.industryTags?.length) parts.push(bp.industryTags[0])
+  if ((bp.products as any)?.[0]?.name) parts.push((bp.products as any)[0].name)
+  const markets = bp.geographicMarkets?.includes('ישראל') ? 'ישראל' : bp.geographicMarkets?.[0] || 'ישראל'
+
+  const base = parts.filter(Boolean).join(' ')
+  return `${base} טרנד ${year} ${markets}`
 }
 
 export async function POST(request: Request) {
@@ -51,7 +55,15 @@ export async function POST(request: Request) {
     const today = new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
 
+    const businessContext = bp ? `
+תחום ספציפי: ${bp.coreActivity || ''}
+מוצרים/שירותים: ${(bp.products as any)?.map((p: any) => p.name).join(', ') || ''}
+קהל יעד: ${bp.targetAudiences?.join(', ') || ''}
+מתחרים ישירים: ${bp.directCompetitors?.slice(0, 3).join(', ') || ''}
+שווקים: ${bp.geographicMarkets?.join(', ') || ''}` : ''
+
     const prompt = `אתה מנתח שוק ישראלי. חפש ברשת מה טורנד כרגע בתחום: "${searchQuery}"
+${businessContext}
 
 תאריך היום: ${today}
 חפש מידע מה-7 ימים האחרונים (מאז ${weekAgo}).
