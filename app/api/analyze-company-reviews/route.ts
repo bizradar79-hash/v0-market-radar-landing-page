@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     const domainHint = domain ? ` (אתר: ${domain})` : ''
     const cityHint = city ? ` בעיר ${city}` : ''
     const searchQuery = domain
-      ? `"${companyName}" ${domain} ביקורות`
+      ? `"${companyName}" "${domain}" ביקורות`
       : `"${companyName}" ביקורות${cityHint}`
 
     const prompt = `אתה מומחה ניתוח שוק ישראלי. השתמש ב-web_search עם השאילתה: ${searchQuery}
@@ -141,10 +141,18 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
         return strictMatch && (isKnownPlatform || matchesCompany || urlMatchesDomain)
       })
 
-    const totalFromSources = sources.reduce((sum: number, s: any) => sum + (s.review_count || 0), 0)
+    // Extra pass: only keep sources that reference the company domain or company name
+    const firstWord = companyName.toLowerCase().split(/\s+/)[0]
+    const validSources = sources.filter((s: any) =>
+      (domain && s.url?.toLowerCase().includes(domain)) ||
+      (firstWord.length >= 3 && s.name?.toLowerCase().includes(firstWord))
+    )
+    const finalSources = validSources.length > 0 ? validSources : sources
+
+    const totalFromSources = finalSources.reduce((sum: number, s: any) => sum + (s.review_count || 0), 0)
 
     const result = {
-      sources,
+      sources: finalSources,
       weighted_average: parsed.weighted_average ?? null,
       sentiment_score: parsed.sentiment_score ?? null,
       overallSentiment: parsed.overallSentiment || 'מעורב',

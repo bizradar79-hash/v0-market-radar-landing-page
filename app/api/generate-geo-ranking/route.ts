@@ -49,7 +49,7 @@ function buildEnginePrompt(
 
     chatgpt: `Use web search to find: what businesses appear when people ask ChatGPT about "${question}" in Israel? Search for "ChatGPT ${question} ישראל המלצות" and list the top 10 businesses or websites that ChatGPT mentions in its answers based on what you find online. Focus specifically on what ChatGPT recommends, not general Google results.`,
 
-    gemini: `Use web search to find: what does Google Gemini recommend for "${question}" in Israel? Search for "Gemini ${question} ישראל תוצאות" and list the top 10 businesses or websites that appear in Gemini's responses based on what you find online. Focus specifically on what Gemini recommends, not general Google results.`,
+    gemini: `חפש בגוגל: "${question} ישראל המלצות 2025 2026". רשום את 10 העסקים הישראלים הרלוונטיים ביותר שמופיעים בתוצאות — בדגש על מה ש-Google Gemini ממליץ עליהם. אל תחזיר תוצאות גנריות, רק עסקים ספציפיים. פוקוס על תוצאות מ-2024-2026 בלבד.`,
 
     grok: `Search directly for "${question}" in Israel and list the top 10 most relevant businesses or websites you find. Use your live web search. Return fresh, current results from 2024-2025. Do not copy results from other AI engines — this is your own independent search.`,
   }
