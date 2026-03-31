@@ -895,19 +895,15 @@ export default function ProfilePage() {
                   )}
                 </div>
               )}
-              {reviewAnalysis.google_maps_url ? (
-                <a
-                  href={reviewAnalysis.google_maps_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  צפה בביקורות בגוגל מאפס
-                </a>
-              ) : (
-                <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps לעסק זה</p>
-              )}
+              <a
+                href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
+              >
+                <ExternalLink className="h-4 w-4" />
+                {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'לחץ לצפייה ישירה בגוגל מאפס'}
+              </a>
               {reviewAnalysis.fetchedAt && (
                 <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
               )}

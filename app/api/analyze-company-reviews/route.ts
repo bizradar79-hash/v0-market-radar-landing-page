@@ -25,15 +25,23 @@ export async function POST(request: Request) {
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
+    const domain = website
+      ? (() => { try { return new URL(website.startsWith('http') ? website : `https://${website}`).hostname.replace(/^www\./, '') } catch { return website } })()
+      : ''
+
+    console.log('1. API key exists:', !!process.env.GOOGLE_PLACES_API_KEY)
+    console.log('2. Company name:', companyName)
+    console.log('3. Domain:', domain)
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
-    const places = await getPlaceDetails(companyName, website)
+    const placeResult = await getPlaceDetails(companyName, domain)
+    console.log('4. Places result:', JSON.stringify(placeResult))
 
     const result = {
-      google_rating: places?.google_rating ?? null,
-      google_review_count: places?.google_review_count ?? null,
-      google_maps_url: places?.google_maps_url ?? null,
+      google_rating: placeResult?.google_rating ?? null,
+      google_review_count: placeResult?.google_review_count ?? null,
+      google_maps_url: placeResult?.google_maps_url ?? null,
       fetchedAt: new Date().toISOString(),
     }
 
