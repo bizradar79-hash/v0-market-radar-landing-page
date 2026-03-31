@@ -147,11 +147,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
         return strictMatch && (isKnownPlatform || matchesCompany || urlMatchesDomain)
       })
 
-    // Extra pass: only keep sources that reference the company domain or company name
-    const firstWord = companyName.toLowerCase().split(/\s+/)[0]
+    // Only accept sources whose URL contains the company domain — no name matching
     const validSources = sources.filter((s: any) =>
-      (domain && s.url?.toLowerCase().includes(domain)) ||
-      (firstWord.length >= 3 && s.name?.toLowerCase().includes(firstWord))
+      domain && s.url?.toLowerCase().includes(domain)
     )
     // When domain is known: empty is better than wrong — never fall back to unvalidated sources
     const finalSources = domain ? validSources : (validSources.length > 0 ? validSources : sources)
