@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
-import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -30,51 +29,94 @@ const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 const ENGINES = ['general', 'chatgpt', 'gemini', 'grok'] as const
 type Engine = typeof ENGINES[number]
 
+// ── Query generation ───────────────────────────────────────────────────────
+
+async function buildSearchQuery(profileSummary: string): Promise<string | null> {
+  if (!profileSummary.trim()) return null
+  const prompt = `Based on this business: ${profileSummary}
+
+What is the single most common search query a customer would type when looking for this type of business in Israel?
+Return only the query, nothing else. Hebrew or English depending on the business. No explanation. No punctuation at the end.`
+
+  try {
+    const res = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        // No web_search — pure reasoning
+      }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const text = (data.output || [])
+      .filter((i: any) => i.type === 'message')
+      .flatMap((i: any) => i.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('')
+      .trim()
+      .replace(/^["']|["']$/g, '') // strip surrounding quotes if any
+    return text.length > 3 ? text : null
+  } catch { return null }
+}
+
+// ── Engine prompts ─────────────────────────────────────────────────────────
+
 function buildEnginePrompt(
   engine: Engine,
-  question: string,
+  query: string,
   companyName: string,
   website: string,
   competitorNames: string[],
 ): string {
   const competitorLine = competitorNames.length > 0
-    ? `\nמתחרים ידועים: ${competitorNames.join(', ')}`
+    ? `\nKnown competitors: ${competitorNames.join(', ')}`
     : ''
-  const jsonTemplate = `{"query": "${question}", "results": [{"position": 1, "name": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}`
+  const jsonTemplate = `{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}`
 
   const bases: Record<Engine, string> = {
-    general: `חפש בגוגל: מי הם 10 העסקים המובילים בישראל עבור "${question}"?
-השתמש בחיפוש אינטרנט כדי למצוא תוצאות גוגל אמיתיות ועדכניות לשאלה זו.
-הצג רשימה ממוינת לפי חשיבות/דירוג בגוגל.`,
+    general: `Use web_search to find the top 10 organic Google results for "${query}" in Israel.
+List businesses/websites as they appear in Google search results.`,
 
-    chatgpt: `Use web search to find: what businesses appear when people ask ChatGPT about "${question}" in Israel? Search for "ChatGPT ${question} ישראל המלצות" and list the top 10 businesses or websites that ChatGPT mentions in its answers based on what you find online. Focus specifically on what ChatGPT recommends, not general Google results.`,
+    chatgpt: `Search for what ChatGPT recommends when asked: "${query}" in Israel.
+Find screenshots, blog posts, or Reddit threads showing ChatGPT answers to this question.
+List the top 10 businesses mentioned in ChatGPT responses you find online.`,
 
-    gemini: `חפש בגוגל: "${question} ישראל המלצות 2025 2026". רשום את 10 העסקים הישראלים הרלוונטיים ביותר שמופיעים בתוצאות — בדגש על מה ש-Google Gemini ממליץ עליהם. אל תחזיר תוצאות גנריות, רק עסקים ספציפיים. פוקוס על תוצאות מ-2024-2026 בלבד.`,
+    gemini: `Search for what Google Gemini recommends when asked: "${query}" in Israel.
+Find real examples of Gemini answers to this question — blog posts, screenshots, or forum discussions.
+List the top 10 businesses mentioned in Gemini responses you find online.`,
 
-    grok: `Search directly for "${question}" in Israel and list the top 10 most relevant businesses or websites you find. Use your live web search. Return fresh, current results from 2024-2025. Do not copy results from other AI engines — this is your own independent search.`,
+    grok: `Use your live web search to directly search for "${query}" in Israel.
+List the top 10 most relevant businesses or websites from your current search results.
+Return fresh, current results. Do not copy from other AI engines.`,
   }
 
   return `${bases[engine]}
 ${competitorLine}
 
-ציין האם ${companyName} (אתר: ${website}) מוזכר ברשימה. (userMentioned: true/false, userPosition: מספר או null)
+Check if ${companyName} (website: ${website}) appears in the list. (userMentioned: true/false, userPosition: number or null)
 
-תן רשימה של עד 10 עסקים לפי סדר חשיבותם.
+Return a ranked list of up to 10 businesses.
 
-החזר JSON בלבד:
+Return ONLY JSON:
 ${jsonTemplate}
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 }
 
+// ── Engine runner ──────────────────────────────────────────────────────────
+
 async function runGeoQuestion(
-  question: string,
+  query: string,
   companyName: string,
   website: string,
   competitorNames: string[],
   engine: Engine = 'general',
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  const prompt = buildEnginePrompt(engine, question, companyName, website, competitorNames)
+  const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
+  const companyDomain = extractDomain(website)
 
   const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -104,7 +146,6 @@ async function runGeoQuestion(
   let parsed: any = {}
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
-  const companyDomainForGeo = extractDomain(website)
   const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
   // Deduplicate by domain
   const seenDomains = new Set<string>()
@@ -115,10 +156,13 @@ async function runGeoQuestion(
     seenDomains.add(domain)
     results.push(r)
   }
+
   results.forEach((r: any) => {
-    r.isOwn = isOwnResult(r, companyName, companyDomainForGeo)
+    const own = isOwnResult(r, companyName, companyDomain)
+    r.isOwn = own
+    r.isCompany = own // explicit alias for UI clarity
     const rName = (r.name || '').toLowerCase()
-    r.isKnownCompetitor = !r.isOwn && competitorNames.some(n => {
+    r.isKnownCompetitor = !own && competitorNames.some(n => {
       const nLower = n.toLowerCase()
       return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
     })
@@ -126,11 +170,13 @@ async function runGeoQuestion(
 
   const ownResult = results.find(r => r.isOwn)
   const appeared = !!ownResult && ownResult.position != null
-  const userPosition = appeared ? (ownResult!.position ?? null) : null
+  const position = appeared ? (ownResult!.position ?? null) : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
 
-  return { position: userPosition, topResults, appeared, results }
+  return { position, topResults, appeared, results }
 }
+
+// ── POST ───────────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
   try {
@@ -173,21 +219,34 @@ export async function POST(request: Request) {
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
-    const keywordString = keywords.slice(0, 5).join(', ')
-    const coreActivityDesc = businessProfile?.coreActivity || industry
-    const fallbackQuestion = isLocal
-      ? `מי הם העסקים המובילים בתחום ${coreActivityDesc} ב${scopeLocation}?`
-      : `מי הם העסקים המובילים בתחום ${coreActivityDesc}${keywordString ? ` (${keywordString})` : ''} בישראל?`
 
-    const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
-    const primaryQuestion = businessAnalysis?.ai_question || fallbackQuestion
+    // Build rich profile summary for query generation
+    const profileParts = [
+      overview,
+      industry ? `Industry: ${industry}` : '',
+      city && isLocal ? `Location: ${city}` : '',
+      businessProfile?.coreActivity ? `Core activity: ${businessProfile.coreActivity}` : '',
+      businessProfile?.products?.length ? `Products/services: ${businessProfile.products.slice(0, 3).map((p: any) => p.name).join(', ')}` : '',
+      businessProfile?.targetAudiences?.length ? `Target audience: ${businessProfile.targetAudiences.slice(0, 3).join(', ')}` : '',
+      keywords.length ? `Keywords: ${keywords.slice(0, 5).join(', ')}` : '',
+    ].filter(Boolean).join('\n')
+
+    // Generate query dynamically from profile (Grok reasoning, no web_search)
+    const generatedQuery = await buildSearchQuery(profileParts)
+
+    // Fallback if query generation fails
+    const coreActivityDesc = businessProfile?.coreActivity || industry
+    const fallbackQuery = isLocal
+      ? `${coreActivityDesc} ${scopeLocation}`
+      : `${coreActivityDesc} ישראל`
+    const primaryQuery = generatedQuery || fallbackQuery
 
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // Run all 5 engines in parallel, each with its own distinct web_search prompt
+    // Run all 4 engines in parallel
     const engineResults = await Promise.all(
-      ENGINES.map(engine => runGeoQuestion(primaryQuestion, companyName, website, competitorNames, engine))
+      ENGINES.map(engine => runGeoQuestion(primaryQuery, companyName, website, competitorNames, engine))
     )
 
     const engines: Record<string, { results: any[]; appeared: boolean; position: number | null; topResults: string[] }> = {}
@@ -200,7 +259,7 @@ export async function POST(request: Request) {
       }
     })
 
-    // Overlap detection — if any two engines share >60% results, retry the second one with an exclusion hint
+    // Overlap detection — retry if >60% overlap between engine pairs
     const enginePairs: [Engine, Engine][] = [
       ['chatgpt', 'gemini'],
       ['chatgpt', 'grok'],
@@ -212,31 +271,25 @@ export async function POST(request: Request) {
       if (refNames.size === 0 || targetNamesList.length === 0) continue
       const overlap = targetNamesList.filter(n => refNames.has(n)).length / targetNamesList.length
       if (overlap > 0.6) {
-        const overlappingDomains = (engines[targetEngine]?.results || [])
+        const overlappingNames = (engines[targetEngine]?.results || [])
           .filter((r: any) => refNames.has((r.name || '').toLowerCase()))
-          .map((r: any) => r.name || '')
-          .slice(0, 5)
-          .join(', ')
-        const retryPrompt = `${primaryQuestion} — Return different results from: ${overlappingDomains}`
-        const retryResult = await runGeoQuestion(retryPrompt, companyName, website, competitorNames, targetEngine)
+          .map((r: any) => r.name || '').slice(0, 5).join(', ')
+        const retryResult = await runGeoQuestion(
+          `${primaryQuery} — exclude these: ${overlappingNames}`,
+          companyName, website, competitorNames, targetEngine
+        )
         engines[targetEngine] = {
           results: retryResult.results,
           appeared: retryResult.appeared,
           position: retryResult.position,
           topResults: retryResult.topResults,
         }
-        break // only retry once
+        break
       }
     }
 
-    // Primary (general) for backward-compat fields
-    const primary = engineResults[0]
-
-    // Recommendations via second call
-    const contextLine = businessAnalysis?.what_business_does
-      ? `בהתחשב בכך ש${companyName} ${businessAnalysis.what_business_does}`
-      : `בהתחשב בתחום "${industry}"`
-    const recsPrompt = `כתוב 3 המלצות ספציפיות כיצד ${companyName} יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Grok, Gemini ו-Perplexity, ${contextLine}. החזר JSON בלבד: {"recommendations": ["", "", ""]}. No markdown.`
+    // Recommendations via Grok (no web_search)
+    const recsPrompt = `Write 3 specific recommendations for how ${companyName} (${industry}) can improve its presence in AI engines like ChatGPT, Grok, Gemini and Perplexity when people search for "${primaryQuery}". Return JSON only: {"recommendations": ["", "", ""]}. No markdown.`
     let recommendations: string[] = []
     try {
       const recsRes = await fetch('https://api.x.ai/v1/responses', {
@@ -256,24 +309,23 @@ export async function POST(request: Request) {
       }
     } catch { /* fallback to empty */ }
 
+    const primary = engineResults[0]
+
     const result = {
-      query: primaryQuestion,
-      // Backward-compat top-level fields
+      query: primaryQuery,
       results: primary.results,
       userMentioned: primary.appeared,
       userPosition: primary.position,
-      // Engine-based structure
       engines,
       recommendations,
       isLocal,
       scope,
-      what_business_does: businessAnalysis?.what_business_does || '',
       fetchedAt: new Date().toISOString(),
     }
 
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)
 
-    return NextResponse.json({ success: true, ...result, businessAnalysis })
+    return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }

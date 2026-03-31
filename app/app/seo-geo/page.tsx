@@ -392,8 +392,8 @@ export default function SeoGeoPage() {
             </div>
           ) : geoRanking ? (
             <div className="space-y-4">
-              {geoRanking.what_business_does && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Bot className="h-3 w-3 shrink-0" />AI הבין: {geoRanking.what_business_does}</p>
+              {geoRanking.query && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Search className="h-3 w-3 shrink-0" />שאילתה: {geoRanking.query}</p>
               )}
               {geoRanking.engines ? (
                 <>
