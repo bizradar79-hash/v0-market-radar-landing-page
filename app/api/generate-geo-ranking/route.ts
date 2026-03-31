@@ -11,17 +11,15 @@ function extractDomain(url: string): string {
 }
 
 function isOwnResult(r: any, companyName: string, companyDomain: string): boolean {
-  const name = companyName.toLowerCase().trim()
   const domain = companyDomain.toLowerCase().trim()
-  const resultTitle = (r.title || r.name || '').toLowerCase().trim()
-  const resultDomain = extractDomain(r.url || '').toLowerCase().trim()
   const resultUrl = (r.url || '').toLowerCase().trim()
-  const nameSlug = name.replace(/\s+/g, '')
-  return (
-    (domain.length >= 3 && (resultDomain.includes(domain) || resultUrl.includes(domain))) ||
-    (name.length >= 3 && resultTitle.includes(name)) ||
-    (nameSlug.length >= 3 && resultDomain.includes(nameSlug))
-  )
+  const resultTitle = (r.title || r.name || '').toLowerCase().trim()
+  const name = companyName.toLowerCase().trim()
+  // Domain match (most reliable)
+  if (domain.length >= 3 && resultUrl.includes(domain)) return true
+  // Exact title match only
+  if (name.length >= 3 && resultTitle === name) return true
+  return false
 }
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days

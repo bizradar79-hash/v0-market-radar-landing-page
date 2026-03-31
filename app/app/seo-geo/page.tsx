@@ -90,6 +90,7 @@ export default function SeoGeoPage() {
   const [geoRanking, setGeoRanking] = useState<GEORanking | null>(null)
   const [loadingSeo, setLoadingSeo] = useState(false)
   const [loadingGeo, setLoadingGeo] = useState(false)
+  const [company, setCompany] = useState<{ name: string; website: string } | null>(null)
 
   const [syncDates, setSyncDates] = useState<{ last_sync_at: string | null; next_sync_at: string | null } | null>(null)
   const [showAllSeo, setShowAllSeo] = useState(false)
@@ -108,10 +109,23 @@ export default function SeoGeoPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data } = await supabase
-      .from('companies').select('seo_ranking, geo_ranking, last_sync_at, next_sync_at').eq('id', user.id).single()
+      .from('companies').select('name, website, seo_ranking, geo_ranking, last_sync_at, next_sync_at').eq('id', user.id).single()
     if (data?.seo_ranking?.fetchedAt) setSeoRanking(data.seo_ranking as SEORanking)
     if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
+    if (data?.name || data?.website) setCompany({ name: data.name || '', website: data.website || '' })
+  }
+
+  function isCompanyResult(r: { url?: string; name?: string; title?: string }): boolean {
+    if (!company) return false
+    const raw = company.website || ''
+    const domain = raw.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase()
+    const resultUrl = (r.url || '').toLowerCase()
+    const resultTitle = (r.title || r.name || '').toLowerCase().trim()
+    const companyName = company.name.toLowerCase().trim()
+    if (domain && resultUrl.includes(domain)) return true
+    if (companyName && resultTitle === companyName) return true
+    return false
   }
 
 
@@ -271,24 +285,26 @@ export default function SeoGeoPage() {
                                     <p className="text-xs text-muted-foreground mb-2 break-words whitespace-normal font-medium">{v.query}</p>
                                     {filteredResults.length > 0 ? (
                                       <div className="space-y-0.5">
-                                        {filteredResults.map((r, ri) => (
-                                          <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${r.isOwn ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
-                                            <span className={`font-mono font-bold w-6 shrink-0 text-right ${r.isOwn ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
-                                            <span className={`flex-1 font-medium ${r.isOwn ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                                        {filteredResults.map((r, ri) => {
+                                          const own = isCompanyResult(r)
+                                          return (
+                                          <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                                            <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                            <span className={`flex-1 font-medium ${own ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
                                             {r.is_sponsored && <Badge className="bg-orange-100 text-orange-700 border-orange-200 shrink-0 py-0 h-4 text-[10px]">ממומן</Badge>}
-                                            {r.isOwn && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
-                                            {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
+                                            {own && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                                            {!own && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
                                             {r.url && (
                                               <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0" title={r.url}>
                                                 <ExternalLink className="h-3 w-3" />
                                               </a>
                                             )}
                                           </div>
-                                        ))}
-                                        {!filteredResults.some(r => r.isOwn) && v.results && v.results.some(r => r.isOwn) && (
+                                        )})}
+                                        {!filteredResults.some(r => isCompanyResult(r)) && v.results && v.results.some(r => isCompanyResult(r)) && (
                                           <p className="text-xs text-amber-600 mt-1.5">העסק שלך מופיע בסינון אחר</p>
                                         )}
-                                        {!filteredResults.some(r => r.isOwn) && !v.results?.some(r => r.isOwn) && (
+                                        {!filteredResults.some(r => isCompanyResult(r)) && !v.results?.some(r => isCompanyResult(r)) && (
                                           <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
                                         )}
                                       </div>
@@ -336,14 +352,16 @@ export default function SeoGeoPage() {
               ) : (
                 /* Fallback: original single-query display */
                 <div className="space-y-2">
-                  {seoRanking.results.map((r, i) => (
-                    <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${r.isOwn ? 'border-primary/30 bg-primary/5' : 'border-border'}`}>
-                      <span className={`font-bold w-6 text-center ${r.isOwn ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
-                      <span className={`flex-1 font-medium ${r.isOwn ? 'text-primary' : ''}`}>{r.name}</span>
+                  {seoRanking.results.map((r, i) => {
+                    const own = isCompanyResult(r)
+                    return (
+                    <div key={i} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${own ? 'border-primary/30 bg-primary/5' : 'border-border'}`}>
+                      <span className={`font-bold w-6 text-center ${own ? 'text-primary' : 'text-muted-foreground'}`}>#{r.position}</span>
+                      <span className={`flex-1 font-medium ${own ? 'text-primary' : ''}`}>{r.name}</span>
                       {r.is_sponsored && <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">ממומן</Badge>}
-                      {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                      {own && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
               {seoRanking.recommendations.length > 0 && (
@@ -447,14 +465,16 @@ export default function SeoGeoPage() {
                           }
                         </div>
                         <div className="space-y-0.5">
-                          {eng.results.length > 0 ? eng.results.map((r, ri) => (
-                            <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${r.isOwn ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
-                              <span className={`font-mono font-bold w-6 shrink-0 text-right ${r.isOwn ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
-                              <span className={`flex-1 font-medium ${r.isOwn ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
-                              {r.isOwn && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
-                              {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
+                          {eng.results.length > 0 ? eng.results.map((r, ri) => {
+                            const own = isCompanyResult(r)
+                            return (
+                            <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                              <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                              <span className={`flex-1 font-medium ${own ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                              {own && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                              {!own && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
                             </div>
-                          )) : (
+                          )}) : (
                             <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
                           )}
                         </div>
@@ -471,14 +491,16 @@ export default function SeoGeoPage() {
                       : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />העסק שלי לא מוזכר</Badge>
                     }
                   </div>
-                  {geoRanking.results.map((r, i) => (
-                    <div key={i} className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${r.isOwn ? "border-primary/30 bg-primary/5" : "border-border"}`}>
-                      <span className={`font-bold w-6 text-center ${r.isOwn ? "text-primary" : "text-muted-foreground"}`}>#{r.position}</span>
-                      <span className={`flex-1 text-sm font-medium ${r.isOwn ? "text-primary" : ""}`}>{r.name}</span>
-                      {r.isOwn && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
-                      {!r.isOwn && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
+                  {geoRanking.results.map((r, i) => {
+                    const own = isCompanyResult(r)
+                    return (
+                    <div key={i} className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 ${own ? "border-primary/30 bg-primary/5" : "border-border"}`}>
+                      <span className={`font-bold w-6 text-center ${own ? "text-primary" : "text-muted-foreground"}`}>#{r.position}</span>
+                      <span className={`flex-1 text-sm font-medium ${own ? "text-primary" : ""}`}>{r.name}</span>
+                      {own && <Badge variant="outline" className="text-xs border-primary/40 text-primary">העסק שלי</Badge>}
+                      {!own && r.isKnownCompetitor && <Badge variant="outline" className="text-xs border-orange-300 text-orange-600">מתחרה</Badge>}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
               {geoRanking.recommendations.length > 0 && (
