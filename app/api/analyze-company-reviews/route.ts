@@ -40,14 +40,14 @@ export async function POST(request: Request) {
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
     const cityHint = city ? ` בעיר ${city}` : ''
-    // Use domain-only query when available — prevents matching unrelated businesses with similar names
+    // Quote the domain for exact match — prevents matching similarly-named businesses
     const searchQuery = domain
-      ? `${domain} ביקורות`
+      ? `"${domain}" ביקורות`
       : `"${companyName}" ביקורות${cityHint}`
 
     const prompt = `אתה מומחה ניתוח שוק ישראלי. השתמש ב-web_search עם השאילתה: ${searchQuery}
 
-חשוב מאוד: חפש רק ביקורות על האתר ${domain || companyName}. אל תחזיר נתונים על עסקים אחרים עם שם דומה — התמקד אך ורק ב-${domain || companyName}.
+CRITICAL: חפש רק ביקורות שמתייחסות לדומיין "${domain || companyName}" ספציפית. אל תחזיר נתונים על שום עסק אחר — גם אם שמו דומה. כל תוצאה שה-URL שלה אינו מכיל "${domain}" ואינה מציינת את הדומיין הזה — דלג עליה לחלוטין.
 
 חפש ביקורות מ: Google Maps, Facebook, Zap, ספריית עסקים ישראלית, iZi, Yad2 עסקים, פורומים ואתרי ביקורות.
 לכל מקור שמצאת — ציין את הדירוג ומספר הביקורות בנפרד, וכלול את כתובת ה-URL.
@@ -111,8 +111,14 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       return NextResponse.json({ error: 'JSON parse error', raw: text.slice(0, 500) }, { status: 500 })
     }
 
-    // Strict business matching: reject results that don't mention the company
+    // Strict business matching: domain match is authoritative; fallback to name matching
     function isValidMatch(result: any): boolean {
+      // If we have a domain and the result URL contains it — always accept
+      if (domain && result.url && (result.url as string).toLowerCase().includes(domain)) return true
+      // If we have a domain and the result URL exists but doesn't contain it — reject
+      // (prevents a similarly-named business from slipping through via name match)
+      if (domain && result.url) return false
+      // No domain or no URL — fall back to name-word matching
       const companyWords = companyName.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2)
       if (companyWords.length === 0) return true
       const resultText = [result.name || '', result.url || '', result.snippet || ''].join(' ').toLowerCase()
@@ -147,7 +153,8 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       (domain && s.url?.toLowerCase().includes(domain)) ||
       (firstWord.length >= 3 && s.name?.toLowerCase().includes(firstWord))
     )
-    const finalSources = validSources.length > 0 ? validSources : sources
+    // When domain is known: empty is better than wrong — never fall back to unvalidated sources
+    const finalSources = domain ? validSources : (validSources.length > 0 ? validSources : sources)
 
     const totalFromSources = finalSources.reduce((sum: number, s: any) => sum + (s.review_count || 0), 0)
 
