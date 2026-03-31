@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { getPlaceDetails } from '@/lib/google-places'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -13,6 +14,37 @@ export async function POST(request: Request) {
     const { competitorId, name, website } = await request.json()
     if (!competitorId || !name) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
+    // Try Google Places API first
+    const places = await getPlaceDetails(name, website || '')
+    if (places) {
+      const rating = places.google_rating
+      const reviewCount = places.google_review_count
+      const updates: Record<string, any> = { google_rating: rating, google_review_count: reviewCount }
+
+      if (rating !== null) {
+        const { data: comp } = await ctx.supabase
+          .from('competitors').select('threat_score').eq('id', competitorId).eq('company_id', ctx.user.id).single()
+        if (comp?.threat_score != null) {
+          let bonus = 0
+          if (rating >= 4.5) bonus += 20
+          else if (rating >= 4.0) bonus += 15
+          else if (rating >= 3.5) bonus += 10
+          if (reviewCount != null) {
+            if (reviewCount > 500) bonus += 10
+            else if (reviewCount >= 100) bonus += 5
+          }
+          updates.threat_score = Math.min(100, comp.threat_score + bonus)
+        }
+      }
+
+      const { error: dbError } = await ctx.supabase
+        .from('competitors').update(updates).eq('id', competitorId).eq('company_id', ctx.user.id)
+      if (dbError) console.warn('fetch-competitor-rating (Places) DB save failed:', dbError.message)
+
+      return NextResponse.json({ success: true, rating, reviewCount, threat_score: updates.threat_score ?? null })
+    }
+
+    // Fall back to Grok if Places returned nothing
     // Explicitly ask for Google Maps rating/count only
     const prompt = `חפש את הפרטים הבאים על העסק: ${name}${website ? ` (אתר: ${website})` : ''}
 

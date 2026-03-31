@@ -61,6 +61,8 @@ interface PlacesData {
 
 
 interface ReviewAnalysis {
+  google_rating: number | null
+  google_review_count: number | null
   google_maps_url: string | null
   fetchedAt?: string
 }
@@ -876,25 +878,42 @@ export default function ProfilePage() {
           {loadingReviewAnalysis ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>מחפש דף Google Maps...</span>
+              <span>מחפש נתוני Google...</span>
             </div>
-          ) : reviewAnalysis?.google_maps_url ? (
+          ) : reviewAnalysis ? (
             <div className="flex flex-col gap-3 py-2">
-              <a
-                href={reviewAnalysis.google_maps_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
-              >
-                <ExternalLink className="h-4 w-4" />
-                לחץ לצפייה בביקורות בגוגל מאפס
-              </a>
+              {(reviewAnalysis.google_rating != null || reviewAnalysis.google_review_count != null) && (
+                <div className="flex items-center gap-3">
+                  {reviewAnalysis.google_rating != null && (
+                    <div className="flex items-center gap-1.5">
+                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                      <span className="font-semibold text-sm">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                    </div>
+                  )}
+                  {reviewAnalysis.google_review_count != null && (
+                    <span className="text-sm text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
+                  )}
+                </div>
+              )}
+              {reviewAnalysis.google_maps_url ? (
+                <a
+                  href={reviewAnalysis.google_maps_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  צפה בביקורות בגוגל מאפס
+                </a>
+              ) : (
+                <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps לעסק זה</p>
+              )}
               {reviewAnalysis.fetchedAt && (
                 <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground py-4">לא נמצא דף Google Maps לעסק זה</p>
+            <p className="text-sm text-muted-foreground py-4">לא נמצאו נתוני ביקורות</p>
           )}
         </CardContent>
       </Card>
