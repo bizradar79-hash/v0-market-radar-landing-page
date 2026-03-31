@@ -39,15 +39,15 @@ export async function POST(request: Request) {
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
-    const domainHint = domain ? ` (אתר: ${domain})` : ''
     const cityHint = city ? ` בעיר ${city}` : ''
+    // Use domain-only query when available — prevents matching unrelated businesses with similar names
     const searchQuery = domain
-      ? `"${companyName}" "${domain}" ביקורות`
+      ? `${domain} ביקורות`
       : `"${companyName}" ביקורות${cityHint}`
 
     const prompt = `אתה מומחה ניתוח שוק ישראלי. השתמש ב-web_search עם השאילתה: ${searchQuery}
 
-חשוב מאוד: חפש רק את העסק "${companyName}"${domain ? ` עם הדומיין ${domain}` : ''}. אל תחזיר מידע על עסקים אחרים עם שם דומה.
+חשוב מאוד: חפש רק ביקורות על האתר ${domain || companyName}. אל תחזיר נתונים על עסקים אחרים עם שם דומה — התמקד אך ורק ב-${domain || companyName}.
 
 חפש ביקורות מ: Google Maps, Facebook, Zap, ספריית עסקים ישראלית, iZi, Yad2 עסקים, פורומים ואתרי ביקורות.
 לכל מקור שמצאת — ציין את הדירוג ומספר הביקורות בנפרד, וכלול את כתובת ה-URL.
