@@ -9,6 +9,20 @@ const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export async function POST(request: Request) {
   try {
+    const testKey = process.env.GOOGLE_PLACES_API_KEY
+    console.log('PLACES_KEY_EXISTS:', !!testKey, 'KEY_LENGTH:', testKey?.length)
+    try {
+      const testFetch = await fetch(
+        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=basalon&inputtype=textquery&fields=place_id,name,rating,user_ratings_total&key=${testKey}`
+      )
+      const testData = await testFetch.json()
+      console.log('PLACES_TEST_RESPONSE:', JSON.stringify(testData))
+    } catch(e) {
+      console.log('PLACES_TEST_ERROR:', e)
+    }
+  } catch(e) { /* ignore */ }
+
+  try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
