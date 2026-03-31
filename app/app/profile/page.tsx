@@ -59,24 +59,9 @@ interface PlacesData {
   error?: string
 }
 
-interface ReviewSource {
-  name: string
-  rating: number | null
-  review_count: number | null
-  url: string | null
-}
 
 interface ReviewAnalysis {
-  sources: ReviewSource[]
-  weighted_average: number | null
-  sentiment_score: number | null
-  overallSentiment: string
-  totalReviewsFound: number
-  positiveThemes: string[]
-  negativeThemes: string[]
-  recurringComplaints: string[]
-  opportunities: string[]
-  summary: string
+  google_maps_url: string | null
   fetchedAt?: string
 }
 
@@ -888,155 +873,28 @@ export default function ProfilePage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {!reviewAnalysis ? (
-            <div className="flex flex-col items-center gap-3 py-8">
-              {loadingReviewAnalysis ? (
-                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>מנתח ביקורות...</span>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground py-4">לא נמצאו ביקורות לעסק זה</p>
-              )}
+          {loadingReviewAnalysis ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>מחפש דף Google Maps...</span>
             </div>
-          ) : (
-            <div className="space-y-5">
-              {/* Summary scores */}
-              <div className="flex flex-wrap gap-4">
-                {reviewAnalysis.weighted_average != null && (
-                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
-                    <p className="text-2xl font-bold">{reviewAnalysis.weighted_average.toFixed(1)}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">ממוצע משוקלל</p>
-                  </div>
-                )}
-                {reviewAnalysis.sentiment_score != null && (
-                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
-                    <p className="text-2xl font-bold">{reviewAnalysis.sentiment_score.toFixed(1)}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">ציון סנטימנט</p>
-                  </div>
-                )}
-                {reviewAnalysis.totalReviewsFound > 0 && (
-                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
-                    <p className="text-2xl font-bold">{reviewAnalysis.totalReviewsFound}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">ביקורות סה&quot;כ</p>
-                  </div>
-                )}
-                {reviewAnalysis.overallSentiment && (
-                  <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-center min-w-[100px]">
-                    <p className="text-lg font-semibold">{reviewAnalysis.overallSentiment}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">סנטימנט כולל</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Per-source breakdown — Google Maps always first if available */}
-              {(() => {
-                const baseSources = reviewAnalysis.sources || []
-                // Inject Google Maps from geo_data as the first source
-                let mergedSources = [...baseSources]
-                if (places?.rating) {
-                  const googleEntry: ReviewSource = {
-                    name: 'Google Maps',
-                    rating: places.rating,
-                    review_count: places.reviewCount,
-                    url: `https://www.google.com/maps/search/${encodeURIComponent(`${companyName} ${companyCity}`.trim())}`,
-                  }
-                  const existingGoogleIdx = mergedSources.findIndex(s => s.name.toLowerCase().includes('google'))
-                  if (existingGoogleIdx >= 0) mergedSources[existingGoogleIdx] = googleEntry
-                  else mergedSources = [googleEntry, ...mergedSources]
-                }
-                return mergedSources.length > 0 ? (
-                  <div className="overflow-x-auto rounded-lg border border-border">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border bg-muted/40">
-                          <th className="text-right py-2 px-3 font-medium">מקור</th>
-                          <th className="text-right py-2 px-3 font-medium">דירוג</th>
-                          <th className="text-right py-2 px-3 font-medium">ביקורות</th>
-                          <th className="py-2 px-3" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {mergedSources.map((s, i) => (
-                          <tr key={i} className="border-b border-border last:border-0">
-                            <td className="py-2 px-3 font-medium">{s.name}</td>
-                            <td className="py-2 px-3">
-                              {s.rating != null ? (
-                                <span className="flex items-center gap-1">
-                                  <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-                                  {s.rating.toFixed(1)}
-                                </span>
-                              ) : '—'}
-                            </td>
-                            <td className="py-2 px-3 text-muted-foreground">{s.review_count ?? '—'}</td>
-                            <td className="py-2 px-3">
-                              {s.url && (
-                                <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-xs">
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null
-              })()}
-
-              {/* Summary */}
-              {reviewAnalysis.summary && (
-                <p className="text-sm text-muted-foreground leading-relaxed">{reviewAnalysis.summary}</p>
-              )}
-
-              {/* Themes */}
-              {(reviewAnalysis.positiveThemes.length > 0 || reviewAnalysis.negativeThemes.length > 0) && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {reviewAnalysis.positiveThemes.length > 0 && (
-                    <div className="rounded-lg border border-green-200 bg-green-50 p-3">
-                      <p className="text-xs font-semibold text-green-800 mb-2">חוזקות לפי ביקורות</p>
-                      <ul className="space-y-1">
-                        {reviewAnalysis.positiveThemes.map((t, i) => (
-                          <li key={i} className="flex items-start gap-1.5 text-sm text-green-700">
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{t}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {reviewAnalysis.negativeThemes.length > 0 && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                      <p className="text-xs font-semibold text-red-800 mb-2">חולשות לפי ביקורות</p>
-                      <ul className="space-y-1">
-                        {reviewAnalysis.negativeThemes.map((t, i) => (
-                          <li key={i} className="flex items-start gap-1.5 text-sm text-red-700">
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />{t}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Opportunities from reviews */}
-              {reviewAnalysis.opportunities.length > 0 && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-                  <p className="text-xs font-semibold text-blue-800 mb-2">הזדמנויות שזוהו</p>
-                  <ul className="space-y-1">
-                    {reviewAnalysis.opportunities.map((o, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-sm text-blue-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />{o}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
+          ) : reviewAnalysis?.google_maps_url ? (
+            <div className="flex flex-col gap-3 py-2">
+              <a
+                href={reviewAnalysis.google_maps_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
+              >
+                <ExternalLink className="h-4 w-4" />
+                לחץ לצפייה בביקורות בגוגל מאפס
+              </a>
               {reviewAnalysis.fetchedAt && (
                 <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
               )}
             </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">לא נמצא דף Google Maps לעסק זה</p>
           )}
         </CardContent>
       </Card>
