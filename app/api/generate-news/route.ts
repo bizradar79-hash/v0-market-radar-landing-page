@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { search } from '@/lib/search'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -8,81 +9,63 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-function toDateStr(d: Date): string {
-  return d.toISOString().split('T')[0] // YYYY-MM-DD
+// ── URL helpers ────────────────────────────────────────────────────────────
+
+function extractDomain(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
 
-function cutoffDate(days: number): Date {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-}
-
-async function fetchNews(businessOverview: string, days: number, geoContext: string): Promise<any[]> {
-  const cutoff = cutoffDate(days)
-  const cutoffStr = toDateStr(cutoff)
-  const todayStr = toDateStr(new Date())
-
-  const prompt = `חפש חדשות עסקיות רלוונטיות מהימים האחרונים.
-
-תחום העסק: ${businessOverview}
-טווח תאריכים: ${cutoffStr} עד ${todayStr} (${days} ימים בלבד)
-היקף גיאוגרפי: ${geoContext}
-
-הוראות:
-- מצא בדיוק 5 חדשות ישראליות + 5 חדשות בינלאומיות (region: "ישראל" / region: "עולם")
-- רק חדשות שפורסמו החל מ-${cutoffStr} — דחה כל חדשה ישנה יותר
-- כל חדשה חייבת להיות רלוונטית ישירות לתחום העסקי שתואר — לא חדשות כלליות
-- ציין relevance_score 0-100 (קבל רק חדשות שציונן מעל 65)
-- summary: משפט אחד שמסביר למה החדשה רלוונטית לעסק
-
-החזר JSON בלבד:
-[{"title": "", "source": "", "date": "YYYY-MM-DD", "url": "", "summary": "", "relevance_score": 0, "region": "ישראל"}]
-
-CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
-
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'grok-4-fast-non-reasoning',
-      input: [{ role: 'user', content: prompt }],
-      tools: [{ type: 'web_search' }],
-    }),
-  })
-  const data = await response.json()
-  if (!response.ok || !data.output) return []
-
-  const text = data.output
-    .filter((item: any) => item.type === 'message')
-    .flatMap((item: any) => item.content)
-    .filter((c: any) => c.type === 'output_text')
-    .map((c: any) => c.text)
-    .join('')
-
-  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = clean.indexOf('[')
-  const end = clean.lastIndexOf(']')
-  if (start === -1 || end <= start) return []
-
+function isHomepage(url: string): boolean {
   try {
-    const list = JSON.parse(clean.slice(start, end + 1))
-    return Array.isArray(list) ? list : []
-  } catch {
-    return []
-  }
+    const u = new URL(url)
+    return u.pathname === '/' || u.pathname === ''
+  } catch { return true }
 }
 
-function filterNews(raw: any[], days: number): any[] {
-  const cutoff = cutoffDate(days)
-  return raw.filter((n: any) => {
-    if ((n.relevance_score ?? 0) < 65) return false
-    if (!n.date) return false
-    const published = new Date(n.date)
-    return !isNaN(published.getTime()) && published >= cutoff
-  })
+const VALID_DOMAINS = [
+  'ynet.co.il', 'haaretz.co.il', 'haaretz.com', 'mako.co.il', 'calcalist.co.il',
+  'globes.co.il', 'walla.co.il', 'n12.co.il', 'kan.org.il', 'themarker.com',
+  'maariv.co.il', 'inn.co.il', 'srugim.co.il', 'ice.co.il',
+  'techcrunch.com', 'reuters.com', 'bbc.com', 'bbc.co.uk', 'theverge.com',
+  'bloomberg.com', 'wsj.com', 'ft.com', 'forbes.com', 'nytimes.com',
+  'washingtonpost.com', 'theguardian.com', 'apnews.com', 'cnbc.com', 'wired.com',
+]
+
+function isValidDomain(url: string): boolean {
+  if (!url.startsWith('http')) return false
+  if (isHomepage(url)) return false
+  const host = extractDomain(url)
+  return VALID_DOMAINS.some(d => host === d || host.endsWith('.' + d))
 }
+
+// ── Tavily fetch ───────────────────────────────────────────────────────────
+
+async function fetchNewsFromTavily(heQuery: string, enQuery: string): Promise<any[]> {
+  const year = new Date().getFullYear()
+  const today = new Date().toISOString().split('T')[0]
+
+  const [ilRaw, intlRaw] = await Promise.all([
+    search(`${heQuery} ${year}`, 10),
+    search(`${enQuery} ${year}`, 5),
+  ])
+
+  const mapResult = (r: any, region: string) => ({
+    title: r.title || '',
+    url: r.url || '',
+    source: extractDomain(r.url || ''),
+    date: today,
+    summary: (r.content || '').slice(0, 200),
+    relevance_score: Math.round((r.score ?? 0.5) * 100),
+    region,
+  })
+
+  return [
+    ...ilRaw.map(r => mapResult(r, 'ישראל')),
+    ...intlRaw.map(r => mapResult(r, 'עולם')),
+  ]
+}
+
+// ── POST ───────────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
   const steps: Record<string, any> = {}
@@ -107,29 +90,21 @@ export async function POST(request: Request) {
     }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
-    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
-
+    const industry = ctx.company?.industry || ''
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
-    const newsSearchContext = businessProfile
-      ? `${businessOverview}\nתגיות תעשייה: ${businessProfile.industryTags.join(', ')}. שאילתות מפתח: ${businessProfile.searchQueries.slice(0, 5).join(', ')}.`
-      : businessOverview
 
-    // Step 1 — 7 days
-    const raw7 = await fetchNews(newsSearchContext, 7, geoContext)
-    let list = filterNews(raw7, 7)
-    steps.window7 = { raw: raw7.length, filtered: list.length }
+    // Build queries dynamically from business profile
+    const heQuery = businessProfile
+      ? `${businessProfile.industryTags.slice(0, 2).join(' ')} חדשות ישראל`
+      : `${industry} חדשות ישראל`
+    const enQuery = businessProfile
+      ? `${businessProfile.searchQueries[0] || industry} trends news`
+      : `${industry} trends news`
 
-    // Step 2 — expand to 30 days if fewer than 10 results
-    if (list.length < 10) {
-      const raw30 = await fetchNews(newsSearchContext, 30, geoContext)
-      const list30 = filterNews(raw30, 30)
-      steps.window30 = { raw: raw30.length, filtered: list30.length }
-      if (list30.length > list.length) list = list30
-    }
+    let list = await fetchNewsFromTavily(heQuery, enQuery)
+    steps.tavily = { count: list.length }
 
-    steps.ai = { ok: true, count: list.length }
-
-    // Deduplicate by url
+    // Deduplicate by URL
     const seenUrls = new Set<string>()
     list = list.filter((n: any) => {
       const url = (n.url || '').toLowerCase()
@@ -138,44 +113,29 @@ export async function POST(request: Request) {
       return true
     })
 
-    // URL validation: only accept URLs from known reliable domains, reject homepages
-    const VALID_DOMAINS = [
-      'ynet.co.il', 'haaretz.co.il', 'haaretz.com', 'mako.co.il', 'calcalist.co.il',
-      'globes.co.il', 'walla.co.il', 'n12.co.il', 'kan.org.il', 'themarker.com',
-      'maariv.co.il', 'inn.co.il', 'srugim.co.il', 'ice.co.il',
-      'techcrunch.com', 'reuters.com', 'bbc.com', 'bbc.co.uk', 'theverge.com',
-      'bloomberg.com', 'wsj.com', 'ft.com', 'forbes.com', 'nytimes.com',
-      'washingtonpost.com', 'theguardian.com', 'apnews.com', 'cnbc.com', 'wired.com',
-    ]
-    function extractDomain(url: string): string {
-      try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
-    }
-    function isHomepage(url: string): boolean {
-      try {
-        const u = new URL(url)
-        return u.pathname === '/' || u.pathname === ''
-      } catch { return true }
-    }
-    list = list.filter((n: any) => {
-      const url = n.url || ''
-      if (!url.startsWith('http')) return false
-      if (isHomepage(url)) return false
-      const host = extractDomain(url)
-      return VALID_DOMAINS.some(d => host === d || host.endsWith('.' + d))
-    })
+    // VALID_DOMAINS filter — reject hallucinated / unverified URLs
+    list = list.filter((n: any) => isValidDomain(n.url || ''))
     steps.urlValidation = { count: list.length }
 
-    // If fewer than 8 valid items, run a second broader search
+    // Broader fallback if fewer than 8 results
     if (list.length < 8) {
-      const broader = businessProfile?.industryTags?.slice(0, 2).join(' ') || businessOverview.split(' ').slice(0, 4).join(' ')
-      const raw2 = await fetchNews(`${broader} עסקים ישראל חדשות`, 30, geoContext)
-      const list2 = filterNews(raw2, 30).filter((n: any) => {
-        const url = n.url || ''
-        if (!url.startsWith('http') || isHomepage(url)) return false
-        const host = extractDomain(url)
-        return VALID_DOMAINS.some(d => host === d || host.endsWith('.' + d))
-      })
-      // Merge deduped
+      const broader = businessProfile?.industryTags?.slice(0, 2).join(' ')
+        || businessOverview.split(' ').slice(0, 4).join(' ')
+      const broadYear = new Date().getFullYear()
+      const broadRaw = await search(`${broader} חדשות ${broadYear}`, 10)
+      const today2 = new Date().toISOString().split('T')[0]
+      const list2 = broadRaw
+        .map((r: any) => ({
+          title: r.title || '',
+          url: r.url || '',
+          source: extractDomain(r.url || ''),
+          date: today2,
+          summary: (r.content || '').slice(0, 200),
+          relevance_score: Math.round((r.score ?? 0.5) * 100),
+          region: 'ישראל',
+        }))
+        .filter((n: any) => isValidDomain(n.url || ''))
+
       const existingUrls = new Set(list.map((n: any) => (n.url || '').toLowerCase()))
       for (const item of list2) {
         if (!existingUrls.has((item.url || '').toLowerCase())) {
