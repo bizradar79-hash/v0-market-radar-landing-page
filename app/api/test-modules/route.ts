@@ -31,11 +31,10 @@ export async function GET() {
   } catch (e: any) { results.geo_query_error = e.message }
 
   // Test 2: Google Places API — direct call for basalon
-  try {
-    const placesResult = await getPlaceDetails('בסלון', 'basalon.co.il', '050-687-1111')
-    results.reviews_places = placesResult ?? 'null — no result from Places API'
-    results.places_key_set = !!process.env.GOOGLE_PLACES_API_KEY
-  } catch (e: any) { results.reviews_places_error = e.message }
+  results.places_key_set = !!process.env.GOOGLE_PLACES_API_KEY
+  results.reviews_places = await getPlaceDetails('בסלון', 'basalon.co.il', '050-687-1111')
+    .then(r => r ?? 'null — no result')
+    .catch(e => `error: ${e.message}`)
 
   return Response.json(results)
 }
