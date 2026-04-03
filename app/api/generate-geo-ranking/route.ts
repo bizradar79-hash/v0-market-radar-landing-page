@@ -34,14 +34,20 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
   if (!geminiKey) return null
   const desc = (coreActivity || industry).trim()
   if (!desc) return null
-  const prompt = `עסק זה: ${desc}. מה השאילתה הכי נפוצה שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה? החזר רק את השאילתה, ללא הסברים.`
+  const prompt = `עסק: ${desc}
+החזר רק 3-5 מילים — שאילתת חיפוש קצרה שלקוח ישראלי יחפש בגוגל.
+דוגמה: 'סדנאות יצירה ישראל' או 'פלטפורמת אירועים תל אביב'
+ללא הסברים. רק השאילתה.`
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 50 },
+        }),
       }
     )
     if (!res.ok) { console.error('[GEO buildQuery] Gemini HTTP:', res.status); return null }
@@ -401,6 +407,13 @@ export async function POST(request: Request) {
         recommendations = Array.isArray(recsParsed.recommendations) ? recsParsed.recommendations.slice(0, 3) : []
       }
     } catch { /* fallback to empty */ }
+
+    console.log('[GEO engines]', JSON.stringify({
+      chatgpt: { count: engines.chatgpt?.results?.length, appeared: engines.chatgpt?.appeared },
+      gemini: { count: engines.gemini?.results?.length, appeared: engines.gemini?.appeared },
+      grok: { count: engines.grok?.results?.length, appeared: engines.grok?.appeared },
+      query: primaryQuery,
+    }))
 
     const primary = engineResults[0]
 

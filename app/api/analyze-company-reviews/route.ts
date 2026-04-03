@@ -10,19 +10,17 @@ async function fetchReviewsWithGemini(companyName: string, domain: string): Prom
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return null
 
-  const prompt = `אתה מומחה שיווק ישראלי. חפש מידע על ביקורות של העסק "${companyName}" (דומיין: ${domain}).
-CRITICAL: החזר נתונים רק על הדומיין "${domain}" בדיוק — לא על עסקים אחרים עם שם דומה.
-החזר JSON בלבד:
-{
-  "sources": [{"name": "Google Maps", "rating": 0, "review_count": 0, "url": ""}, {"name": "Facebook", "rating": 0, "review_count": 0, "url": ""}],
-  "weighted_average": 0,
-  "sentiment_score": 0,
-  "overallSentiment": "חיובי",
-  "positiveThemes": [""],
-  "negativeThemes": [""],
-  "opportunities": [""],
-  "summary": ""
-}`
+  const prompt = `אתה מומחה שיווק ישראלי. חפש מידע אמיתי על ביקורות של העסק "${companyName}" (דומיין בדיוק: ${domain}).
+CRITICAL: החזר נתונים רק על הדומיין "${domain}" — לא על עסקים אחרים עם שם דומה.
+החזר אובייקט JSON עם המפתחות הבאים:
+- sources: מערך של מקורות ביקורת (Google Maps, Facebook וכו׳) עם rating, review_count, url
+- weighted_average: ממוצע משוקלל של כל הביקורות (מספר)
+- sentiment_score: ציון סנטימנט 0-100
+- overallSentiment: "חיובי" / "מעורב" / "שלילי"
+- positiveThemes: מערך נושאים חיוביים
+- negativeThemes: מערך נושאים שליליים
+- opportunities: מערך הזדמנויות לשיפור
+- summary: סיכום קצר`
 
   try {
     const res = await fetch(
@@ -30,7 +28,10 @@ CRITICAL: החזר נתונים רק על הדומיין "${domain}" בדיוק 
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' },
+        }),
       }
     )
     if (!res.ok) {
