@@ -28,6 +28,9 @@ interface KwData {
   trends?: KwTrend[]
   israel?: KwTrend[]
   world?: KwTrend[]
+  related_queries?: string[]
+  gemini_trend?: string | null
+  gemini_confidence?: number | null
 }
 interface KwTrendsMap { [keyword: string]: KwData }
 
@@ -217,6 +220,8 @@ export default function TrendsPage() {
           trends: data.trends,
           israel: data.israel,
           world: data.world,
+          related_queries: data.related_queries || [],
+          gemini_trend: data.gemini_trend || null,
         } }))
         setExpanded(prev => new Set([...prev, kw]))
         toast({ title: `טרנדים עודכנו: ${kw}` })
@@ -358,8 +363,8 @@ export default function TrendsPage() {
             </button>
           ) : (
             <div className="space-y-1 text-blue-800 leading-relaxed">
-              <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות</p>
-              <p>וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
+              <p>מבוסס על Gemini AI — ניתוח גוגל טרנדס</p>
+              <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
               <button onClick={() => setInfoExpanded(false)} className="text-blue-700 font-medium mt-1 block">
                 הצג פחות ▲
               </button>
@@ -473,6 +478,18 @@ export default function TrendsPage() {
                         </div>
                       ))}
                     </div>
+                    {kwData.related_queries && kwData.related_queries.length > 0 && (
+                      <div className="mt-3 pt-3 border-t space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground">חיפושים קשורים — Gemini AI</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {kwData.related_queries.map((q, i) => (
+                            <span key={i} className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground border">
+                              {q}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground pt-2">
                       עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
                     </p>

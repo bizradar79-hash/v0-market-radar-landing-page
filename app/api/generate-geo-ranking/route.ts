@@ -24,7 +24,7 @@ function isOwnResult(r: any, companyName: string, companyDomain: string): boolea
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-const ENGINES = ['general', 'chatgpt', 'gemini', 'grok'] as const
+const ENGINES = ['chatgpt', 'gemini', 'grok'] as const
 type Engine = typeof ENGINES[number]
 
 // ── Query generation ───────────────────────────────────────────────────────
@@ -144,12 +144,14 @@ async function runGeminiEngine(
   companyName: string,
   website: string,
   competitorNames: string[],
+  industry?: string,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
   const companyDomain = extractDomain(website)
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return { position: null, topResults: [], appeared: false, results: [] }
 
-  const prompt = `אתה עוזר ישראלי. המשתמש שואל: "${query}". רשום את 10 העסקים או האתרים הישראלים הרלוונטיים ביותר שהיית ממליץ עליהם, לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
+  const industryDesc = industry || query
+  const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. איזה עסקים או פלטפורמות היית ממליץ? רשום את 10 הטובים ביותר לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
 
   try {
     const res = await fetch(
@@ -185,8 +187,9 @@ async function runGeoQuestion(
   website: string,
   competitorNames: string[],
   engine: Engine = 'general',
+  industry?: string,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames)
+  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, industry)
 
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
   const companyDomain = extractDomain(website)
@@ -291,9 +294,10 @@ export async function POST(request: Request) {
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // Run all 4 engines in parallel
+    // Run all 4 engines in parallel (pass industry for Gemini)
+    const geminiIndustry = businessProfile?.coreActivity || industry
     const engineResults = await Promise.all(
-      ENGINES.map(engine => runGeoQuestion(primaryQuery, companyName, website, competitorNames, engine))
+      ENGINES.map(engine => runGeoQuestion(primaryQuery, companyName, website, competitorNames, engine, geminiIndustry))
     )
 
     const engines: Record<string, { results: any[]; appeared: boolean; position: number | null; topResults: string[] }> = {}

@@ -262,6 +262,18 @@ export async function POST(request: Request) {
     const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0])
     if (primaryReordered) variantResults[0].results = primaryReordered
 
+    // Dedup all variants by base domain, cap at 10
+    for (const v of variantResults) {
+      const seen = new Set<string>()
+      v.results = v.results.filter((r: any) => {
+        const raw = r.url ? extractDomain(r.url) : (r.name || '').toLowerCase()
+        const base = baseDomain(raw) || raw
+        if (!base || seen.has(base)) return false
+        seen.add(base)
+        return true
+      }).slice(0, 10)
+    }
+
     const queryVariants = queryList.map((q, i) => ({
       query: q,
       position: variantResults[i].position,

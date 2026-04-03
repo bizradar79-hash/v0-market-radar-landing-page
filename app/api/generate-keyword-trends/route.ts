@@ -58,6 +58,35 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
   }
 }
 
+async function fetchRelatedQueriesFromGemini(keyword: string): Promise<{
+  trend: string; related_queries: string[]; confidence: number
+} | null> {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return null
+  const prompt = `בהתבסס על ידע שלך על גוגל טרנדס, מה הטרנד של מילת המפתח "${keyword}" בישראל בשבועות האחרונים? עולה, יורד או יציב? ומה 5 ביטויי החיפוש הקשורים הכי פופולריים לה כרגע? החזר JSON: {"trend": "rising", "related_queries": ["", "", "", "", ""], "confidence": 80}`
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+    const data = await res.json()
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const s = clean.indexOf('{'); const e = clean.lastIndexOf('}')
+    if (s === -1 || e <= s) return null
+    const parsed = JSON.parse(clean.slice(s, e + 1))
+    return {
+      trend: parsed.trend || 'stable',
+      related_queries: Array.isArray(parsed.related_queries) ? parsed.related_queries.slice(0, 5) : [],
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 70,
+    }
+  } catch { return null }
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
@@ -97,6 +126,8 @@ export async function POST(request: Request) {
             trends: kwData.israel || kwData.trends || [],
             israel: kwData.israel || kwData.trends || [],
             world: kwData.world || [],
+            related_queries: (kwData as any).related_queries || [],
+            gemini_trend: (kwData as any).gemini_trend || null,
           })
         }
       }
@@ -104,10 +135,11 @@ export async function POST(request: Request) {
 
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
-    // Run Israel and World searches in parallel
-    const [israelTrends, worldTrends] = await Promise.all([
+    // Run Israel, World searches and Gemini related queries in parallel
+    const [israelTrends, worldTrends, geminiData] = await Promise.all([
       fetchTrendsForRegion(keyword, 'israel', geoContext),
       fetchTrendsForRegion(keyword, 'world', geoContext),
+      fetchRelatedQueriesFromGemini(keyword),
     ])
 
     // Merge with existing keyword_trends in companies table
@@ -125,6 +157,9 @@ export async function POST(request: Request) {
         trends: israelTrends, // backward-compat alias
         israel: israelTrends,
         world: worldTrends,
+        related_queries: geminiData?.related_queries ?? [],
+        gemini_trend: geminiData?.trend ?? null,
+        gemini_confidence: geminiData?.confidence ?? null,
       },
     }
 
@@ -140,7 +175,7 @@ export async function POST(request: Request) {
       })
     }
 
-    return NextResponse.json({ success: true, keyword, trends: israelTrends, israel: israelTrends, world: worldTrends })
+    return NextResponse.json({ success: true, keyword, trends: israelTrends, israel: israelTrends, world: worldTrends, related_queries: geminiData?.related_queries ?? [], gemini_trend: geminiData?.trend ?? null })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }

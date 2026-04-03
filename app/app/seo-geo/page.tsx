@@ -97,7 +97,7 @@ export default function SeoGeoPage() {
   const [expandedSeoRow, setExpandedSeoRow] = useState<number | null>(null)
 
   const [seoFilter, setSeoFilter] = useState<SeoFilter>('all')
-  const [selectedGeoEngine, setSelectedGeoEngine] = useState<'general' | 'chatgpt' | 'gemini' | 'grok'>('general')
+  const [selectedGeoEngine, setSelectedGeoEngine] = useState<'chatgpt' | 'gemini' | 'grok'>('chatgpt')
 
   const supabase = createClient()
 
@@ -418,7 +418,6 @@ export default function SeoGeoPage() {
                   {/* Engine tabs — 4 engines, no Perplexity */}
                   <div className="flex gap-0 border-b border-border overflow-x-auto">
                     {([
-                      { id: 'general', label: 'כללי' },
                       { id: 'chatgpt', label: 'ChatGPT' },
                       { id: 'gemini', label: 'Gemini' },
                       { id: 'grok', label: 'Grok' },
@@ -440,7 +439,6 @@ export default function SeoGeoPage() {
                   {/* Engine info box */}
                   {(() => {
                     const ENGINE_INFO: Record<string, string> = {
-                      general: "תוצאות אורגניות מגוגל — מבוסס על Grok web search",
                       chatgpt: "מה ChatGPT ממליץ — מבוסס על Grok web search",
                       gemini: "המלצות Google Gemini — מבוסס על Gemini API ישירות",
                       grok: "תוצאות Grok בזמן אמת — מבוסס על Grok web search",
