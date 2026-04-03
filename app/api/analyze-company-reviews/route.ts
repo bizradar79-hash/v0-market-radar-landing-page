@@ -109,9 +109,11 @@ export async function POST(request: Request) {
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
+    const phone: string | undefined = ctx.company?.phone || undefined
+
     // Try Google Places first (real data), fall back to Gemini
     const [placesData, geminiReviews] = await Promise.all([
-      getPlaceDetails(companyName, website),
+      getPlaceDetails(companyName, website, phone),
       fetchReviewsWithGemini(companyName, domain),
     ])
 

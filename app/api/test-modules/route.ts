@@ -32,7 +32,7 @@ export async function GET() {
 
   // Test 2: Google Places API — direct call for basalon
   try {
-    const placesResult = await getPlaceDetails('בסלון', 'basalon.co.il')
+    const placesResult = await getPlaceDetails('בסלון', 'basalon.co.il', '050-687-1111')
     results.reviews_places = placesResult ?? 'null — no result from Places API'
     results.places_key_set = !!process.env.GOOGLE_PLACES_API_KEY
   } catch (e: any) { results.reviews_places_error = e.message }
