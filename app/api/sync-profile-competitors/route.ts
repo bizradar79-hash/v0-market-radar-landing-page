@@ -7,6 +7,25 @@ export const maxDuration = 60
 
 const MAX_COMPETITORS = 10
 
+async function fetchDescriptionWithGemini(name: string): Promise<string | null> {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return null
+  const prompt = `תאר בקצרה (משפט אחד) מה העסק "${name}" מציע ללקוחותיו בישראל.`
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+    const data = await res.json()
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim()
+    return text.length > 3 ? text : null
+  } catch { return null }
+}
+
 async function enrichCompetitor(name: string, contextHint: string): Promise<{
   services: string
   website: string | null
@@ -59,7 +78,6 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     const googleRating = typeof parsed.google_rating === 'number' && parsed.google_rating > 0 ? parsed.google_rating : null
     const googleReviewCount = typeof parsed.google_review_count === 'number' && parsed.google_review_count > 0 ? parsed.google_review_count : null
 
-    // Apply Google rating bonus to threat score (same formula as find-competitors)
     let finalThreat = threat
     if (googleRating != null) {
       if (googleRating >= 4.5) finalThreat = Math.min(100, finalThreat + 20)
@@ -71,8 +89,14 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       else if (googleReviewCount >= 100) finalThreat = Math.min(100, finalThreat + 5)
     }
 
+    // If Grok couldn't produce a real services description, fall back to Gemini
+    let services = typeof parsed.services === 'string' && parsed.services.length > 2 ? parsed.services : ''
+    if (!services || services === 'מתחרה שזוהה בניתוח עסקי') {
+      services = (await fetchDescriptionWithGemini(name)) || ''
+    }
+
     return {
-      services: typeof parsed.services === 'string' && parsed.services.length > 2 ? parsed.services : '',
+      services,
       website: typeof parsed.website === 'string' && parsed.website.startsWith('http') ? parsed.website : null,
       google_rating: googleRating,
       google_review_count: googleReviewCount,
