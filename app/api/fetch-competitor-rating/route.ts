@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { getPlaceDetails } from '@/lib/google-places'
 import { NextResponse } from 'next/server'
 
 export const maxDuration = 60
@@ -59,22 +60,28 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { competitorId, name } = await request.json()
+    const { competitorId, name, website: competitorWebsite } = await request.json()
     if (!competitorId || !name) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
-    const geminiResult = await fetchRatingWithGemini(name)
+    // Try Google Places first (accurate), fall back to Gemini
+    const placesResult = competitorWebsite
+      ? await getPlaceDetails(name, competitorWebsite)
+      : null
+    const geminiResult = placesResult ? null : await fetchRatingWithGemini(name)
 
-    // If Gemini returned null for both fields, don't overwrite existing data
-    if (!geminiResult || (geminiResult.google_rating === null && geminiResult.google_review_count === null)) {
+    const rating = placesResult?.google_rating ?? geminiResult?.google_rating ?? null
+    const reviewCount = placesResult?.google_review_count ?? geminiResult?.google_review_count ?? null
+
+    // If neither source returned data, don't overwrite existing data
+    if (rating === null && reviewCount === null) {
       return NextResponse.json({ success: true, rating: null, reviewCount: null, skipped: true })
     }
-
-    const { google_rating: rating, google_review_count: reviewCount } = geminiResult
     const updates: Record<string, any> = {}
 
     // Only update non-null values
     if (rating !== null) updates.google_rating = rating
     if (reviewCount !== null) updates.google_review_count = reviewCount
+    if (placesResult?.google_maps_url) updates.google_maps_url = placesResult.google_maps_url
 
     if (rating !== null) {
       const { data: comp } = await ctx.supabase

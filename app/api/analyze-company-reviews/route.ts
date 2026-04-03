@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { getPlaceDetails } from '@/lib/google-places'
 import { NextResponse } from 'next/server'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -108,20 +109,45 @@ export async function POST(request: Request) {
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
-    const reviews = await fetchReviewsWithGemini(companyName, domain)
+    // Try Google Places first (real data), fall back to Gemini
+    const [placesData, geminiReviews] = await Promise.all([
+      getPlaceDetails(companyName, website),
+      fetchReviewsWithGemini(companyName, domain),
+    ])
+
+    console.log('[reviews] places:', placesData ? `rating=${placesData.google_rating} reviews=${placesData.google_review_count}` : 'null')
+
+    // Prefer Places for rating/count/URL; use Gemini for qualitative analysis
+    const google_rating = placesData?.google_rating ?? geminiReviews?.google_rating ?? null
+    const google_review_count = placesData?.google_review_count ?? geminiReviews?.google_review_count ?? null
+    const google_maps_url = placesData?.google_maps_url ?? geminiReviews?.google_maps_url ?? null
+
+    // Merge: if Places found real data, inject it as first source
+    let sources = geminiReviews?.sources ?? []
+    if (placesData?.google_rating != null) {
+      const googleIdx = sources.findIndex((s: any) => (s.name || '').toLowerCase().includes('google'))
+      const placesSource = {
+        name: 'Google Maps',
+        rating: placesData.google_rating,
+        review_count: placesData.google_review_count,
+        url: placesData.google_maps_url,
+      }
+      if (googleIdx >= 0) sources[googleIdx] = placesSource
+      else sources = [placesSource, ...sources]
+    }
 
     const result = {
-      sources: reviews?.sources ?? [],
-      weighted_average: reviews?.weighted_average ?? null,
-      sentiment_score: reviews?.sentiment_score ?? null,
-      overallSentiment: reviews?.overallSentiment ?? null,
-      positiveThemes: reviews?.positiveThemes ?? [],
-      negativeThemes: reviews?.negativeThemes ?? [],
-      opportunities: reviews?.opportunities ?? [],
-      summary: reviews?.summary ?? '',
-      google_rating: reviews?.google_rating ?? null,
-      google_review_count: reviews?.google_review_count ?? null,
-      google_maps_url: reviews?.google_maps_url ?? null,
+      sources,
+      weighted_average: geminiReviews?.weighted_average ?? google_rating,
+      sentiment_score: geminiReviews?.sentiment_score ?? null,
+      overallSentiment: geminiReviews?.overallSentiment ?? null,
+      positiveThemes: geminiReviews?.positiveThemes ?? [],
+      negativeThemes: geminiReviews?.negativeThemes ?? [],
+      opportunities: geminiReviews?.opportunities ?? [],
+      summary: geminiReviews?.summary ?? '',
+      google_rating,
+      google_review_count,
+      google_maps_url,
       fetchedAt: new Date().toISOString(),
     }
 
