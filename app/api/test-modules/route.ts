@@ -36,7 +36,14 @@ export async function GET() {
     .then(r => r ?? 'null — no result')
     .catch(e => `error: ${e.message}`)
 
-  // Test 3: Direct Place ID lookup — known correct basalon Place ID
+  // Test 3: Website-based textsearch — inspect top results for basalon.co.il
+  results.reviews_website = await (async () => {
+    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?query=basalon.co.il&fields=place_id,name,rating,user_ratings_total,website&key=${process.env.GOOGLE_PLACES_API_KEY}`)
+    const data = await res.json()
+    return data.results?.slice(0, 3).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, website: r.website }))
+  })().catch(e => `error: ${e.message}`)
+
+  // Test 4: Direct Place ID lookup — known correct basalon Place ID
   try {
     const res = await fetch(
       `https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJV7EbImX7RhQRecG312XfvXs&fields=name,rating,user_ratings_total&key=${process.env.GOOGLE_PLACES_API_KEY}`

@@ -4,33 +4,32 @@ export async function getPlaceDetails(businessName: string, website: string, pho
 
   try {
     const domain = website.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
+    const firstWord = businessName.toLowerCase().split(' ')[0]
 
-    // 1. Phone lookup via findplacefromtext (most accurate)
-    if (phone) {
-      const intlPhone = phone.replace(/\s+/g, '').replace(/-/g, '').replace(/^0/, '+972')
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(intlPhone)}&inputtype=phonenumber&fields=place_id,name,rating,user_ratings_total&key=${apiKey}`
-      )
-      const data = await res.json()
-      if (data.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        console.error('[google-places] phone status:', data.status, data.error_message || '')
-      }
-      const candidate = data.candidates?.[0]
-      if (candidate?.place_id && candidate?.rating) {
-        return {
-          place_id: candidate.place_id,
-          google_rating: candidate.rating,
-          google_review_count: candidate.user_ratings_total ?? 0,
-          google_maps_url: `https://www.google.com/maps/place/?q=place_id:${candidate.place_id}`,
-        }
+    // 1. Website-based search — unique per business, most precise
+    const websiteRes = await fetch(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(domain)}&fields=place_id,name,rating,user_ratings_total,website&key=${apiKey}`
+    )
+    const websiteData = await websiteRes.json()
+    if (websiteData.status && websiteData.status !== 'OK' && websiteData.status !== 'ZERO_RESULTS') {
+      console.error('[google-places] website search status:', websiteData.status, websiteData.error_message || '')
+    }
+    const match = websiteData.results?.find((r: any) =>
+      r.website?.includes(domain) || r.name?.toLowerCase().includes(firstWord)
+    )
+    if (match?.place_id && match?.rating) {
+      return {
+        place_id: match.place_id,
+        google_rating: match.rating,
+        google_review_count: match.user_ratings_total ?? 0,
+        google_maps_url: `https://www.google.com/maps/place/?q=place_id:${match.place_id}`,
       }
     }
 
-    // 2. Text queries via textsearch (more flexible than findplacefromtext)
+    // 2. Text queries via textsearch
     const textQueries = [
       `${businessName} ${domain}`,
       `${businessName} ישראל`,
-      domain, // domain-only — most precise when business name is ambiguous
     ]
     for (const q of textQueries) {
       const res = await fetch(
