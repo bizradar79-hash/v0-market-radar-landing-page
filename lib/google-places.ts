@@ -5,19 +5,14 @@ export async function getPlaceDetails(businessName: string, website: string, pho
   try {
     const domain = website.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
 
-    // Try phone first — most accurate
-    const queries: { input: string; inputtype: string }[] = []
-    if (phone) queries.push({ input: phone, inputtype: 'phonenumber' })
-    queries.push({ input: `${businessName} ${domain}`, inputtype: 'textquery' })
-    queries.push({ input: businessName, inputtype: 'textquery' })
-
-    for (const q of queries) {
+    // 1. Phone lookup via findplacefromtext (most accurate)
+    if (phone) {
       const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q.input)}&inputtype=${q.inputtype}&fields=place_id,name,rating,user_ratings_total&key=${apiKey}`
+        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(phone)}&inputtype=phonenumber&fields=place_id,name,rating,user_ratings_total&key=${apiKey}`
       )
       const data = await res.json()
       if (data.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-        console.error('[google-places] status:', data.status, q.input, data.error_message || '')
+        console.error('[google-places] phone status:', data.status, data.error_message || '')
       }
       const candidate = data.candidates?.[0]
       if (candidate?.place_id && candidate?.rating) {
@@ -26,6 +21,30 @@ export async function getPlaceDetails(businessName: string, website: string, pho
           google_rating: candidate.rating,
           google_review_count: candidate.user_ratings_total ?? 0,
           google_maps_url: `https://www.google.com/maps/place/?q=place_id:${candidate.place_id}`,
+        }
+      }
+    }
+
+    // 2. Text queries via textsearch (more flexible than findplacefromtext)
+    const textQueries = [
+      `${businessName} ${domain}`,
+      `${businessName} ישראל`,
+    ]
+    for (const q of textQueries) {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}&key=${apiKey}`
+      )
+      const data = await res.json()
+      if (data.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+        console.error('[google-places] textsearch status:', data.status, q, data.error_message || '')
+      }
+      const result = data.results?.[0]
+      if (result?.place_id && result?.rating) {
+        return {
+          place_id: result.place_id,
+          google_rating: result.rating,
+          google_review_count: result.user_ratings_total ?? 0,
+          google_maps_url: `https://www.google.com/maps/place/?q=place_id:${result.place_id}`,
         }
       }
     }
