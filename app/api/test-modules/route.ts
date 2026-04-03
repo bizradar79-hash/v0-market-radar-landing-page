@@ -36,5 +36,14 @@ export async function GET() {
     .then(r => r ?? 'null — no result')
     .catch(e => `error: ${e.message}`)
 
+  // Test 3: Direct Place ID lookup — known correct basalon Place ID
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJV7EbImX7RhQRecG312XfvXs&fields=name,rating,user_ratings_total&key=${process.env.GOOGLE_PLACES_API_KEY}`
+    )
+    const data = await res.json()
+    results.reviews_direct = data.result ?? data
+  } catch (e: any) { results.reviews_direct_error = e.message }
+
   return Response.json(results)
 }

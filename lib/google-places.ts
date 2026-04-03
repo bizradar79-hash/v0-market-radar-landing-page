@@ -30,6 +30,7 @@ export async function getPlaceDetails(businessName: string, website: string, pho
     const textQueries = [
       `${businessName} ${domain}`,
       `${businessName} ישראל`,
+      domain, // domain-only — most precise when business name is ambiguous
     ]
     for (const q of textQueries) {
       const res = await fetch(
