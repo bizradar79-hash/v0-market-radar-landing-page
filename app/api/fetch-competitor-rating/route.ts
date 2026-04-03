@@ -31,8 +31,10 @@ async function fetchRatingWithGemini(competitorName: string): Promise<{
     const s = clean.indexOf('{'); const e = clean.lastIndexOf('}')
     if (s === -1 || e <= s) return null
     const parsed = JSON.parse(clean.slice(s, e + 1))
+    const rating = typeof parsed.google_rating === 'number' ? parsed.google_rating : null
     return {
-      google_rating: typeof parsed.google_rating === 'number' ? parsed.google_rating : null,
+      // Reject implausibly low ratings (< 2.0 means data error, not a real score)
+      google_rating: rating !== null && rating >= 2.0 ? rating : null,
       google_review_count: typeof parsed.google_review_count === 'number' ? parsed.google_review_count : null,
     }
   } catch { return null }
