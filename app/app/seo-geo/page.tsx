@@ -440,10 +440,10 @@ export default function SeoGeoPage() {
                   {/* Engine info box */}
                   {(() => {
                     const ENGINE_INFO: Record<string, string> = {
-                      general: "תוצאות אורגניות בגוגל לשאילתה זו",
-                      chatgpt: "מה ChatGPT ממליץ כשמישהו שואל שאלה זו",
-                      gemini: "מה Google Gemini מציג בתשובה לשאלה זו",
-                      grok: "תוצאות חיפוש בזמן אמת של Grok לשאילתה זו",
+                      general: "תוצאות אורגניות מגוגל — מבוסס על Grok web search",
+                      chatgpt: "מה ChatGPT ממליץ — מבוסס על Grok web search",
+                      gemini: "המלצות Google Gemini — מבוסס על Gemini API ישירות",
+                      grok: "תוצאות Grok בזמן אמת — מבוסס על Grok web search",
                     }
                     return ENGINE_INFO[selectedGeoEngine] ? (
                       <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2 border">

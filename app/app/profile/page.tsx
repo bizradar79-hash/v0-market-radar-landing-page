@@ -63,6 +63,8 @@ interface PlacesData {
 interface ReviewAnalysis {
   google_rating: number | null
   google_review_count: number | null
+  facebook_rating?: number | null
+  facebook_review_count?: number | null
   google_maps_url: string | null
   fetchedAt?: string
 }
@@ -883,15 +885,32 @@ export default function ProfilePage() {
           ) : reviewAnalysis ? (
             <div className="flex flex-col gap-3 py-2">
               {(reviewAnalysis.google_rating != null || reviewAnalysis.google_review_count != null) && (
-                <div className="flex items-center gap-3">
-                  {reviewAnalysis.google_rating != null && (
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground font-medium">Google</span>
+                    {reviewAnalysis.google_rating != null && (
+                      <div className="flex items-center gap-1">
+                        <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                        <span className="font-semibold text-sm">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                      </div>
+                    )}
+                    {reviewAnalysis.google_review_count != null && (
+                      <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()})</span>
+                    )}
+                  </div>
+                  {(reviewAnalysis.facebook_rating != null || reviewAnalysis.facebook_review_count != null) && (
                     <div className="flex items-center gap-1.5">
-                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                      <span className="font-semibold text-sm">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                      <span className="text-xs text-muted-foreground font-medium">Facebook</span>
+                      {reviewAnalysis.facebook_rating != null && (
+                        <div className="flex items-center gap-1">
+                          <Star className="h-3.5 w-3.5 fill-blue-400 text-blue-400" />
+                          <span className="font-semibold text-sm">{reviewAnalysis.facebook_rating.toFixed(1)}</span>
+                        </div>
+                      )}
+                      {reviewAnalysis.facebook_review_count != null && (
+                        <span className="text-xs text-muted-foreground">({reviewAnalysis.facebook_review_count.toLocaleString()})</span>
+                      )}
                     </div>
-                  )}
-                  {reviewAnalysis.google_review_count != null && (
-                    <span className="text-sm text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
                   )}
                 </div>
               )}

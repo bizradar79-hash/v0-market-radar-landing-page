@@ -104,7 +104,80 @@ ${jsonTemplate}
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 }
 
-// ── Engine runner ──────────────────────────────────────────────────────────
+// ── Shared result processor ────────────────────────────────────────────────
+
+function processResults(
+  rawResults: any[],
+  companyName: string,
+  companyDomain: string,
+  competitorNames: string[],
+): { position: number | null; topResults: string[]; appeared: boolean; results: any[] } {
+  const seenDomains = new Set<string>()
+  const results: any[] = []
+  for (const r of rawResults.slice(0, 10)) {
+    const domain = extractDomain(r.url || '') || r.name
+    if (seenDomains.has(domain)) continue
+    seenDomains.add(domain)
+    results.push(r)
+  }
+  results.forEach((r: any) => {
+    const own = isOwnResult(r, companyName, companyDomain)
+    r.isOwn = own
+    r.isCompany = own
+    const rName = (r.name || '').toLowerCase()
+    r.isKnownCompetitor = !own && competitorNames.some(n => {
+      const nLower = n.toLowerCase()
+      return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
+    })
+  })
+  const ownResult = results.find(r => r.isOwn)
+  const appeared = !!ownResult && ownResult.position != null
+  const position = appeared ? (ownResult!.position ?? null) : null
+  const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
+  return { position, topResults, appeared, results }
+}
+
+// ── Gemini engine (direct API) ─────────────────────────────────────────────
+
+async function runGeminiEngine(
+  query: string,
+  companyName: string,
+  website: string,
+  competitorNames: string[],
+): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
+  const companyDomain = extractDomain(website)
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return { position: null, topResults: [], appeared: false, results: [] }
+
+  const prompt = `אתה עוזר ישראלי. המשתמש שואל: "${query}". רשום את 10 העסקים או האתרים הישראלים הרלוונטיים ביותר שהיית ממליץ עליהם, לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+    const data = await res.json()
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const s = clean.indexOf('[')
+    const e = clean.lastIndexOf(']')
+    if (s === -1 || e <= s) return { position: null, topResults: [], appeared: false, results: [] }
+    const arr: any[] = JSON.parse(clean.slice(s, e + 1))
+    const rawResults = arr.map((item: any, idx: number) => ({
+      position: item.rank ?? idx + 1,
+      name: item.name || '',
+      url: item.domain ? `https://${item.domain}` : '',
+      title: item.name || '',
+    }))
+    return processResults(rawResults, companyName, companyDomain, competitorNames)
+  } catch { return { position: null, topResults: [], appeared: false, results: [] } }
+}
+
+// ── Grok engine runner ─────────────────────────────────────────────────────
 
 async function runGeoQuestion(
   query: string,
@@ -113,6 +186,8 @@ async function runGeoQuestion(
   competitorNames: string[],
   engine: Engine = 'general',
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
+  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames)
+
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
   const companyDomain = extractDomain(website)
 
@@ -144,34 +219,8 @@ async function runGeoQuestion(
   let parsed: any = {}
   try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
 
-  const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : []).slice(0, 10)
-  // Deduplicate by domain
-  const seenDomains = new Set<string>()
-  const results: any[] = []
-  for (const r of rawResults) {
-    const domain = extractDomain(r.url || '') || r.name
-    if (seenDomains.has(domain)) continue
-    seenDomains.add(domain)
-    results.push(r)
-  }
-
-  results.forEach((r: any) => {
-    const own = isOwnResult(r, companyName, companyDomain)
-    r.isOwn = own
-    r.isCompany = own // explicit alias for UI clarity
-    const rName = (r.name || '').toLowerCase()
-    r.isKnownCompetitor = !own && competitorNames.some(n => {
-      const nLower = n.toLowerCase()
-      return nLower.length >= 3 && (rName.includes(nLower) || nLower.includes(rName))
-    })
-  })
-
-  const ownResult = results.find(r => r.isOwn)
-  const appeared = !!ownResult && ownResult.position != null
-  const position = appeared ? (ownResult!.position ?? null) : null
-  const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
-
-  return { position, topResults, appeared, results }
+  const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : [])
+  return processResults(rawResults, companyName, companyDomain, competitorNames)
 }
 
 // ── POST ───────────────────────────────────────────────────────────────────

@@ -148,6 +148,54 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   }
 }
 
+// ── Gemini validation step ─────────────────────────────────────────────────
+
+async function reorderWithGemini(
+  results: any[],
+  query: string,
+): Promise<any[] | null> {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey || results.length === 0) return null
+  const list = results.map(r => `${r.position}. ${r.name} (${r.url || ''})`).join('\n')
+  const prompt = `בדוק את רשימת התוצאות הזו לשאילתה "${query}" בגוגל ישראל. סדר מחדש לפי דירוג גוגל האמיתי שאתה מכיר. החזר JSON בלבד: [{"rank": 1, "title": "", "domain": "", "is_sponsored": false}]\n\nהרשימה:\n${list}`
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+    const data = await res.json()
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const s = clean.indexOf('['); const e = clean.lastIndexOf(']')
+    if (s === -1 || e <= s) return null
+    const arr: any[] = JSON.parse(clean.slice(s, e + 1))
+    if (!Array.isArray(arr) || arr.length === 0) return null
+    // Merge Gemini ordering back into existing results
+    const byName = new Map(results.map(r => [(r.name || '').toLowerCase(), r]))
+    const byDomain = new Map(results.map(r => [(r.url || '').toLowerCase(), r]))
+    const reordered: any[] = []
+    for (const g of arr) {
+      const key = (g.title || g.domain || '').toLowerCase()
+      const existing = byName.get(key) || byDomain.get(key) || results.find(r =>
+        (r.name || '').toLowerCase().includes(key) || key.includes((r.name || '').toLowerCase().slice(0, 5))
+      )
+      if (existing) {
+        reordered.push({ ...existing, position: g.rank ?? reordered.length + 1, is_sponsored: g.is_sponsored ?? existing.is_sponsored })
+      }
+    }
+    // Append any results Gemini didn't mention, at the end
+    const reorderedIds = new Set(reordered.map(r => r.url))
+    results.filter(r => !reorderedIds.has(r.url)).forEach((r, i) => {
+      reordered.push({ ...r, position: reordered.length + i + 1 })
+    })
+    return reordered.length > 0 ? reordered : null
+  } catch { return null }
+}
+
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
@@ -209,6 +257,10 @@ export async function POST(request: Request) {
     const variantResults = await Promise.all(
       queryList.map(q => runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal))
     )
+
+    // Gemini validation: reorder primary query results
+    const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0])
+    if (primaryReordered) variantResults[0].results = primaryReordered
 
     const queryVariants = queryList.map((q, i) => ({
       query: q,
