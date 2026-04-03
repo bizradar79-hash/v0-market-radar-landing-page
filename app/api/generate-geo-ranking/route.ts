@@ -162,12 +162,27 @@ async function runGeminiEngine(
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       }
     )
+    if (!res.ok) {
+      console.error('[GEO gemini] HTTP error:', res.status, await res.text())
+      return { position: null, topResults: [], appeared: false, results: [] }
+    }
     const data = await res.json()
+    if (data.error) {
+      console.error('[GEO gemini] API error:', JSON.stringify(data.error))
+      return { position: null, topResults: [], appeared: false, results: [] }
+    }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    if (!text) {
+      console.error('[GEO gemini] empty response, full data:', JSON.stringify(data).slice(0, 500))
+      return { position: null, topResults: [], appeared: false, results: [] }
+    }
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const s = clean.indexOf('[')
     const e = clean.lastIndexOf(']')
-    if (s === -1 || e <= s) return { position: null, topResults: [], appeared: false, results: [] }
+    if (s === -1 || e <= s) {
+      console.error('[GEO gemini] no JSON array in response:', clean.slice(0, 200))
+      return { position: null, topResults: [], appeared: false, results: [] }
+    }
     const arr: any[] = JSON.parse(clean.slice(s, e + 1))
     const rawResults = arr.map((item: any, idx: number) => ({
       position: item.rank ?? idx + 1,
@@ -176,7 +191,10 @@ async function runGeminiEngine(
       title: item.name || '',
     }))
     return processResults(rawResults, companyName, companyDomain, competitorNames)
-  } catch { return { position: null, topResults: [], appeared: false, results: [] } }
+  } catch (err) {
+    console.error('[GEO gemini] exception:', err)
+    return { position: null, topResults: [], appeared: false, results: [] }
+  }
 }
 
 // ── Grok engine runner ─────────────────────────────────────────────────────
@@ -205,7 +223,10 @@ async function runGeoQuestion(
   })
 
   const data = await response.json()
-  if (!response.ok || !data.output) return { position: null, topResults: [], appeared: false, results: [] }
+  if (!response.ok || !data.output) {
+    console.error(`[GEO ${engine}] Grok error: status=${response.status}`, JSON.stringify(data).slice(0, 300))
+    return { position: null, topResults: [], appeared: false, results: [] }
+  }
 
   const text = data.output
     .filter((item: any) => item.type === 'message')
@@ -217,10 +238,16 @@ async function runGeoQuestion(
   const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
   const s = clean.indexOf('{')
   const e = clean.lastIndexOf('}')
-  if (s === -1 || e <= s) return { position: null, topResults: [], appeared: false, results: [] }
+  if (s === -1 || e <= s) {
+    console.error(`[GEO ${engine}] no JSON in Grok response:`, clean.slice(0, 200))
+    return { position: null, topResults: [], appeared: false, results: [] }
+  }
 
   let parsed: any = {}
-  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return { position: null, topResults: [], appeared: false, results: [] } }
+  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch (err) {
+    console.error(`[GEO ${engine}] JSON parse error:`, err)
+    return { position: null, topResults: [], appeared: false, results: [] }
+  }
 
   const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : [])
   return processResults(rawResults, companyName, companyDomain, competitorNames)
@@ -270,9 +297,10 @@ export async function POST(request: Request) {
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
 
-    // Build rich profile summary for query generation
+    // Build query from structured profile data ONLY — never include company name or free-text overview
+    // to avoid the model returning brand-centric queries like "סדנאות בסלון"
+    const coreActivityDesc = businessProfile?.coreActivity || industry
     const profileParts = [
-      overview,
       industry ? `Industry: ${industry}` : '',
       city && isLocal ? `Location: ${city}` : '',
       businessProfile?.coreActivity ? `Core activity: ${businessProfile.coreActivity}` : '',
@@ -285,7 +313,6 @@ export async function POST(request: Request) {
     const generatedQuery = await buildSearchQuery(profileParts)
 
     // Fallback if query generation fails
-    const coreActivityDesc = businessProfile?.coreActivity || industry
     const fallbackQuery = isLocal
       ? `${coreActivityDesc} ${scopeLocation}`
       : `${coreActivityDesc} ישראל`
