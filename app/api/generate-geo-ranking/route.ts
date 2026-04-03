@@ -46,7 +46,6 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 50 },
         }),
       }
     )
@@ -54,8 +53,13 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
     const data = await res.json()
     const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim()
       .replace(/^["'״]|["'״]$/g, '')
+      .split('\n')[0] // take first line only in case of multi-line response
+      .trim()
     console.log('[GEO buildQuery] generated:', text)
-    return text.length > 3 ? text : null
+    // Validate: must be a short query (3–50 chars), not a full description
+    if (text.length >= 3 && text.length <= 50) return text
+    console.warn('[GEO buildQuery] response too long or too short, using fallback:', text.slice(0, 80))
+    return null
   } catch (err) { console.error('[GEO buildQuery] error:', err); return null }
 }
 
