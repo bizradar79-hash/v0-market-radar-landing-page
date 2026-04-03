@@ -7,8 +7,9 @@ export async function getPlaceDetails(businessName: string, website: string, pho
 
     // 1. Phone lookup via findplacefromtext (most accurate)
     if (phone) {
+      const intlPhone = phone.replace(/\s+/g, '').replace(/-/g, '').replace(/^0/, '+972')
       const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(phone)}&inputtype=phonenumber&fields=place_id,name,rating,user_ratings_total&key=${apiKey}`
+        `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(intlPhone)}&inputtype=phonenumber&fields=place_id,name,rating,user_ratings_total&key=${apiKey}`
       )
       const data = await res.json()
       if (data.status && data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
