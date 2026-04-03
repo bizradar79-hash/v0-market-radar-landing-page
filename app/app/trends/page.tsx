@@ -465,6 +465,13 @@ export default function TrendsPage() {
                               {getMomentumBadge(t.trend)}
                             </div>
                             <p className="text-xs text-muted-foreground">{t.reason}</p>
+                            {i === 0 && kwData.related_queries && kwData.related_queries.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {kwData.related_queries.map((q, qi) => (
+                                  <span key={qi} className="text-xs bg-muted text-muted-foreground rounded px-2 py-0.5 border">{q}</span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           {t.trend_data?.length >= 2 && (
                             <button

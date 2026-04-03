@@ -33,12 +33,32 @@ CRITICAL: החזר נתונים רק על הדומיין "${domain}" בדיוק 
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       }
     )
+    if (!res.ok) {
+      console.error('[reviews] Gemini HTTP error:', res.status, await res.text())
+      return null
+    }
     const data = await res.json()
+    if (data.error) {
+      console.error('[reviews] Gemini API error:', JSON.stringify(data.error))
+      return null
+    }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    console.log('[reviews] raw Gemini text:', text.slice(0, 600))
+    if (!text) {
+      console.error('[reviews] empty Gemini response, data:', JSON.stringify(data).slice(0, 400))
+      return null
+    }
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const s = clean.indexOf('{'); const e = clean.lastIndexOf('}')
-    if (s === -1 || e <= s) return null
-    const parsed = JSON.parse(clean.slice(s, e + 1))
+    if (s === -1 || e <= s) {
+      console.error('[reviews] no JSON object found in:', clean.slice(0, 300))
+      return null
+    }
+    let parsed: any
+    try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch (parseErr) {
+      console.error('[reviews] JSON parse error:', parseErr, '| raw:', clean.slice(s, e + 1).slice(0, 300))
+      return null
+    }
     // Extract google_maps_url and google_rating from sources for backward compat
     const googleSource = Array.isArray(parsed.sources)
       ? parsed.sources.find((src: any) => (src.name || '').toLowerCase().includes('google'))

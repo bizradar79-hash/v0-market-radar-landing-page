@@ -29,35 +29,28 @@ type Engine = typeof ENGINES[number]
 
 // ── Query generation ───────────────────────────────────────────────────────
 
-async function buildSearchQuery(profileSummary: string): Promise<string | null> {
-  if (!profileSummary.trim()) return null
-  const prompt = `Based on this business: ${profileSummary}
-
-What is the single most common search query a customer would type when looking for this type of business in Israel?
-Return only the query, nothing else. Hebrew or English depending on the business. No explanation. No punctuation at the end.`
-
+async function buildSearchQuery(coreActivity: string, industry: string): Promise<string | null> {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return null
+  const desc = (coreActivity || industry).trim()
+  if (!desc) return null
+  const prompt = `עסק זה: ${desc}. מה השאילתה הכי נפוצה שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה? החזר רק את השאילתה, ללא הסברים.`
   try {
-    const res = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        // No web_search — pure reasoning
-      }),
-    })
-    if (!res.ok) return null
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+    if (!res.ok) { console.error('[GEO buildQuery] Gemini HTTP:', res.status); return null }
     const data = await res.json()
-    const text = (data.output || [])
-      .filter((i: any) => i.type === 'message')
-      .flatMap((i: any) => i.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('')
-      .trim()
-      .replace(/^["']|["']$/g, '') // strip surrounding quotes if any
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim()
+      .replace(/^["'״]|["'״]$/g, '')
+    console.log('[GEO buildQuery] generated:', text)
     return text.length > 3 ? text : null
-  } catch { return null }
+  } catch (err) { console.error('[GEO buildQuery] error:', err); return null }
 }
 
 // ── Engine prompts ─────────────────────────────────────────────────────────
@@ -183,7 +176,29 @@ async function runGeminiEngine(
       console.error('[GEO gemini] no JSON array in response:', clean.slice(0, 200))
       return { position: null, topResults: [], appeared: false, results: [] }
     }
-    const arr: any[] = JSON.parse(clean.slice(s, e + 1))
+    let arr: any[] = JSON.parse(clean.slice(s, e + 1))
+    // If empty — retry once with simpler prompt
+    if (!Array.isArray(arr) || arr.length === 0) {
+      console.log('[GEO gemini] empty array, retrying with simple prompt')
+      const retryPrompt = `רשום 10 עסקים ישראלים בתחום ${industryDesc}. JSON בלבד: [{"rank": 1, "name": "", "domain": ""}]`
+      const retryRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: retryPrompt }] }] }),
+        }
+      )
+      if (retryRes.ok) {
+        const retryData = await retryRes.json()
+        const retryText = retryData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        const rc = retryText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+        const rs = rc.indexOf('['); const re = rc.lastIndexOf(']')
+        if (rs !== -1 && re > rs) {
+          try { arr = JSON.parse(rc.slice(rs, re + 1)) } catch { /* keep empty */ }
+        }
+      }
+    }
     const rawResults = arr.map((item: any, idx: number) => ({
       position: item.rank ?? idx + 1,
       name: item.name || '',
@@ -309,8 +324,8 @@ export async function POST(request: Request) {
       keywords.length ? `Keywords: ${keywords.slice(0, 5).join(', ')}` : '',
     ].filter(Boolean).join('\n')
 
-    // Generate query dynamically from profile (Grok reasoning, no web_search)
-    const generatedQuery = await buildSearchQuery(profileParts)
+    // Generate query via Gemini from structured fields only (no brand name)
+    const generatedQuery = await buildSearchQuery(coreActivityDesc, industry)
 
     // Fallback if query generation fails
     const fallbackQuery = isLocal
