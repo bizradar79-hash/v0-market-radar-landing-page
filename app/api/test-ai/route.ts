@@ -38,7 +38,7 @@ export async function GET() {
       results.gemini = { ok: false, error: 'GOOGLE_GENERATIVE_AI_API_KEY not set' }
     } else {
       const genAI = new GoogleGenerativeAI(key)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
       const result = await model.generateContent('say "ok"')
       results.gemini = { ok: true, text: result.response.text(), tokens: result.response.usageMetadata?.totalTokenCount }
     }

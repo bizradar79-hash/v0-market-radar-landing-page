@@ -66,7 +66,7 @@ async function fetchRelatedQueriesFromGemini(keyword: string): Promise<{
   const prompt = `בהתבסס על ידע שלך על גוגל טרנדס, מה הטרנד של מילת המפתח "${keyword}" בישראל בשבועות האחרונים? עולה, יורד או יציב? ומה 5 ביטויי החיפוש הקשורים הכי פופולריים לה כרגע? החזר JSON: {"trend": "rising", "related_queries": ["", "", "", "", ""], "confidence": 80}`
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

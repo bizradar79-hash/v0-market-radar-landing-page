@@ -13,7 +13,7 @@ async function fetchDescriptionWithGemini(name: string): Promise<string | null> 
   const prompt = `תאר בקצרה (משפט אחד) מה העסק "${name}" מציע ללקוחותיו בישראל.`
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

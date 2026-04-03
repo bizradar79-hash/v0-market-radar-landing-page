@@ -42,7 +42,7 @@ async function callGemini(systemPrompt: string, userMessage: string): Promise<an
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error('GEMINI_KEY_NOT_SET')
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY)
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
   })
   const result = await model.generateContent(userMessage)

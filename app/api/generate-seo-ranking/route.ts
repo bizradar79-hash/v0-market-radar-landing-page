@@ -160,7 +160,7 @@ async function reorderWithGemini(
   const prompt = `בדוק את רשימת התוצאות הזו לשאילתה "${query}" בגוגל ישראל. סדר מחדש לפי דירוג גוגל האמיתי שאתה מכיר. החזר JSON בלבד: [{"rank": 1, "title": "", "domain": "", "is_sponsored": false}]\n\nהרשימה:\n${list}`
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
