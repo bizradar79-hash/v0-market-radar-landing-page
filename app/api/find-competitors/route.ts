@@ -280,12 +280,13 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     const { data: manualComps } = await supabase
       .from('competitors')
-      .select('website')
+      .select('website, name')
       .eq('company_id', userId)
       .eq('source', 'manual')
     const manualDomains = new Set(
       (manualComps || []).map((c: any) => extractDomain(c.website || '')).filter(Boolean)
     )
+    const manualNames = (manualComps || []).map((c: any) => (c.name || '').toLowerCase().trim())
     const manualCount = (manualComps || []).length
     steps.db = { manualKept: manualDomains.size }
 
@@ -299,7 +300,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     const deduped = mapped
       .filter((c: any) => {
         const domain = extractDomain(c.website || '')
-        return !domain || !manualDomains.has(domain)
+        const name = (c.name || '').toLowerCase().trim()
+        if (domain && manualDomains.has(domain)) return false
+        if (name && manualNames.includes(name)) return false
+        return true
       })
       .slice(0, Math.max(0, 10 - manualCount))
 

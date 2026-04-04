@@ -123,6 +123,12 @@ async function placeDetails(
   }
 }
 
+function sanitizeCount(count: number): number {
+  // Reject obviously wrong counts (API parse error / hallucination)
+  if (count > 50000) return 0
+  return count
+}
+
 function buildResult(
   placeId: string,
   rating: number,
@@ -131,7 +137,7 @@ function buildResult(
   return {
     place_id: placeId,
     google_rating: rating,
-    google_review_count: userRatingsTotal,
+    google_review_count: sanitizeCount(userRatingsTotal),
     google_maps_url: `https://www.google.com/maps/place/?q=place_id:${placeId}`,
   }
 }
@@ -203,7 +209,7 @@ async function getRatingViaGeminiSearch(
     return {
       place_id: `gemini_${domain}`,
       google_rating: rating,
-      google_review_count: count ?? 0,
+      google_review_count: count != null ? sanitizeCount(count) : 0,
       google_maps_url: mapsUrl ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(businessName + ' ' + domain)}`,
     }
   } catch (err) {

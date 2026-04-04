@@ -36,7 +36,7 @@ async function fetchRatingWithGemini(competitorName: string): Promise<{
     return {
       // Reject implausibly low ratings (< 2.0 means data error, not a real score)
       google_rating: rating !== null && rating >= 2.0 ? rating : null,
-      google_review_count: typeof parsed.google_review_count === 'number' ? parsed.google_review_count : null,
+      google_review_count: typeof parsed.google_review_count === 'number' && parsed.google_review_count <= 50000 ? parsed.google_review_count : null,
     }
   } catch { return null }
 }

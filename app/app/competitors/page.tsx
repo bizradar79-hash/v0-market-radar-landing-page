@@ -305,6 +305,10 @@ export default function CompetitorsPage() {
       setShowAddDialog(false)
       setAddName(""); setAddWebsite(""); setAddServices(""); setAddThreatScore("")
       toast({ title: "המתחרה נוסף" })
+      // Fetch Google rating in the background for the newly added manual competitor
+      if (data.website) {
+        fetchGoogleRating(data)
+      }
     } else {
       toast({ title: "שגיאה בהוספה", description: error?.message, variant: "destructive" })
     }
