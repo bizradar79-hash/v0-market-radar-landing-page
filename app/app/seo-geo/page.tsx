@@ -66,6 +66,12 @@ interface EngineResults {
 
 interface GEORanking {
   query: string
+  queries?: string[]
+  queryResults?: Record<string, {
+    chatgpt: EngineResults
+    gemini: EngineResults
+    grok: EngineResults
+  }>
   results: RankingResult[]
   queryVariants?: QueryVariant[]
   engines?: {
@@ -98,6 +104,7 @@ export default function SeoGeoPage() {
 
   const [seoFilter, setSeoFilter] = useState<SeoFilter>('all')
   const [selectedGeoEngine, setSelectedGeoEngine] = useState<'chatgpt' | 'gemini' | 'grok'>('chatgpt')
+  const [selectedGeoQuery, setSelectedGeoQuery] = useState<string>('')
 
   const supabase = createClient()
 
@@ -410,12 +417,45 @@ export default function SeoGeoPage() {
             </div>
           ) : geoRanking ? (
             <div className="space-y-4">
-              {geoRanking.query && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Search className="h-3 w-3 shrink-0" />שאילתה: {geoRanking.query}</p>
-              )}
-              {geoRanking.engines ? (
+              {(() => {
+                // Compute active query and engines (supports both old and new data formats)
+                const activeQuery = selectedGeoQuery || geoRanking.queries?.[0] || geoRanking.query || ''
+                const activeEngines = (activeQuery && geoRanking.queryResults?.[activeQuery])
+                  ? geoRanking.queryResults[activeQuery]
+                  : geoRanking.engines
+                return (
+                  <>
+                    {/* Query selector — only shown when multi-query data is available */}
+                    {(geoRanking.queries?.length ?? 0) > 1 ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">שאילתה:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {geoRanking.queries!.map(q => (
+                            <button
+                              key={q}
+                              onClick={() => setSelectedGeoQuery(q)}
+                              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                activeQuery === q
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'border-border text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : geoRanking.query ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Search className="h-3 w-3 shrink-0" />שאילתה: {geoRanking.query}
+                      </p>
+                    ) : null}
+                  </>
+                )
+              })()}
+              {geoRanking.engines || geoRanking.queryResults ? (
                 <>
-                  {/* Engine tabs — 4 engines, no Perplexity */}
+                  {/* Engine tabs */}
                   <div className="flex gap-0 border-b border-border overflow-x-auto">
                     {([
                       { id: 'chatgpt', label: 'ChatGPT' },
@@ -452,7 +492,11 @@ export default function SeoGeoPage() {
 
                   {/* Selected engine results */}
                   {(() => {
-                    const eng = geoRanking.engines![selectedGeoEngine]
+                    const activeQuery = selectedGeoQuery || geoRanking.queries?.[0] || geoRanking.query || ''
+                    const activeEngines = (activeQuery && geoRanking.queryResults?.[activeQuery])
+                      ? geoRanking.queryResults[activeQuery]
+                      : geoRanking.engines
+                    const eng = activeEngines?.[selectedGeoEngine]
                     if (!eng) return <p className="text-sm text-muted-foreground py-4 text-center">אין נתונים למנוע זה</p>
                     return (
                       <div className="space-y-2">
@@ -466,13 +510,14 @@ export default function SeoGeoPage() {
                           {eng.results.length > 0 ? eng.results.map((r, ri) => {
                             const own = isCompanyResult(r)
                             return (
-                            <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
-                              <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
-                              <span className={`flex-1 font-medium ${own ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
-                              {own && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
-                              {!own && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
-                            </div>
-                          )}) : (
+                              <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
+                                <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
+                                <span className={`flex-1 font-medium ${own ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                                {own && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
+                                {!own && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
+                              </div>
+                            )
+                          }) : (
                             <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
                           )}
                         </div>

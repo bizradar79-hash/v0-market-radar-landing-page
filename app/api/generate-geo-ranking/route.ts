@@ -4,7 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
@@ -187,7 +187,7 @@ async function runGeminiEngine(
     // If empty — retry once with simpler prompt
     if (!Array.isArray(arr) || arr.length === 0) {
       console.log('[GEO gemini] empty array, retrying with simple prompt')
-      const retryPrompt = `רשום 10 עסקים ישראלים בתחום ${industryDesc}. JSON בלבד: [{"rank": 1, "name": "", "domain": ""}]`
+      const retryPrompt = `רשום 10 חברות ישראליות שמוכרות ${query}. JSON: [{"rank": 1, "name": "", "domain": ""}]`
       const retryRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
         {
@@ -283,9 +283,12 @@ export async function POST(request: Request) {
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
+
+    // Fetch both geo_ranking (cache check) and seo_ranking (query reuse) in one query
+    const { data: company } = await ctx.supabase
+      .from('companies').select('geo_ranking, seo_ranking').eq('id', ctx.user.id).single()
+
     if (!force) {
-      const { data: company } = await ctx.supabase
-        .from('companies').select('geo_ranking').eq('id', ctx.user.id).single()
       const cached = company?.geo_ranking as { fetchedAt?: string } | null
       if (cached?.fetchedAt) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
@@ -302,7 +305,6 @@ export async function POST(request: Request) {
     const industry = ctx.company?.industry || ''
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoArea: string[] = ctx.company?.geographic_area || []
-    const keywords: string[] = ctx.company?.keywords || []
     const scopes: string[] = Array.isArray(ctx.company?.geographic_scope)
       ? ctx.company.geographic_scope
       : [ctx.company?.geographic_scope || 'national']
@@ -318,76 +320,95 @@ export async function POST(request: Request) {
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
-
-    // Build query from structured profile data ONLY — never include company name or free-text overview
-    // to avoid the model returning brand-centric queries like "סדנאות בסלון"
     const coreActivityDesc = businessProfile?.coreActivity || industry
-    const profileParts = [
-      industry ? `Industry: ${industry}` : '',
-      city && isLocal ? `Location: ${city}` : '',
-      businessProfile?.coreActivity ? `Core activity: ${businessProfile.coreActivity}` : '',
-      businessProfile?.products?.length ? `Products/services: ${businessProfile.products.slice(0, 3).map((p: any) => p.name).join(', ')}` : '',
-      businessProfile?.targetAudiences?.length ? `Target audience: ${businessProfile.targetAudiences.slice(0, 3).join(', ')}` : '',
-      keywords.length ? `Keywords: ${keywords.slice(0, 5).join(', ')}` : '',
-    ].filter(Boolean).join('\n')
+    const geminiIndustry = coreActivityDesc
 
-    // Generate query via Gemini — use specific product name when available for precision
-    const specificDesc = (businessProfile?.products as any[])?.[0]?.name || coreActivityDesc
-    const generatedQuery = await buildSearchQuery(specificDesc, industry)
+    // ── Build query list ────────────────────────────────────────────────────
+    // 1. Reuse SEO queryVariants if fresh enough (avoids duplicate API calls)
+    let queryList: string[] = []
+    const seoVariants = (company?.seo_ranking as any)?.queryVariants
+    if (Array.isArray(seoVariants) && seoVariants.length >= 2) {
+      queryList = seoVariants.map((v: any) => v.query).filter(Boolean).slice(0, 5)
+      console.log('[GEO] reusing SEO queries:', queryList)
+    }
 
-    // Fallback if query generation fails
-    const fallbackQuery = isLocal
-      ? `${coreActivityDesc} ${scopeLocation}`
-      : `${coreActivityDesc} ישראל`
-    const primaryQuery = generatedQuery || fallbackQuery
+    // 2. Generate fresh 5 queries via Gemini if no SEO queries available
+    if (queryList.length === 0) {
+      const geminiKey = process.env.GEMINI_API_KEY
+      if (geminiKey && businessProfile) {
+        try {
+          const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
+          const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
+          const qRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: qPrompt }] }] }),
+            }
+          )
+          if (qRes.ok) {
+            const qData = await qRes.json()
+            const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+            const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+            const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
+            if (qs !== -1 && qe > qs) {
+              const arr = JSON.parse(qClean.slice(qs, qe + 1))
+              if (Array.isArray(arr)) {
+                queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, 5)
+              }
+            }
+          }
+        } catch { /* fallback below */ }
+      }
+    }
 
+    // 3. Fallback: single query
+    if (queryList.length === 0) {
+      const specificDesc = (businessProfile?.products as any[])?.[0]?.name || coreActivityDesc
+      const generatedQuery = await buildSearchQuery(specificDesc, industry)
+      const fallbackQuery = isLocal ? `${coreActivityDesc} ${scopeLocation}` : `${coreActivityDesc} ישראל`
+      queryList = [generatedQuery || fallbackQuery]
+    }
+
+    const primaryQuery = queryList[0]
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // Run all 4 engines in parallel (pass industry for Gemini)
-    const geminiIndustry = businessProfile?.coreActivity || industry
-    const engineResults = await Promise.all(
-      ENGINES.map(engine => runGeoQuestion(primaryQuery, companyName, website, competitorNames, engine, geminiIndustry))
+    // ── Run all queries × all 3 engines in parallel ─────────────────────────
+    const queryVariantResults = await Promise.all(
+      queryList.map(async (q) => {
+        const [chatgptRes, geminiRes, grokRes] = await Promise.all([
+          runGeoQuestion(q, companyName, website, competitorNames, 'chatgpt', geminiIndustry),
+          runGeoQuestion(q, companyName, website, competitorNames, 'gemini', geminiIndustry),
+          runGeoQuestion(q, companyName, website, competitorNames, 'grok'),
+        ])
+        return { query: q, chatgpt: chatgptRes, gemini: geminiRes, grok: grokRes }
+      })
     )
 
-    const engines: Record<string, { results: any[]; appeared: boolean; position: number | null; topResults: string[] }> = {}
-    ENGINES.forEach((engine, i) => {
-      engines[engine] = {
-        results: engineResults[i].results,
-        appeared: engineResults[i].appeared,
-        position: engineResults[i].position,
-        topResults: engineResults[i].topResults,
-      }
-    })
-
-    // Overlap detection — retry if >60% overlap between engine pairs
-    const enginePairs: [Engine, Engine][] = [
-      ['chatgpt', 'gemini'],
-      ['chatgpt', 'grok'],
-      ['gemini', 'grok'],
-    ]
-    for (const [refEngine, targetEngine] of enginePairs) {
-      const refNames = new Set((engines[refEngine]?.results || []).map((r: any) => (r.name || '').toLowerCase()))
-      const targetNamesList = (engines[targetEngine]?.results || []).map((r: any) => (r.name || '').toLowerCase())
-      if (refNames.size === 0 || targetNamesList.length === 0) continue
-      const overlap = targetNamesList.filter(n => refNames.has(n)).length / targetNamesList.length
-      if (overlap > 0.6) {
-        const overlappingNames = (engines[targetEngine]?.results || [])
-          .filter((r: any) => refNames.has((r.name || '').toLowerCase()))
-          .map((r: any) => r.name || '').slice(0, 5).join(', ')
-        const retryResult = await runGeoQuestion(
-          `${primaryQuery} — exclude these: ${overlappingNames}`,
-          companyName, website, competitorNames, targetEngine
-        )
-        engines[targetEngine] = {
-          results: retryResult.results,
-          appeared: retryResult.appeared,
-          position: retryResult.position,
-          topResults: retryResult.topResults,
-        }
-        break
-      }
+    // Build queryResults map: query → { chatgpt, gemini, grok }
+    const queryResults: Record<string, any> = {}
+    for (const qr of queryVariantResults) {
+      queryResults[qr.query] = { chatgpt: qr.chatgpt, gemini: qr.gemini, grok: qr.grok }
     }
+
+    // Primary engines (first query) for backward compat
+    const primary = queryVariantResults[0]
+    const engines = {
+      chatgpt: primary.chatgpt,
+      gemini: primary.gemini,
+      grok: primary.grok,
+    }
+
+    console.log('[GEO] queries:', queryList.length, JSON.stringify(
+      queryVariantResults.map(qr => ({
+        query: qr.query.slice(0, 30),
+        chatgpt: qr.chatgpt.results.length,
+        gemini: qr.gemini.results.length,
+        grok: qr.grok.results.length,
+      }))
+    ))
 
     // Recommendations via Grok (no web_search)
     const recsPrompt = `Write 3 specific recommendations for how ${companyName} (${industry}) can improve its presence in AI engines like ChatGPT, Grok, Gemini and Perplexity when people search for "${primaryQuery}". Return JSON only: {"recommendations": ["", "", ""]}. No markdown.`
@@ -410,21 +431,14 @@ export async function POST(request: Request) {
       }
     } catch { /* fallback to empty */ }
 
-    console.log('[GEO engines]', JSON.stringify({
-      chatgpt: { count: engines.chatgpt?.results?.length, appeared: engines.chatgpt?.appeared },
-      gemini: { count: engines.gemini?.results?.length, appeared: engines.gemini?.appeared },
-      grok: { count: engines.grok?.results?.length, appeared: engines.grok?.appeared },
-      query: primaryQuery,
-    }))
-
-    const primary = engineResults[0]
-
     const result = {
       query: primaryQuery,
-      results: primary.results,
-      userMentioned: primary.appeared,
-      userPosition: primary.position,
-      engines,
+      queries: queryList,
+      queryResults,
+      results: primary.chatgpt.results,  // backward compat
+      userMentioned: primary.chatgpt.appeared,
+      userPosition: primary.chatgpt.position,
+      engines,  // backward compat: primary query engines
       recommendations,
       isLocal,
       scope,

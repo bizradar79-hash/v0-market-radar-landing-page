@@ -194,6 +194,9 @@ export default function CompetitorsPage() {
       } else {
         setCompetitors(sorted)
       }
+      // Auto-fetch ratings for manual competitors with missing google_rating (background, fire-and-forget)
+      const needsRating = sorted.filter(c => c.source === 'manual' && c.google_rating == null && c.website)
+      needsRating.forEach(c => fetchGoogleRating(c))
     }
     setLoading(false)
   }

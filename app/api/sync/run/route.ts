@@ -124,6 +124,12 @@ export async function POST(request: Request) {
       addLog('competitors', 'skipped', `already have ${autoCount} auto competitors`)
     }
 
+    // ── 1b. Manual competitor ratings — fill missing google_rating for manual entries ─
+    {
+      const r = await callModule(origin, '/api/patch-manual-ratings', companyId)
+      addLog('manual_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
+    }
+
     // ── 2. SEO ranking ────────────────────────────────────────────────────────
     {
       const r = await callModule(origin, '/api/generate-seo-ranking', companyId)
