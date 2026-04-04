@@ -34,10 +34,7 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
   if (!geminiKey) return null
   const desc = (coreActivity || industry).trim()
   if (!desc) return null
-  const prompt = `עסק: ${desc}
-החזר רק 3-5 מילים — שאילתת חיפוש קצרה שלקוח ישראלי יחפש בגוגל.
-דוגמה: 'סדנאות יצירה ישראל' או 'פלטפורמת אירועים תל אביב'
-ללא הסברים. רק השאילתה.`
+  const prompt = `העסק מייצר/מוכר: ${desc}. מה השאילתה הכי ספציפית שלקוח ישראלי יחפש כדי למצוא עסק כזה? 3-5 מילים בלבד. ללא הסברים. רק השאילתה.`
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
@@ -334,8 +331,9 @@ export async function POST(request: Request) {
       keywords.length ? `Keywords: ${keywords.slice(0, 5).join(', ')}` : '',
     ].filter(Boolean).join('\n')
 
-    // Generate query via Gemini from structured fields only (no brand name)
-    const generatedQuery = await buildSearchQuery(coreActivityDesc, industry)
+    // Generate query via Gemini — use specific product name when available for precision
+    const specificDesc = (businessProfile?.products as any[])?.[0]?.name || coreActivityDesc
+    const generatedQuery = await buildSearchQuery(specificDesc, industry)
 
     // Fallback if query generation fails
     const fallbackQuery = isLocal

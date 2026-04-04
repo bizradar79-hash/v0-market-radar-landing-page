@@ -134,10 +134,10 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     if (typeof r.is_sponsored !== 'boolean') r.is_sponsored = false
   })
 
-  const ownResult = results.find(r => r.isOwn)
-  // Fix 7: only "appeared" when the result is actually in the list AND has a valid position
-  const appeared = !!ownResult && ownResult.position != null
-  const position = appeared ? (ownResult!.position ?? null) : null
+  // Use findIndex so position reflects actual array order, not Grok-reported number
+  const ownIdx = results.findIndex(r => r.isOwn)
+  const appeared = ownIdx !== -1
+  const position = appeared ? ownIdx + 1 : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
 
   return {
@@ -239,16 +239,36 @@ export async function POST(request: Request) {
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
     const primaryQuery = businessAnalysis?.google_query || fallbackQuery
 
-    // Build query variations from business profile
-    const rawQueries: string[] = businessProfile ? [
-      primaryQuery,
-      businessProfile.coreActivity && city ? `${businessProfile.coreActivity} ${city}` : '',
-      ...businessProfile.primaryKeywords.slice(0, 2).map(kw => `${kw} ישראל`),
-      ...businessProfile.products.slice(0, 2).map(p => p.name).filter(Boolean),
-    ].filter(Boolean) : [primaryQuery]
-
-    // Deduplicate and cap at 5
-    const queryList = [...new Set(rawQueries)].slice(0, 5)
+    // Generate 5 distinct search queries via Gemini
+    let queryList: string[] = []
+    const geminiKey = process.env.GEMINI_API_KEY
+    if (geminiKey && businessProfile) {
+      try {
+        const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
+        const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
+        const qRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: qPrompt }] }] }),
+          }
+        )
+        if (qRes.ok) {
+          const qData = await qRes.json()
+          const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+          const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+          const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
+          if (qs !== -1 && qe > qs) {
+            const arr = JSON.parse(qClean.slice(qs, qe + 1))
+            if (Array.isArray(arr)) {
+              queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, 5)
+            }
+          }
+        }
+      } catch { /* fallback */ }
+    }
+    if (queryList.length === 0) queryList = [primaryQuery]
 
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorWebsites = savedCompetitors.map((c: any) => c.website).filter(Boolean).slice(0, 10)
