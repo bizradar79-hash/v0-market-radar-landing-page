@@ -2,45 +2,57 @@ export const dynamic = 'force-dynamic'
 
 const KEY = () => process.env.GOOGLE_PLACES_API_KEY ?? ''
 
-async function tsearch(q: string) {
-  // NO region param — was causing ZERO_RESULTS for Hebrew
+async function details(id: string) {
   const res = await fetch(
-    `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}&locationbias=rectangle:29.5,34.2|33.4,35.9&key=${KEY()}`
+    `https://maps.googleapis.com/maps/api/place/details/json?place_id=${id}&fields=name,rating,user_ratings_total,website,formatted_address,url&key=${KEY()}`
+  )
+  const d = await res.json()
+  return { status: d.status, result: d.result ?? null }
+}
+
+async function tsearch(q: string, bias?: string) {
+  const biasParam = bias ? `&locationbias=${bias}` : ''
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}${biasParam}&key=${KEY()}`
   )
   const data = await res.json()
-  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS')
-    return { status: data.status, error: data.error_message }
   return (data.results ?? []).slice(0, 5).map((r: any) => ({
     name: r.name, rating: r.rating, count: r.user_ratings_total, id: r.place_id,
   }))
 }
 
-async function details(id: string) {
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/place/details/json?place_id=${id}&fields=name,rating,user_ratings_total,website&key=${KEY()}`
-  )
-  const d = await res.json()
-  return d.result ?? null
-}
-
 export async function GET() {
   const out: Record<string, unknown> = { key_set: !!KEY() }
 
-  // 1. Broad search — top 5 results, validate each via details to get website
-  for (const q of ['basalon', 'basalon ישראל', 'basalon.co.il', 'בסלון', 'בסלון אירועים']) {
-    out[`q_${q}`] = await tsearch(q).catch(e => `error: ${e.message}`)
+  // Get full details for the candidate we found (rating:5, count:1)
+  out.candidate_details = await details('ChIJFW6RO16dAhURCM70St7nFnw')
+
+  // Search without any bias — wider net
+  out.basalon_no_bias = await tsearch('basalon')
+  out.basalon_israel_no_bias = await tsearch('basalon israel')
+  out.basalon_events = await tsearch('basalon events platform')
+  out.basalon_sadnaot = await tsearch('basalon סדנאות')
+
+  // Places v1 — search variations
+  const v1 = async (q: string) => {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': KEY(),
+        'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.id',
+      },
+      body: JSON.stringify({ textQuery: q, languageCode: 'he', regionCode: 'IL' }),
+    })
+    const d = await res.json()
+    return d.places?.slice(0, 5).map((p: any) => ({
+      name: p.displayName?.text, rating: p.rating, count: p.userRatingCount, website: p.websiteUri, id: p.id,
+    })) ?? d
   }
 
-  // 2. Take all place_ids from query "basalon" and get their websites
-  const basalonSearch = await tsearch('basalon')
-  if (Array.isArray(basalonSearch)) {
-    out.basalon_with_websites = await Promise.all(
-      basalonSearch.map(async (r: any) => {
-        const d = await details(r.id)
-        return { name: r.name, rating: r.rating, website: d?.website ?? null, id: r.id }
-      })
-    )
-  }
+  out.v1_basalon = await v1('basalon')
+  out.v1_basalon_israel = await v1('basalon ישראל')
+  out.v1_basalon_events = await v1('basalon events')
 
   return Response.json(out)
 }
