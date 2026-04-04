@@ -4,156 +4,186 @@ export const maxDuration = 60
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
 
-interface ReportSection {
-  title: string
-  content: string[]
-  meta?: string
-}
-
-interface WeeklyReport {
-  generated_at: string
-  company_name: string
-  sections: ReportSection[]
-}
+const CACHE_MS = 7 * 24 * 60 * 60 * 1000
 
 export async function POST(request: Request) {
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const force = new URL(request.url).searchParams.get('force') === 'true'
+    const userId = ctx.user.id
+    const companyName = ctx.company?.name || ''
+    const industry = ctx.company?.industry || ''
 
-    const [
-      { data: competitors },
-      { data: tenders },
-      { data: news },
-      { data: company },
-    ] = await Promise.all([
-      ctx.supabase.from('competitors').select('name, threat_score, services, positioning').order('threat_score', { ascending: false }).limit(10),
-      ctx.supabase.from('tenders').select('title, organization, deadline, description').order('deadline', { ascending: true }).limit(5),
-      ctx.supabase.from('news').select('title, source, summary, category, published_at').gte('published_at', weekAgo).order('published_at', { ascending: false }).limit(8),
-      ctx.supabase.from('companies').select('name, industry, business_overview, seo_ranking, geo_ranking, industry_trends, competitor_trends, weekly_actions, niche_opportunities').eq('id', ctx.user.id).single(),
-    ])
-
-    const sections: ReportSection[] = []
-
-    // 1. Business Overview
-    if (company?.business_overview) {
-      sections.push({
-        title: "סקירת עסק",
-        content: [company.business_overview],
-        meta: company.industry || '',
-      })
+    // Cache check
+    if (!force) {
+      const { data: companyRow } = await ctx.supabase
+        .from('companies').select('last_report').eq('id', userId).single()
+      const cached = companyRow?.last_report as { generated_at?: string } | null
+      if (cached?.generated_at) {
+        const age = Date.now() - new Date(cached.generated_at).getTime()
+        if (age < CACHE_MS) {
+          return NextResponse.json({ success: true, report: cached, company_name: companyName, cached: true })
+        }
+      }
     }
 
-    // 2. Competitors
-    if (competitors && competitors.length > 0) {
-      const high = competitors.filter(c => (c.threat_score || 0) >= 70)
-      sections.push({
-        title: "עדכון מתחרים",
-        content: [
-          `נמצאו ${competitors.length} מתחרים סה"כ — ${high.length} בעלי ציון איום גבוה (≥70).`,
-          ...competitors.slice(0, 5).map(c => `• ${c.name} — ציון איום: ${c.threat_score || 'לא ידוע'}`),
-        ],
-        meta: `${competitors.length} מתחרים`,
-      })
+    // Fetch all JSONB data from companies row
+    const { data: companyData } = await ctx.supabase
+      .from('companies')
+      .select('business_profile, seo_ranking, geo_ranking, industry_trends, competitor_trends, niche_opportunities, weekly_actions')
+      .eq('id', userId)
+      .single()
+
+    // Fetch top 5 competitors by threat score
+    const { data: competitors } = await ctx.supabase
+      .from('competitors')
+      .select('name, website, services, threat_score, last_activity')
+      .eq('company_id', userId)
+      .order('threat_score', { ascending: false })
+      .limit(5)
+
+    // Fetch news from last 7 days
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const { data: news } = await ctx.supabase
+      .from('news')
+      .select('title, source, summary, category, sentiment, published_at')
+      .eq('company_id', userId)
+      .gte('published_at', sevenDaysAgo)
+      .order('published_at', { ascending: false })
+      .limit(8)
+
+    // Fetch active tenders
+    const today = new Date().toISOString().split('T')[0]
+    const { data: tenders } = await ctx.supabase
+      .from('tenders')
+      .select('title, organization, deadline, budget, relevance_score')
+      .eq('company_id', userId)
+      .gte('deadline', today)
+      .order('relevance_score', { ascending: false })
+      .limit(5)
+
+    // Fetch upcoming conferences
+    const { data: conferences } = await ctx.supabase
+      .from('conferences')
+      .select('name, date, location, url')
+      .eq('company_id', userId)
+      .gte('date', today)
+      .order('date', { ascending: true })
+      .limit(4)
+
+    // Fetch keyword trends
+    const { data: trends } = await ctx.supabase
+      .from('trends')
+      .select('name, score, direction, category')
+      .eq('company_id', userId)
+      .order('score', { ascending: false })
+      .limit(10)
+
+    const allData = {
+      company: { name: companyName, industry, website: ctx.company?.website, business_profile: companyData?.business_profile },
+      seo_ranking: companyData?.seo_ranking,
+      geo_ranking: companyData?.geo_ranking,
+      industry_trends: companyData?.industry_trends,
+      competitor_trends: companyData?.competitor_trends,
+      niche_opportunities: companyData?.niche_opportunities,
+      weekly_actions: companyData?.weekly_actions,
+      competitors: competitors || [],
+      news: news || [],
+      tenders: tenders || [],
+      conferences: conferences || [],
+      trends: trends || [],
     }
 
-    // 3. SEO Summary
-    const seoData = (company as any)?.seo_ranking as any
-    if (seoData?.queryVariants) {
-      const appeared = seoData.queryVariants.filter((v: any) => v.appeared && v.position != null)
-      const best = appeared.reduce((b: any, v: any) => (!b || v.position < b.position) ? v : b, null)
-      sections.push({
-        title: "דירוג SEO",
-        content: [
-          best ? `הדירוג הטוב ביותר: מיקום #${best.position} עבור "${best.query}"` : 'לא נמצא מיקום בגוגל השבוע',
-          `נבדקו ${seoData.queryVariants.length} שאילתות — הופעה ב-${appeared.length} מהן`,
-        ],
-        meta: best ? `#${best.position}` : '—',
-      })
+    const geminiKey = process.env.GEMINI_API_KEY
+    if (!geminiKey) return NextResponse.json({ error: 'Missing GEMINI_API_KEY' }, { status: 500 })
+
+    const nowIso = new Date().toISOString()
+    const prompt = `אתה יועץ עסקי בכיר. צור דוח שבועי מקצועי בעברית לבעל עסק בתחום ${industry}.
+הדוח צריך לכלול תובנות אמיתיות, מספרים ספציפיים, והמלצות פעולה ברורות.
+המידע: ${JSON.stringify(allData)}
+
+החזר JSON בלבד (ללא markdown, ללא הסברים):
+{
+  "executive_summary": "3-4 משפטים — תמצית מנהלים עם הנקודות החשובות ביותר",
+  "seo_geo": {
+    "summary": "סיכום מצב הנוכחות הדיגיטלית",
+    "top_positions": [{"query": "string", "position": 1, "appeared": true}],
+    "opportunities": ["המלצה 1", "המלצה 2"]
+  },
+  "competitors": {
+    "summary": "מה קורה עם המתחרים השבוע",
+    "threats": [{"name": "string", "threat_score": 80, "threat": "למה זה מאיים"}],
+    "opportunities": ["הזדמנות 1", "הזדמנות 2"]
+  },
+  "trends": {
+    "hot_keywords": ["מילה 1", "מילה 2"],
+    "competitor_moves": ["מהלך 1", "מהלך 2"],
+    "market_insights": ["תובנה 1", "תובנה 2"]
+  },
+  "opportunities": {
+    "new_niches": ["נישה 1", "נישה 2"],
+    "distribution_channels": ["ערוץ 1", "ערוץ 2"],
+    "actions": ["פעולה 1", "פעולה 2"]
+  },
+  "news_tenders": {
+    "relevant_news": [{"title": "string", "summary": "string"}],
+    "active_tenders": [{"title": "string", "deadline": "string", "organization": "string"}],
+    "upcoming_conferences": [{"name": "string", "date": "string"}]
+  },
+  "weekly_actions": {
+    "immediate": ["פעולה דחופה 1", "פעולה דחופה 2"],
+    "short_term": ["פעולה קצר טווח 1", "פעולה קצר טווח 2"]
+  },
+  "generated_at": "${nowIso}"
+}`
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    )
+
+    if (!res.ok) {
+      const errText = await res.text()
+      console.error('[weekly-report] Gemini HTTP error:', res.status, errText.slice(0, 300))
+      return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
     }
 
-    // 4. GEO Summary
-    const geoData = (company as any)?.geo_ranking as any
-    if (geoData?.engines) {
-      const engineLines = Object.entries(geoData.engines).map(([eng, data]: [string, any]) => {
-        const label = { general: 'כללי', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' }[eng] || eng
-        return data?.appeared ? `• ${label}: מיקום #${data.position}` : `• ${label}: לא הוזכרת`
-      })
-      sections.push({
-        title: "דירוג GEO (מנועי AI)",
-        content: engineLines,
-        meta: Object.values(geoData.engines as any).filter((d: any) => d?.appeared).length + '/4 מנועים',
-      })
+    const data = await res.json()
+    if (data.error) {
+      console.error('[weekly-report] Gemini API error:', JSON.stringify(data.error))
+      return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
     }
 
-    // 5. Trending Topics
-    const industryTrends = (company as any)?.industry_trends as any
-    if (industryTrends?.trends?.length) {
-      const rising = industryTrends.trends.filter((t: any) => t.direction === 'rising').slice(0, 3)
-      sections.push({
-        title: "טרנדים חמים השבוע",
-        content: [
-          ...rising.map((t: any) => `📈 ${t.name}: ${t.evidence || ''}`),
-          ...industryTrends.trends.filter((t: any) => t.direction === 'declining').slice(0, 2).map((t: any) => `📉 ${t.name}`),
-        ].filter(Boolean),
-        meta: `${industryTrends.trends.length} טרנדים`,
-      })
+    const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const s = clean.indexOf('{')
+    const e = clean.lastIndexOf('}')
+    if (s === -1 || e <= s) {
+      console.error('[weekly-report] no JSON in response:', clean.slice(0, 300))
+      return NextResponse.json({ error: 'Invalid Gemini response' }, { status: 500 })
     }
 
-    // 6. News
-    if (news && news.length > 0) {
-      sections.push({
-        title: "חדשות רלוונטיות השבוע",
-        content: news.map(n => `• [${n.category}] ${n.title} (${n.source})`),
-        meta: `${news.length} חדשות`,
-      })
+    let report: any = {}
+    try { report = JSON.parse(clean.slice(s, e + 1)) } catch (err) {
+      console.error('[weekly-report] JSON parse error:', err)
+      return NextResponse.json({ error: 'Failed to parse report JSON' }, { status: 500 })
     }
 
-    // 7. Tenders
-    if (tenders && tenders.length > 0) {
-      sections.push({
-        title: "מכרזים פעילים",
-        content: tenders.map(t => `• ${t.title} — ${t.organization} (עד ${new Date(t.deadline).toLocaleDateString('he-IL')})`),
-        meta: `${tenders.length} מכרזים`,
-      })
-    }
+    report.generated_at = nowIso
 
-    // 8. Weekly Actions
-    const weeklyActions = (company as any)?.weekly_actions as any
-    if (Array.isArray(weeklyActions) && weeklyActions.length > 0) {
-      sections.push({
-        title: "משימות שבועיות",
-        content: weeklyActions.slice(0, 5).map((a: any) => `• ${a.title || a.action || a}`),
-        meta: `${weeklyActions.length} משימות`,
-      })
-    }
+    const { error: dbError } = await ctx.supabase
+      .from('companies').update({ last_report: report } as any).eq('id', userId)
+    if (dbError) console.warn('[weekly-report] DB save error:', dbError.message)
 
-    // 9. Niche Opportunities
-    const nicheOpps = (company as any)?.niche_opportunities as any
-    const activeNiches = Array.isArray(nicheOpps)
-      ? nicheOpps.filter((n: any) => n.status === 'tracking').slice(0, 3)
-      : []
-    if (activeNiches.length > 0) {
-      sections.push({
-        title: "הזדמנויות נישה במעקב",
-        content: activeNiches.map((n: any) => `• ${n.nicheTitle}: ${n.shortInsightSummary || ''}`),
-        meta: `${activeNiches.length} במעקב`,
-      })
-    }
-
-    const report: WeeklyReport = {
-      generated_at: new Date().toISOString(),
-      company_name: company?.name || '',
-      sections,
-    }
-
-    // Save to DB
-    await ctx.supabase.from('companies').update({ last_report: report } as any).eq('id', ctx.user.id)
-
-    return NextResponse.json({ success: true, report })
+    return NextResponse.json({ success: true, report, company_name: companyName })
   } catch (e: any) {
+    console.error('[generate-weekly-report] error:', e?.message)
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

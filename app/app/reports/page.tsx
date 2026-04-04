@@ -1,832 +1,496 @@
 "use client"
 
-export const dynamic = 'force-dynamic'
-
-import { useState, useEffect } from "react"
-import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { useState, useEffect, useCallback } from "react"
+import {
+  Download, RefreshCw, TrendingUp, Users, Search, Globe,
+  Zap, FileText, Calendar, Target, AlertTriangle, CheckCircle,
+  Star, Newspaper, ChevronRight, Loader2, BarChart3,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Download, Calendar, FileText, TrendingUp, TrendingDown, Minus, Star, Target, Loader2, Newspaper } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 
-interface SwotData {
-  strengths: string[]
-  weaknesses: string[]
-  opportunities: string[]
-  threats: string[]
-}
+// ── Types ──────────────────────────────────────────────────────────────────
 
-interface GeoReview {
-  author: string
-  rating: number
-  text: string
-}
-
-interface GeoData {
-  rating: number | null
-  reviewCount: number
-  reviews: GeoReview[]
-  address: string
-  phone: string
-}
-
-interface Company {
-  name: string
-  industry: string
-  website: string
-  city: string
-  description: string
-  business_overview: string
-  swot: SwotData | null
-  geo_data: GeoData | null
-}
-
-interface Competitor {
-  name: string
-  website: string
-  services: string
-  threat_score: number
-  positioning: string
-}
-
-interface Lead {
-  name: string
-  website: string
-  industry: string
-  score: number
-  reason: string
-  source: string
-}
-
-interface Tender {
-  title: string
-  organization: string
-  deadline: string
-  budget: string
-  description: string
-  relevance_score: number
-}
-
-interface Trend {
-  name: string
-  description: string
-  score: number
-  direction: string
-  category: string
-}
-
-interface NewsItem {
-  title: string
-  source: string
-  summary: string
-  category: string
-  sentiment: string
-  published_at: string
-}
-
-interface Conference {
-  name: string
-  date: string
-  location: string
-  description: string
-  url: string
-}
-
-interface WeeklyReportSection {
-  title: string
-  content: string[]
-  meta?: string
-}
+interface SeoPosition { query: string; position: number; appeared: boolean }
+interface CompetitorThreat { name: string; threat_score: number; threat: string }
+interface NewsItem { title: string; summary: string }
+interface TenderItem { title: string; deadline: string; organization: string }
+interface ConferenceItem { name: string; date: string }
 
 interface WeeklyReport {
+  executive_summary: string
+  seo_geo: {
+    summary: string
+    top_positions: SeoPosition[]
+    opportunities: string[]
+  }
+  competitors: {
+    summary: string
+    threats: CompetitorThreat[]
+    opportunities: string[]
+  }
+  trends: {
+    hot_keywords: string[]
+    competitor_moves: string[]
+    market_insights: string[]
+  }
+  opportunities: {
+    new_niches: string[]
+    distribution_channels: string[]
+    actions: string[]
+  }
+  news_tenders: {
+    relevant_news: NewsItem[]
+    active_tenders: TenderItem[]
+    upcoming_conferences: ConferenceItem[]
+  }
+  weekly_actions: {
+    immediate: string[]
+    short_term: string[]
+  }
   generated_at: string
-  company_name: string
-  sections: WeeklyReportSection[]
 }
 
-interface ReportData {
-  weekRange: string
-  generatedAt: string
-  company: Company
-  highlights: { tenders: number; competitors: number; savedOpps: number; alerts: number; trends: number; news: number; conferences: number }
-  competitors: Competitor[]
-  leads: Lead[]
-  tenders: Tender[]
-  trends: Trend[]
-  news: NewsItem[]
-  conferences: Conference[]
-  recommendations: string[]
-}
+// ── Helpers ────────────────────────────────────────────────────────────────
 
-function getMomentumBadge(direction: string) {
-  if (direction === 'עולה' || direction === 'up') {
-    return <Badge className="bg-green-100 text-green-700 gap-1 shrink-0"><TrendingUp className="h-3 w-3" />עולה</Badge>
-  }
-  if (direction === 'יורד' || direction === 'down') {
-    return <Badge className="bg-red-100 text-red-700 gap-1 shrink-0"><TrendingDown className="h-3 w-3" />יורד</Badge>
-  }
-  return <Badge className="bg-yellow-100 text-yellow-700 gap-1 shrink-0"><Minus className="h-3 w-3" />יציב</Badge>
-}
-
-function formatShortDate(dateStr: string) {
-  if (!dateStr) return ''
+function formatDate(iso: string) {
   try {
-    return new Date(dateStr).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' })
-  } catch { return dateStr }
+    return new Date(iso).toLocaleDateString("he-IL", {
+      year: "numeric", month: "long", day: "numeric",
+    })
+  } catch { return iso }
 }
 
-function HighlightLine({ text }: { text?: string }) {
-  if (!text) return null
+function threatColor(score: number) {
+  if (score >= 80) return "bg-red-100 text-red-800 border-red-200"
+  if (score >= 60) return "bg-orange-100 text-orange-800 border-orange-200"
+  return "bg-yellow-100 text-yellow-800 border-yellow-200"
+}
+
+function positionBadgeColor(pos: number) {
+  if (pos <= 3) return "bg-emerald-500 text-white"
+  if (pos <= 6) return "bg-amber-500 text-white"
+  return "bg-gray-400 text-white"
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+function SectionHeader({ icon: Icon, title, color }: { icon: any; title: string; color: string }) {
   return (
-    <p className="mb-3 text-sm italic text-muted-foreground border-r-2 border-primary/40 pr-3">
+    <div className={`flex items-center gap-2 mb-4 pb-3 border-b-2 ${color}`}>
+      <Icon className="w-5 h-5" />
+      <h2 className="text-lg font-bold">{title}</h2>
+    </div>
+  )
+}
+
+function BulletList({ items }: { items: string[] }) {
+  if (!items?.length) return null
+  return (
+    <ul className="space-y-1.5">
+      {items.map((item, i) => (
+        <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+          <ChevronRight className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ActionCard({ text, variant }: { text: string; variant: "immediate" | "short_term" }) {
+  const styles = variant === "immediate"
+    ? "bg-red-50 border-red-200 text-red-900"
+    : "bg-blue-50 border-blue-200 text-blue-900"
+  return (
+    <div className={`border rounded-lg px-4 py-3 text-sm font-medium ${styles}`}>
       {text}
-    </p>
+    </div>
   )
 }
 
-function StarRating({ rating }: { rating: number }) {
+// ── Loading skeleton ───────────────────────────────────────────────────────
+
+function LoadingSkeleton({ companyName }: { companyName: string }) {
   return (
-    <span className="text-yellow-500 text-sm">
-      {'★'.repeat(Math.round(rating))}{'☆'.repeat(5 - Math.round(rating))}
-      <span className="text-muted-foreground mr-1">{rating.toFixed(1)}</span>
-    </span>
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-6 p-8" dir="rtl">
+      <div className="bg-white rounded-2xl shadow-lg p-10 max-w-md w-full text-center">
+        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-2">מייצר דוח שבועי</h2>
+        <p className="text-gray-500 text-sm mb-4">
+          {companyName ? `עבור ${companyName}` : "אוסף נתונים ומנתח..."}
+        </p>
+        <div className="space-y-2">
+          {["מנתח נתוני SEO/GEO", "בודק מתחרים", "מעריך טרנדים", "מסכם הזדמנויות"].map((step) => (
+            <div key={step} className="flex items-center gap-2 text-xs text-gray-400 justify-center">
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-300 animate-pulse" />
+              {step}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
+
+// ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function ReportsPage() {
-  const [reportData, setReportData] = useState<ReportData | null>(null)
-  const [highlights, setHighlights] = useState<Record<string, string>>({})
-  const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null)
+  const [report, setReport] = useState<WeeklyReport | null>(null)
+  const [companyName, setCompanyName] = useState("")
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const supabase = createClient()
+  const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
 
-  useEffect(() => {
-    fetchReportData()
-    loadHighlights()
-  }, [])
-
-  async function loadHighlights() {
+  const loadReport = useCallback(async (force = false) => {
+    if (force) setGenerating(true)
+    else setLoading(true)
+    setError(null)
     try {
-      const res = await fetch('/api/weekly-report', { method: 'POST' })
+      const url = `/api/generate-weekly-report${force ? "?force=true" : ""}`
+      const res = await fetch(url, { method: "POST" })
       const data = await res.json()
-      if (data.success) setHighlights(data.highlights || {})
-    } catch { /* highlights are optional */ }
-  }
-
-  async function fetchReportData() {
-    const today = new Date().toISOString().split('T')[0]
-
-    const [
-      { count: tendersCount },
-      { count: competitorsCount },
-      { count: savedOppsCount },
-      { count: alertsCount },
-      { data: comps },
-      { data: leads },
-      { data: tenders },
-      { data: trends },
-      { data: news },
-      { data: conferences },
-      { data: company },
-    ] = await Promise.all([
-      supabase.from("tenders").select("*", { count: "exact", head: true }),
-      supabase.from("competitors").select("*", { count: "exact", head: true }),
-      supabase.from("saved_opportunities").select("*", { count: "exact", head: true }),
-      supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
-      supabase.from("competitors").select("name, website, services, threat_score, positioning").order("threat_score", { ascending: false }),
-      supabase.from("leads").select("name, website, industry, score, reason, source").order("score", { ascending: false }),
-      supabase.from("tenders").select("title, organization, deadline, budget, description, relevance_score").order("relevance_score", { ascending: false }),
-      supabase.from("trends").select("name, description, score, direction, category").order("created_at", { ascending: false }),
-      supabase.from("news").select("title, source, summary, category, sentiment, published_at").order("published_at", { ascending: false }),
-      supabase.from("conferences").select("name, date, location, description, url").gte("date", today).order("date", { ascending: true }),
-      supabase.from("companies").select("name, industry, website, city, description, business_overview, swot, geo_data, last_report").single(),
-    ])
-
-    const now = new Date()
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-    const weekRange = `${weekAgo.toLocaleDateString("he-IL", { day: "numeric", month: "long" })} - ${now.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" })}`
-    const generatedAt = now.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
-
-    const recommendations: string[] = []
-    if ((leads?.length || 0) > 0) recommendations.push("לפנות ללידים בעלי ציון גבוה מ-80 תוך 24 שעות")
-    if ((competitorsCount || 0) > 0) recommendations.push("לעקוב אחר פעילות המתחרים ולהכין תגובה")
-    if ((tendersCount || 0) > 0) recommendations.push("לבחון את המכרזים הפתוחים ולפעול בהתאם")
-    recommendations.push("להמשיך לעדכן את פרופיל החברה לתוצאות מדויקות יותר")
-
-    if ((company as any)?.last_report) setWeeklyReport((company as any).last_report as WeeklyReport)
-
-    setReportData({
-      weekRange,
-      generatedAt,
-      company: {
-        name: company?.name || "החברה שלי",
-        industry: company?.industry || "",
-        website: company?.website || "",
-        city: company?.city || "",
-        description: company?.description || "",
-        business_overview: company?.business_overview || "",
-        swot: (company?.swot as SwotData | null) || null,
-        geo_data: (company?.geo_data as GeoData | null) || null,
-      },
-      highlights: {
-        tenders: tendersCount || 0,
-        competitors: competitorsCount || 0,
-        savedOpps: savedOppsCount || 0,
-        alerts: alertsCount || 0,
-        trends: trends?.length || 0,
-        news: news?.length || 0,
-        conferences: conferences?.length || 0,
-      },
-      competitors: comps || [],
-      leads: leads || [],
-      tenders: tenders || [],
-      trends: trends || [],
-      news: news || [],
-      conferences: conferences || [],
-      recommendations,
-    })
-    setLoading(false)
-  }
-
-  async function generatePDF() {
-    if (!reportData) return
-    setGenerating(true)
-    try {
-      const directionIcon = (d: string) => (d === 'עולה' || d === 'up') ? '↑' : (d === 'יורד' || d === 'down') ? '↓' : '→'
-      const directionText = (d: string) => (d === 'עולה' || d === 'up') ? 'עולה' : (d === 'יורד' || d === 'down') ? 'יורד' : 'יציב'
-
-      const highlightHtml = (text?: string) => text
-        ? `<p style="font-style:italic;color:#6b7280;margin:0 0 12px;border-right:3px solid #3b82f6;padding-right:10px;">${text}</p>`
-        : ''
-
-      const starsHtml = (r: number) => '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r))
-      const swot = reportData.company.swot
-      const geo = reportData.company.geo_data
-
-      const printContent = `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="he">
-        <head>
-          <meta charset="UTF-8">
-          <title>דוח מודיעין שוק - ${reportData.company.name}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; padding: 30px; direction: rtl; color: #1a1a1a; line-height: 1.5; }
-            h1 { color: #1a1a1a; border-bottom: 3px solid #3b82f6; padding-bottom: 10px; margin-bottom: 5px; }
-            h2 { color: #1e40af; margin-top: 30px; margin-bottom: 12px; border-right: 4px solid #3b82f6; padding-right: 10px; }
-            h3 { color: #374151; font-size: 14px; margin: 14px 0 6px; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .meta { color: #6b7280; font-size: 13px; }
-            .company-profile { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 16px 0; }
-            .company-profile p { margin: 4px 0; font-size: 14px; }
-            .overview-block { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.7; margin: 10px 0; }
-            .swot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
-            .swot-cell { border-radius: 8px; padding: 12px; font-size: 12px; }
-            .swot-strengths { background: #f0fdf4; border: 1px solid #bbf7d0; }
-            .swot-weaknesses { background: #fef2f2; border: 1px solid #fecaca; }
-            .swot-opportunities { background: #eff6ff; border: 1px solid #bfdbfe; }
-            .swot-threats { background: #fff7ed; border: 1px solid #fed7aa; }
-            .swot-cell strong { display: block; margin-bottom: 6px; font-size: 13px; }
-            .swot-cell li { margin: 3px 0; }
-            .stars { color: #f59e0b; font-size: 16px; }
-            .review-item { border-top: 1px solid #e5e7eb; padding: 8px 0; font-size: 12px; }
-            .review-item:first-child { border-top: none; }
-            .review-author { font-weight: bold; margin-bottom: 2px; }
-            .review-text { color: #6b7280; }
-            .grid-4 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin: 16px 0; }
-            .stat { background: #f3f4f6; padding: 16px; border-radius: 8px; text-align: center; }
-            .stat-value { font-size: 28px; font-weight: bold; color: #3b82f6; }
-            .stat-label { color: #6b7280; font-size: 12px; }
-            .item { padding: 12px 16px; border-radius: 8px; margin: 8px 0; border-right: 4px solid #3b82f6; background: #f9fafb; }
-            .item-title { font-weight: bold; font-size: 14px; }
-            .item-desc { color: #6b7280; font-size: 13px; margin-top: 4px; }
-            .item-meta { color: #9ca3af; font-size: 12px; margin-top: 4px; }
-            .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; margin-right: 6px; }
-            .badge-blue { background: #dbeafe; color: #1e40af; }
-            .badge-red { background: #fee2e2; color: #991b1b; }
-            .badge-green { background: #dcfce7; color: #166534; }
-            .badge-yellow { background: #fef9c3; color: #92400e; }
-            .badge-gray { background: #f3f4f6; color: #374151; }
-            .recommendations li { background: #eff6ff; padding: 12px; border-radius: 8px; margin: 8px 0; display: flex; align-items: flex-start; gap: 10px; }
-            .rec-num { background: #3b82f6; color: white; min-width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
-            @media print { body { padding: 15px; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>דוח מודיעין שוק</h1>
-            <p class="meta">${reportData.weekRange}</p>
-            <p class="meta">נוצר: ${reportData.generatedAt}</p>
-          </div>
-
-          <h2>פרופיל עסקי</h2>
-          <div class="company-profile">
-            <p><strong>שם:</strong> ${reportData.company.name}</p>
-            ${reportData.company.industry ? `<p><strong>תעשייה:</strong> ${reportData.company.industry}</p>` : ''}
-            ${reportData.company.city ? `<p><strong>עיר:</strong> ${reportData.company.city}</p>` : ''}
-            ${reportData.company.website ? `<p><strong>אתר:</strong> ${reportData.company.website}</p>` : ''}
-          </div>
-
-          ${reportData.company.business_overview ? `
-            <h3>סקירת העסק</h3>
-            <div class="overview-block">${reportData.company.business_overview}</div>
-          ` : ''}
-
-          ${swot && (swot.strengths?.length || swot.weaknesses?.length || swot.opportunities?.length || swot.threats?.length) ? `
-            <h3>ניתוח SWOT</h3>
-            <div class="swot-grid">
-              ${swot.strengths?.length ? `<div class="swot-cell swot-strengths"><strong>חוזקות</strong><ul>${swot.strengths.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
-              ${swot.weaknesses?.length ? `<div class="swot-cell swot-weaknesses"><strong>חולשות</strong><ul>${swot.weaknesses.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
-              ${swot.opportunities?.length ? `<div class="swot-cell swot-opportunities"><strong>הזדמנויות</strong><ul>${swot.opportunities.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
-              ${swot.threats?.length ? `<div class="swot-cell swot-threats"><strong>איומים</strong><ul>${swot.threats.slice(0, 4).map(s => `<li>${s}</li>`).join('')}</ul></div>` : ''}
-            </div>
-          ` : ''}
-
-          ${geo?.rating ? `
-            <h3>דירוג וביקורות</h3>
-            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;">
-              <div style="margin-bottom:10px;">
-                <span class="stars">${starsHtml(geo.rating)}</span>
-                <strong style="margin-right:6px;">${geo.rating.toFixed(1)}</strong>
-                ${geo.reviewCount ? `<span style="color:#6b7280;font-size:12px;">(${geo.reviewCount} ביקורות)</span>` : ''}
-              </div>
-              ${geo.reviews?.length ? [...geo.reviews].sort((a, b) => b.rating - a.rating).slice(0, 3).map(r => `
-                <div class="review-item">
-                  <div class="review-author">${r.author || ''} <span class="stars" style="font-size:12px;">${starsHtml(r.rating)}</span></div>
-                  ${r.text ? `<div class="review-text">${r.text}</div>` : ''}
-                </div>
-              `).join('') : ''}
-            </div>
-          ` : ''}
-
-          <h2>סיכום נתונים</h2>
-          <div class="grid-4">
-            <div class="stat"><div class="stat-value">${reportData.highlights.tenders}</div><div class="stat-label">מכרזים</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.competitors}</div><div class="stat-label">מתחרים</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.savedOpps}</div><div class="stat-label">הזדמנויות</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.alerts}</div><div class="stat-label">התראות</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.trends}</div><div class="stat-label">טרנדים</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.news}</div><div class="stat-label">חדשות</div></div>
-            <div class="stat"><div class="stat-value">${reportData.highlights.conferences}</div><div class="stat-label">כנסים</div></div>
-          </div>
-
-          ${reportData.competitors.length > 0 ? `
-            <h2>מתחרים (${reportData.competitors.length})</h2>
-            ${highlightHtml(highlights.competitors)}
-            ${reportData.competitors.map(c => `
-              <div class="item">
-                <div class="item-title">${c.name} <span class="badge badge-red">איום: ${c.threat_score}</span>${c.positioning ? `<span class="badge badge-gray">${c.positioning}</span>` : ''}</div>
-                ${c.services ? `<div class="item-desc">${c.services}</div>` : ''}
-                ${c.website ? `<div class="item-meta">${c.website}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.trends.length > 0 ? `
-            <h2>טרנדים מובילים (${reportData.trends.length})</h2>
-            ${highlightHtml(highlights.trends)}
-            ${reportData.trends.map(t => `
-              <div class="item">
-                <div class="item-title">${directionIcon(t.direction)} ${t.name} <span class="badge ${(t.direction === 'עולה' || t.direction === 'up') ? 'badge-green' : (t.direction === 'יורד' || t.direction === 'down') ? 'badge-red' : 'badge-yellow'}">${directionText(t.direction)}</span>${t.category ? `<span class="badge badge-gray">${t.category}</span>` : ''}</div>
-                ${t.description ? `<div class="item-desc">${t.description}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.news.length > 0 ? `
-            <h2>חדשות אחרונות (${reportData.news.length})</h2>
-            ${highlightHtml(highlights.news)}
-            ${reportData.news.map(n => `
-              <div class="item">
-                <div class="item-title">${n.title} ${n.sentiment === 'positive' ? '<span class="badge badge-green">חיובי</span>' : n.sentiment === 'negative' ? '<span class="badge badge-red">שלילי</span>' : '<span class="badge badge-gray">ניטרלי</span>'}</div>
-                ${n.summary ? `<div class="item-desc">${n.summary}</div>` : ''}
-                <div class="item-meta">${n.source || ''}${n.published_at ? ` | ${formatShortDate(n.published_at)}` : ''}</div>
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.conferences.length > 0 ? `
-            <h2>כנסים קרובים (${reportData.conferences.length})</h2>
-            ${highlightHtml(highlights.conferences)}
-            ${reportData.conferences.map(c => `
-              <div class="item">
-                <div class="item-title">${c.name}</div>
-                <div class="item-desc">${c.date ? `תאריך: ${c.date}` : ''}${c.location ? ` | ${c.location}` : ''}</div>
-                ${c.description ? `<div class="item-meta">${c.description}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.tenders.length > 0 ? `
-            <h2>מכרזים פתוחים (${reportData.tenders.length})</h2>
-            ${highlightHtml(highlights.tenders)}
-            ${reportData.tenders.map(t => `
-              <div class="item">
-                <div class="item-title">${t.title}${t.relevance_score ? `<span class="badge badge-blue">רלוונטיות: ${t.relevance_score}</span>` : ''}</div>
-                <div class="item-desc">${t.organization || ''}${t.deadline ? ` | דדליין: ${t.deadline}` : ''}${t.budget ? ` | תקציב: ${t.budget}` : ''}</div>
-                ${t.description ? `<div class="item-meta">${t.description}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          ${reportData.leads.length > 0 ? `
-            <h2>לידים (${reportData.leads.length})</h2>
-            ${reportData.leads.map(l => `
-              <div class="item">
-                <div class="item-title">${l.name} <span class="badge ${l.score >= 80 ? 'badge-green' : 'badge-yellow'}">ציון: ${l.score}</span>${l.industry ? `<span class="badge badge-gray">${l.industry}</span>` : ''}</div>
-                ${l.reason ? `<div class="item-desc">${l.reason}</div>` : ''}
-                ${l.website ? `<div class="item-meta">${l.website}</div>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          <h2>המלצות</h2>
-          <ul class="recommendations" style="list-style:none; padding:0;">
-            ${reportData.recommendations.map((rec, idx) => `
-              <li><span class="rec-num">${idx + 1}</span> <span>${rec}</span></li>
-            `).join('')}
-          </ul>
-        </body>
-        </html>
-      `
-
-      const printWindow = window.open('', '_blank')
-      if (printWindow) {
-        printWindow.document.write(printContent)
-        printWindow.document.close()
-        printWindow.focus()
-        setTimeout(() => { printWindow.print() }, 300)
-      }
-
-      toast({ title: "הדוח מוכן", description: "חלון ההדפסה נפתח — בחר 'שמור כ-PDF' להורדה" })
-    } catch (error) {
-      console.error("Error generating PDF:", error)
-      toast({ title: "שגיאה", description: "אירעה שגיאה בעת יצירת הדוח", variant: "destructive" })
+      if (!res.ok) throw new Error(data.error || "שגיאה ביצירת הדוח")
+      setReport(data.report)
+      setCompanyName(data.company_name || "")
+    } catch (e: any) {
+      setError(e.message)
+      toast({ title: "שגיאה ביצירת דוח", description: e.message, variant: "destructive" })
     } finally {
+      setLoading(false)
       setGenerating(false)
     }
-  }
+  }, [toast])
 
-  if (loading) {
+  useEffect(() => { loadReport() }, [loadReport])
+
+  if (loading) return <LoadingSkeleton companyName={companyName} />
+
+  if (error) {
     return (
-      <div className="flex h-96 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8" dir="rtl">
+        <div className="bg-white rounded-2xl shadow-lg p-10 max-w-md w-full text-center">
+          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">לא ניתן ליצור דוח</h2>
+          <p className="text-gray-500 text-sm mb-6">{error}</p>
+          <Button onClick={() => loadReport(true)}>נסה שוב</Button>
+        </div>
       </div>
     )
   }
 
-  if (!reportData) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12">
-          <FileText className="h-12 w-12 text-muted-foreground/50" />
-          <p className="mt-4 text-muted-foreground">לא ניתן לטעון את הדוח</p>
-        </CardContent>
-      </Card>
-    )
-  }
+  if (!report) return null
 
   return (
-    <div className="space-y-6">
-      {/* Weekly structured report */}
-      {weeklyReport && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <FileText className="h-5 w-5 text-primary" />
-              דו&quot;ח שבועי
-              <span className="text-xs text-muted-foreground font-normal">
-                {new Date(weeklyReport.generated_at).toLocaleDateString('he-IL')}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {weeklyReport.sections.map((section, i) => (
-              <div key={i} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-sm">{section.title}</h3>
-                  {section.meta && <Badge variant="secondary" className="text-xs">{section.meta}</Badge>}
-                </div>
-                <ul className="space-y-1">
-                  {section.content.map((line, j) => (
-                    <li key={j} className="text-sm text-muted-foreground">{line}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+    <div className="min-h-screen bg-gray-100" dir="rtl">
+      {/* Print-specific styles */}
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .report-section { break-inside: avoid; }
+          @page { size: A4; margin: 1cm; }
+        }
+      `}</style>
 
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">דוחות</h1>
-          <p className="text-muted-foreground">דוח מודיעין שוק מקיף</p>
+      {/* ── Screen action bar ────────────────────────────────────────────── */}
+      <div className="no-print sticky top-0 z-10 bg-slate-900 text-white px-6 py-3 flex items-center justify-between shadow-lg">
+        <div className="flex items-center gap-3">
+          <FileText className="w-5 h-5 text-blue-300" />
+          <span className="font-semibold">דוח שבועי — {companyName}</span>
+          {report.generated_at && (
+            <span className="text-slate-400 text-sm hidden sm:inline">
+              | {formatDate(report.generated_at)}
+            </span>
+          )}
         </div>
-        <Button onClick={generatePDF} disabled={generating}>
-          {generating ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Download className="ml-2 h-4 w-4" />}
-          הורד PDF מלא
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-slate-300 hover:text-white hover:bg-slate-700"
+            onClick={() => loadReport(true)}
+            disabled={generating}
+          >
+            {generating ? (
+              <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 ml-2" />
+            )}
+            {generating ? "מייצר..." : "רענן"}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-blue-600 hover:bg-blue-500 text-white gap-2"
+            onClick={() => window.print()}
+          >
+            <Download className="w-4 h-4" />
+            הורד PDF
+          </Button>
+        </div>
       </div>
 
-      {/* Report Card */}
-      <Card>
-        <CardHeader className="border-b">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      {/* ── Report container ─────────────────────────────────────────────── */}
+      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5 pb-12">
+
+        {/* Print header (hidden on screen) */}
+        <div className="hidden print:block border-b-4 border-slate-900 pb-4 mb-6">
+          <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-xl">דוח מודיעין שוק</CardTitle>
-              <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-4 w-4" />
-                  {reportData.weekRange}
-                </span>
-                <span className="flex items-center gap-1">
-                  <FileText className="h-4 w-4" />
-                  נוצר: {reportData.generatedAt}
-                </span>
-              </div>
+              <h1 className="text-2xl font-bold text-slate-900">{companyName}</h1>
+              <p className="text-slate-500 text-sm mt-1">דוח שבועי | {formatDate(report.generated_at)}</p>
+            </div>
+            <div className="text-left">
+              <p className="text-xs text-slate-400">North Star Radar</p>
             </div>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-6">
-          {/* פרופיל עסקי */}
-          {(reportData.company.business_overview || reportData.company.swot || reportData.company.geo_data?.rating) && (
-            <div className="mb-8 space-y-4">
-              <h3 className="text-base font-semibold border-b pb-2">פרופיל עסקי</h3>
+        {/* ── Executive Summary ──────────────────────────────────────────── */}
+        <div className="report-section bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-6 shadow-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <Star className="w-5 h-5 text-amber-400" />
+            <h2 className="text-base font-bold text-amber-400 uppercase tracking-wide">תמצית מנהלים</h2>
+          </div>
+          <p className="text-slate-100 leading-relaxed text-sm sm:text-base">
+            {report.executive_summary}
+          </p>
+        </div>
 
-              {/* סקירת העסק */}
-              {reportData.company.business_overview && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">סקירת העסק</p>
-                  <p className="text-sm leading-relaxed rounded-lg bg-muted/30 border p-3">
-                    {reportData.company.business_overview}
-                  </p>
-                </div>
-              )}
+        {/* ── SEO / GEO ─────────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-blue-100">
+          <SectionHeader icon={Search} title="דירוג SEO וGEO" color="border-blue-400 text-blue-700" />
 
-              {/* ניתוח SWOT */}
-              {reportData.company.swot && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">ניתוח SWOT</p>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    {[
-                      { label: 'חוזקות', key: 'strengths', color: 'bg-green-50 border-green-200 text-green-800' },
-                      { label: 'חולשות', key: 'weaknesses', color: 'bg-red-50 border-red-200 text-red-800' },
-                      { label: 'הזדמנויות', key: 'opportunities', color: 'bg-blue-50 border-blue-200 text-blue-800' },
-                      { label: 'איומים', key: 'threats', color: 'bg-orange-50 border-orange-200 text-orange-800' },
-                    ].map(({ label, key, color }) => {
-                      const items = reportData.company.swot![key as keyof SwotData] as string[]
-                      if (!items?.length) return null
-                      return (
-                        <div key={key} className={`rounded-lg border p-3 ${color}`}>
-                          <p className="font-semibold text-xs mb-1">{label}</p>
-                          <ul className="space-y-0.5">
-                            {items.slice(0, 3).map((item, i) => (
-                              <li key={i} className="text-xs">• {item}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )
-                    })}
+          <p className="text-sm text-gray-600 mb-4">{report.seo_geo?.summary}</p>
+
+          {(report.seo_geo?.top_positions?.length ?? 0) > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">מיקומים בגוגל</p>
+              <div className="flex flex-wrap gap-2">
+                {report.seo_geo.top_positions.map((p, i) => (
+                  <div key={i} className={`rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs border ${p.appeared ? "bg-white border-gray-200" : "bg-gray-50 border-gray-100 opacity-60"}`}>
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${p.appeared ? positionBadgeColor(p.position) : "bg-gray-300 text-white"}`}>
+                      {p.appeared ? `#${p.position}` : "—"}
+                    </span>
+                    <span className="text-gray-700 max-w-[160px] truncate">{p.query}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(report.seo_geo?.opportunities?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-blue-600 uppercase mb-2">הזדמנויות</p>
+              <BulletList items={report.seo_geo.opportunities} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Competitors ───────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-orange-100">
+          <SectionHeader icon={Users} title="מתחרים" color="border-orange-400 text-orange-700" />
+
+          <p className="text-sm text-gray-600 mb-4">{report.competitors?.summary}</p>
+
+          {(report.competitors?.threats?.length ?? 0) > 0 && (
+            <div className="space-y-2 mb-4">
+              {report.competitors.threats.map((t, i) => (
+                <div key={i} className={`rounded-lg border px-4 py-2.5 flex items-start gap-3 ${threatColor(t.threat_score)}`}>
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{t.name}</span>
+                      <Badge className={`text-xs ${t.threat_score >= 80 ? "bg-red-600" : t.threat_score >= 60 ? "bg-orange-500" : "bg-yellow-500"} text-white border-0`}>
+                        {t.threat_score}
+                      </Badge>
+                    </div>
+                    {t.threat && <p className="text-xs mt-1 opacity-80">{t.threat}</p>}
                   </div>
                 </div>
-              )}
+              ))}
+            </div>
+          )}
 
-              {/* דירוג וביקורות */}
-              {reportData.company.geo_data?.rating && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">דירוג וביקורות</p>
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <div className="flex items-center gap-2 mb-3">
-                      <StarRating rating={reportData.company.geo_data.rating} />
-                      {reportData.company.geo_data.reviewCount > 0 && (
-                        <span className="text-xs text-muted-foreground">({reportData.company.geo_data.reviewCount} ביקורות)</span>
+          {(report.competitors?.opportunities?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-orange-600 uppercase mb-2">הזדמנויות מול המתחרים</p>
+              <BulletList items={report.competitors.opportunities} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Trends ────────────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-emerald-100">
+          <SectionHeader icon={TrendingUp} title="טרנדים ותובנות שוק" color="border-emerald-400 text-emerald-700" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {(report.trends?.hot_keywords?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-emerald-600 uppercase mb-2">מילות מפתח חמות</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {report.trends.hot_keywords.map((kw, i) => (
+                    <span key={i} className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs rounded-full px-2.5 py-1 font-medium">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(report.trends?.competitor_moves?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-blue-600 uppercase mb-2">מהלכי מתחרים</p>
+                <BulletList items={report.trends.competitor_moves} />
+              </div>
+            )}
+
+            {(report.trends?.market_insights?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-purple-600 uppercase mb-2">תובנות שוק</p>
+                <BulletList items={report.trends.market_insights} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Opportunities ─────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-purple-100">
+          <SectionHeader icon={Target} title="הזדמנויות עסקיות" color="border-purple-400 text-purple-700" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {(report.opportunities?.new_niches?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-purple-600 uppercase mb-2">נישות חדשות</p>
+                <BulletList items={report.opportunities.new_niches} />
+              </div>
+            )}
+            {(report.opportunities?.distribution_channels?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-indigo-600 uppercase mb-2">ערוצי הפצה</p>
+                <BulletList items={report.opportunities.distribution_channels} />
+              </div>
+            )}
+            {(report.opportunities?.actions?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-teal-600 uppercase mb-2">פעולות מומלצות</p>
+                <BulletList items={report.opportunities.actions} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── News & Tenders ────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-teal-100">
+          <SectionHeader icon={Newspaper} title="חדשות, מכרזים וכנסים" color="border-teal-400 text-teal-700" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            {/* News */}
+            {(report.news_tenders?.relevant_news?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-teal-600 uppercase mb-2">חדשות רלוונטיות</p>
+                <div className="space-y-2">
+                  {report.news_tenders.relevant_news.map((n, i) => (
+                    <div key={i} className="bg-teal-50 rounded-lg px-3 py-2">
+                      <p className="text-sm font-medium text-teal-900 leading-snug">{n.title}</p>
+                      {n.summary && <p className="text-xs text-teal-700 mt-0.5 opacity-80">{n.summary}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tenders */}
+            {(report.news_tenders?.active_tenders?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-amber-600 uppercase mb-2">מכרזים פעילים</p>
+                <div className="space-y-2">
+                  {report.news_tenders.active_tenders.map((t, i) => (
+                    <div key={i} className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                      <p className="text-sm font-medium text-amber-900 leading-snug">{t.title}</p>
+                      <p className="text-xs text-amber-700 mt-0.5">{t.organization}</p>
+                      {t.deadline && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <Calendar className="w-3 h-3 text-amber-500" />
+                          <span className="text-xs text-amber-600">עד {t.deadline}</span>
+                        </div>
                       )}
                     </div>
-                    {reportData.company.geo_data.reviews?.length > 0 && (
-                      <div className="space-y-2">
-                        {[...reportData.company.geo_data.reviews]
-                          .sort((a, b) => b.rating - a.rating)
-                          .slice(0, 3)
-                          .map((r, i) => (
-                            <div key={i} className="text-xs border-t pt-2 first:border-t-0 first:pt-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <span className="font-medium">{r.author}</span>
-                                <StarRating rating={r.rating} />
-                              </div>
-                              {r.text && <p className="text-muted-foreground line-clamp-2">{r.text}</p>}
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* KPI highlights */}
-          <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
-            <div className="rounded-lg bg-primary/10 p-4 text-center">
-              <FileText className="mx-auto mb-2 h-6 w-6 text-primary" />
-              <p className="text-2xl font-bold">{reportData.highlights.tenders}</p>
-              <p className="text-sm text-muted-foreground">מכרזים</p>
-            </div>
-            <div className="rounded-lg bg-red-100 p-4 text-center">
-              <Target className="mx-auto mb-2 h-6 w-6 text-red-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.competitors}</p>
-              <p className="text-sm text-muted-foreground">מתחרים</p>
-            </div>
-            <div className="rounded-lg bg-emerald-100 p-4 text-center">
-              <Star className="mx-auto mb-2 h-6 w-6 text-emerald-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.savedOpps}</p>
-              <p className="text-sm text-muted-foreground">הזדמנויות</p>
-            </div>
-            <div className="rounded-lg bg-yellow-100 p-4 text-center">
-              <TrendingUp className="mx-auto mb-2 h-6 w-6 text-yellow-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.alerts}</p>
-              <p className="text-sm text-muted-foreground">התראות</p>
-            </div>
-            <div className="rounded-lg bg-orange-100 p-4 text-center">
-              <TrendingUp className="mx-auto mb-2 h-6 w-6 text-orange-500" />
-              <p className="text-2xl font-bold">{reportData.highlights.trends}</p>
-              <p className="text-sm text-muted-foreground">טרנדים</p>
-            </div>
-            <div className="rounded-lg bg-sky-100 p-4 text-center">
-              <Newspaper className="mx-auto mb-2 h-6 w-6 text-sky-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.news}</p>
-              <p className="text-sm text-muted-foreground">חדשות</p>
-            </div>
-            <div className="rounded-lg bg-purple-100 p-4 text-center">
-              <Calendar className="mx-auto mb-2 h-6 w-6 text-purple-600" />
-              <p className="text-2xl font-bold">{reportData.highlights.conferences}</p>
-              <p className="text-sm text-muted-foreground">כנסים</p>
-            </div>
-          </div>
-
-          {/* מתחרים עיקריים */}
-          {reportData.competitors.length > 0 && (
-            <div className="mb-6">
-              <h3 className="mb-1 text-base font-semibold">מתחרים עיקריים</h3>
-              <HighlightLine text={highlights.competitors} />
-              <div className="space-y-2">
-                {reportData.competitors.slice(0, 3).map((c, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-                    <div>
-                      <p className="font-medium text-sm">{c.name}</p>
-                      <p className="text-xs text-muted-foreground">{c.services}</p>
-                    </div>
-                    <Badge className={c.threat_score >= 70 ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}>
-                      איום: {c.threat_score}
-                    </Badge>
-                  </div>
-                ))}
-                {reportData.competitors.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.competitors.length - 3} נוספים בדוח המלא</p>
-                )}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* טרנדים מובילים */}
-          {reportData.trends.length > 0 && (
-            <div className="mb-6">
-              <h3 className="mb-1 text-base font-semibold">טרנדים מובילים</h3>
-              <HighlightLine text={highlights.trends} />
-              <div className="space-y-2">
-                {reportData.trends.slice(0, 3).map((t, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{t.name}</p>
-                      {t.category && <p className="text-xs text-muted-foreground">{t.category}</p>}
+            {/* Conferences */}
+            {(report.news_tenders?.upcoming_conferences?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-blue-600 uppercase mb-2">כנסים קרובים</p>
+                <div className="space-y-2">
+                  {report.news_tenders.upcoming_conferences.map((c, i) => (
+                    <div key={i} className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                      <p className="text-sm font-medium text-blue-900 leading-snug">{c.name}</p>
+                      {c.date && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <Calendar className="w-3 h-3 text-blue-500" />
+                          <span className="text-xs text-blue-600">{c.date}</span>
+                        </div>
+                      )}
                     </div>
-                    {getMomentumBadge(t.direction)}
-                  </div>
-                ))}
-                {reportData.trends.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.trends.length - 3} נוספים בדוח המלא</p>
-                )}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* חדשות אחרונות */}
-          {reportData.news.length > 0 && (
-            <div className="mb-6">
-              <h3 className="mb-1 text-base font-semibold">חדשות אחרונות</h3>
-              <HighlightLine text={highlights.news} />
-              <div className="space-y-2">
-                {reportData.news.slice(0, 3).map((n, i) => (
-                  <div key={i} className="rounded-lg border bg-muted/30 p-3">
-                    <p className="font-medium text-sm">{n.title}</p>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      {n.source && <span>{n.source}</span>}
-                      {n.published_at && <span>·  {formatShortDate(n.published_at)}</span>}
-                    </div>
-                  </div>
-                ))}
-                {reportData.news.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.news.length - 3} נוספות בדוח המלא</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* כנסים קרובים */}
-          <div className="mb-6">
-            <h3 className="mb-1 text-base font-semibold">כנסים קרובים</h3>
-            <HighlightLine text={highlights.conferences} />
-            {reportData.conferences.length > 0 ? (
-              <div className="space-y-2">
-                {reportData.conferences.slice(0, 3).map((c, i) => (
-                  <div key={i} className="rounded-lg border bg-muted/30 p-3">
-                    <p className="font-medium text-sm">{c.name}</p>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      {c.date && <span>{formatShortDate(c.date)}</span>}
-                      {c.location && <span>· {c.location}</span>}
-                    </div>
-                  </div>
-                ))}
-                {reportData.conferences.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.conferences.length - 3} נוספים בדוח המלא</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 p-3">לא נמצאו כנסים קרובים</p>
             )}
           </div>
+        </div>
 
-          {/* מכרזים פתוחים */}
-          <div className="mb-6">
-            <h3 className="mb-1 text-base font-semibold">מכרזים פתוחים</h3>
-            <HighlightLine text={highlights.tenders} />
-            {reportData.tenders.length > 0 ? (
-              <div className="space-y-2">
-                {reportData.tenders.slice(0, 3).map((t, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{t.title}</p>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                        {t.organization && <span>{t.organization}</span>}
-                        {t.deadline && <span>· {t.deadline}</span>}
-                      </div>
-                    </div>
-                    {t.relevance_score > 0 && (
-                      <Badge variant="secondary" className="shrink-0">{t.relevance_score}%</Badge>
-                    )}
-                  </div>
-                ))}
-                {reportData.tenders.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.tenders.length - 3} נוספים בדוח המלא</p>
-                )}
+        {/* ── Weekly Actions ────────────────────────────────────────────── */}
+        <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
+          <SectionHeader icon={Zap} title="משימות שבועיות" color="border-slate-400 text-slate-700" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {(report.weekly_actions?.immediate?.length ?? 0) > 0 && (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                  <p className="text-xs font-bold text-red-700 uppercase">מיידי — עכשיו</p>
+                </div>
+                <div className="space-y-2">
+                  {report.weekly_actions.immediate.map((a, i) => (
+                    <ActionCard key={i} text={a} variant="immediate" />
+                  ))}
+                </div>
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 p-3">לא נמצאו מכרזים רלוונטיים</p>
+            )}
+
+            {(report.weekly_actions?.short_term?.length ?? 0) > 0 && (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                  <p className="text-xs font-bold text-blue-700 uppercase">קצר טווח — השבוע</p>
+                </div>
+                <div className="space-y-2">
+                  {report.weekly_actions.short_term.map((a, i) => (
+                    <ActionCard key={i} text={a} variant="short_term" />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
+        </div>
 
-          {/* לידים מובילים */}
-          {reportData.leads.length > 0 && (
-            <div className="mb-6">
-              <h3 className="mb-3 text-base font-semibold">לידים מובילים</h3>
-              <div className="space-y-2">
-                {reportData.leads.slice(0, 3).map((l, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-                    <div>
-                      <p className="font-medium text-sm">{l.name}</p>
-                      <p className="text-xs text-muted-foreground">{l.industry}</p>
-                    </div>
-                    <Badge variant="secondary">{l.score}/100</Badge>
-                  </div>
-                ))}
-                {reportData.leads.length > 3 && (
-                  <p className="text-xs text-muted-foreground text-center">+ {reportData.leads.length - 3} נוספים בדוח המלא</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* המלצות */}
-          <div>
-            <h3 className="mb-3 text-base font-semibold">המלצות</h3>
-            <ul className="space-y-2">
-              {reportData.recommendations.map((rec, index) => (
-                <li key={index} className="flex items-start gap-3 rounded-lg border bg-primary/5 p-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                    {index + 1}
-                  </span>
-                  <span className="text-sm">{rec}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+        {/* Footer */}
+        <div className="text-center text-xs text-gray-400 py-2 no-print">
+          דוח נוצר ב-{formatDate(report.generated_at)} · מתחדש אוטומטית כל שבוע
+        </div>
+        <div className="hidden print:block text-center text-xs text-gray-400 pt-4 border-t border-gray-200 mt-4">
+          דוח נוצר ב-{formatDate(report.generated_at)} · North Star Radar
+        </div>
+      </div>
     </div>
   )
 }
