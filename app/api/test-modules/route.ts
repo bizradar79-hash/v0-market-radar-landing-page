@@ -3,45 +3,20 @@ export const dynamic = 'force-dynamic'
 const KEY = () => process.env.GOOGLE_PLACES_API_KEY ?? ''
 const GKEY = () => process.env.GEMINI_API_KEY ?? ''
 
-async function tsearch(q: string) {
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q)}&key=${KEY()}`
-  )
-  const d = await res.json()
-  return (d.results ?? []).slice(0, 3).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, id: r.place_id }))
-}
-
-async function v1search(q: string) {
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': KEY(),
-      'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.id',
-    },
-    body: JSON.stringify({ textQuery: q, regionCode: 'IL' }),
-  })
-  const d = await res.json()
-  return (d.places ?? []).slice(0, 3).map((p: any) => ({ name: p.displayName?.text, rating: p.rating, count: p.userRatingCount, website: p.websiteUri, id: p.id }))
-}
-
 export async function GET() {
-  const out: Record<string, unknown> = { key_set: !!KEY() }
+  const out: Record<string, unknown> = {}
 
-  // Try all variations of the app/platform name
-  out.t1 = await tsearch('בסלון מה עושים היום')
-  out.t2 = await tsearch('basalon מה עושים היום')
-  out.t3 = await tsearch('בסלון אירועים ישראל')
-  out.t4 = await tsearch('basalon israel platform')
-  out.t5 = await tsearch('basalon.co.il')
+  // Ask Gemini to specifically find the Google My Business page or Maps URL for basalon.co.il
+  out.gemini_find_gmb = await (async () => {
+    const prompt = `I need to find the exact Google Maps (Google My Business) listing for basalon.co.il — an Israeli online platform for workshops and experiences.
+Please search for:
+1. "basalon.co.il google maps"
+2. "בסלון site:google.com/maps"
+3. The Google Maps URL in basalon.co.il's website footer or contact page
+4. Any review sites (e.g. Google reviews for basalon)
 
-  out.v1 = await v1search('בסלון מה עושים היום')
-  out.v2 = await v1search('basalon events israel')
-  out.v3 = await v1search('basalon.co.il israel')
-
-  // Gemini search with the app name
-  out.gemini_app_name = await (async () => {
-    const prompt = `Search Google Maps for the Israeli business "בסלון - מה עושים היום" or "basalon.co.il". Find its Google Maps rating and review count. Return JSON: {"rating": X.X, "review_count": Y, "maps_url": "..."}`
+If you find a Google Maps URL or place_id for this business, return JSON: {"maps_url": "...", "rating": X.X, "review_count": Y}
+If not found, return: {"maps_url": null, "rating": null, "review_count": null}`
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GKEY()}`,
       {
@@ -56,7 +31,17 @@ export async function GET() {
     const d = await res.json()
     if (d.error) return { error: d.error }
     const text = d.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? ''
-    return { text: text.slice(0, 600) }
+    const groundingChunks = d.candidates?.[0]?.groundingMetadata?.groundingChunks?.slice(0, 5) ?? []
+    return { text: text.slice(0, 800), sources: groundingChunks.map((c: any) => c.web?.uri) }
+  })().catch(e => `error: ${e.message}`)
+
+  // Also try: textsearch for the exact address range (Tel Aviv tech companies)
+  out.textsearch_platform = await (async () => {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent('בסלון ישראל פלטפורמה')}&key=${KEY()}`
+    )
+    const d = await res.json()
+    return (d.results ?? []).slice(0, 3).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, id: r.place_id, address: r.formatted_address }))
   })().catch(e => `error: ${e.message}`)
 
   return Response.json(out)
