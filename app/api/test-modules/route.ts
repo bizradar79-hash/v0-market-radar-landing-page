@@ -1,40 +1,14 @@
 export const dynamic = 'force-dynamic'
 
-const KEY = () => process.env.GOOGLE_PLACES_API_KEY ?? ''
+import { getPlaceDetails } from '@/lib/google-places'
 
-export async function GET() {
-  const out: Record<string, unknown> = { key_set: !!KEY() }
+// Diagnostic endpoint — test getPlaceDetails for any domain
+// GET /api/test-modules?name=BusinessName&website=https://example.com
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const name = searchParams.get('name') || 'בסלון - basalon'
+  const website = searchParams.get('website') || 'https://basalon.co.il'
 
-  // Get lat/lng for "Sheinkin St 44, Giv'atayim" (ChIJeZty5bNLHRURjFc6gAW1Ki4 found earlier)
-  out.givatayim_sheinkin_detail = await (async () => {
-    const res = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJeZty5bNLHRURjFc6gAW1Ki4&fields=geometry,formatted_address,name&key=${KEY()}`
-    )
-    const d = await res.json()
-    return d.result ?? { status: d.status }
-  })().catch(e => `error: ${e.message}`)
-
-  const geom = (out.givatayim_sheinkin_detail as any)?.geometry?.location
-  if (geom) {
-    out.nearby_givatayim_sheinkin = await (async () => {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${geom.lat},${geom.lng}&radius=100&key=${KEY()}`
-      )
-      const d = await res.json()
-      return {
-        status: d.status,
-        results: (d.results ?? []).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, id: r.place_id, types: r.types?.slice(0, 3) }))
-      }
-    })().catch(e => `error: ${e.message}`)
-
-    out.nearby_givatayim_500m = await (async () => {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${geom.lat},${geom.lng}&radius=500&keyword=basalon&key=${KEY()}`
-      )
-      const d = await res.json()
-      return { status: d.status, results: (d.results ?? []).slice(0, 5).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, id: r.place_id })) }
-    })().catch(e => `error: ${e.message}`)
-  }
-
-  return Response.json(out)
+  const result = await getPlaceDetails(name, website)
+  return Response.json({ name, website, result })
 }
