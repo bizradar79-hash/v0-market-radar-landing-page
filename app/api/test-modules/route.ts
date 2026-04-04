@@ -1,91 +1,56 @@
 export const dynamic = 'force-dynamic'
 
-import { getPlaceDetails } from '@/lib/google-places'
+const PLACES_KEY = () => process.env.GOOGLE_PLACES_API_KEY ?? ''
+const ISRAEL_BIAS = 'rectangle:29.5,34.2|33.4,35.9'
+
+async function rawFindplace(input: string, inputtype: string) {
+  const url =
+    `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
+    `?input=${encodeURIComponent(input)}` +
+    `&inputtype=${inputtype}` +
+    `&fields=place_id,name,rating,user_ratings_total,website` +
+    `&locationbias=${ISRAEL_BIAS}` +
+    `&key=${PLACES_KEY()}`
+  const res = await fetch(url)
+  const data = await res.json()
+  return { status: data.status, candidates: data.candidates?.map((c: any) => ({ name: c.name, rating: c.rating, count: c.user_ratings_total, website: c.website, id: c.place_id })) }
+}
 
 export async function GET() {
-  const results: any = {}
-  const key = process.env.GEMINI_API_KEY
+  const results: any = { places_key_set: !!PLACES_KEY() }
 
-  if (!key) {
-    return Response.json({ error: 'GEMINI_API_KEY not set' }, { status: 500 })
-  }
+  // Strategy A: findplacefromtext with domain (root cause fix — fields includes website)
+  results.A_domain = await rawFindplace('basalon.co.il', 'textquery').catch(e => `error: ${e.message}`)
 
-  // Test 1: GEO query generation
-  try {
+  // Strategy B: findplacefromtext with name+domain
+  results.B_name_domain = await rawFindplace('בסלון basalon.co.il', 'textquery').catch(e => `error: ${e.message}`)
+
+  // Strategy C: findplacefromtext with name only + Israel bias
+  results.C_name_only = await rawFindplace('בסלון', 'textquery').catch(e => `error: ${e.message}`)
+
+  // Strategy D: Direct Place Details with known correct Place ID
+  results.D_direct_id = await (async () => {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'פלטפורמה מקוונת לסדנאות ישראל — תן שאילתת חיפוש קצרה של 3-5 מילים בלבד' }] }],
-        }),
-      }
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJV7EbImX7RhQRecG312XfvXs&fields=name,rating,user_ratings_total,website&key=${PLACES_KEY()}`
     )
     const data = await res.json()
-    const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim()
-    results.geo_query_test = text || 'no response'
-    results.geo_query_length = text.length
-    results.geo_query_valid = text.length >= 3 && text.length <= 50
-    if (data?.error) results.geo_query_api_error = data.error
-  } catch (e: any) { results.geo_query_error = e.message }
-
-  // Test 2: Google Places API — direct call for basalon
-  results.places_key_set = !!process.env.GOOGLE_PLACES_API_KEY
-  results.reviews_places = await getPlaceDetails('בסלון', 'basalon.co.il', '050-687-1111')
-    .then(r => r ?? 'null — no result')
-    .catch(e => `error: ${e.message}`)
-
-  // Test 3: Exact name search — "בסלון - basalon"
-  results.reviews_exact = await (async () => {
-    const key = process.env.GOOGLE_PLACES_API_KEY
-    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent('בסלון - basalon')}&fields=place_id,name,rating,user_ratings_total,website&key=${key}`)
-    const data = await res.json()
-    return data.results?.slice(0, 3).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, website: r.website }))
+    return { status: data.status, result: data.result }
   })().catch(e => `error: ${e.message}`)
 
-  // Test 4: Website-based textsearch — inspect top results for basalon.co.il
-  results.reviews_website = await (async () => {
-    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?query=basalon.co.il&fields=place_id,name,rating,user_ratings_total,website&key=${process.env.GOOGLE_PLACES_API_KEY}`)
-    const data = await res.json()
-    return data.results?.slice(0, 3).map((r: any) => ({ name: r.name, rating: r.rating, count: r.user_ratings_total, website: r.website }))
-  })().catch(e => `error: ${e.message}`)
-
-  // Test 4: Direct Place ID lookup — known correct basalon Place ID
-  try {
-    const res = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=ChIJV7EbImX7RhQRecG312XfvXs&fields=name,rating,user_ratings_total&key=${process.env.GOOGLE_PLACES_API_KEY}`
-    )
-    const data = await res.json()
-    results.reviews_direct = data.result ?? data
-  } catch (e: any) { results.reviews_direct_error = e.message }
-
-  // Test 5: Places API v1 (new) — more accurate search
-  results.reviews_new_api = await (async () => {
-    const key = process.env.GOOGLE_PLACES_API_KEY
-    const res = await fetch(
-      'https://places.googleapis.com/v1/places:searchText',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': key,
-          'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.id',
-        },
-        body: JSON.stringify({
-          textQuery: 'בסלון basalon.co.il',
-          languageCode: 'he',
-          regionCode: 'IL',
-        }),
-      }
-    )
+  // Strategy E: Places API v1 (new) with websiteUri in field mask
+  results.E_places_v1 = await (async () => {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': PLACES_KEY(),
+        'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.id',
+      },
+      body: JSON.stringify({ textQuery: 'basalon.co.il', languageCode: 'he', regionCode: 'IL' }),
+    })
     const data = await res.json()
     return data.places?.slice(0, 3).map((p: any) => ({
-      name: p.displayName?.text,
-      rating: p.rating,
-      count: p.userRatingCount,
-      website: p.websiteUri,
-      id: p.id,
+      name: p.displayName?.text, rating: p.rating, count: p.userRatingCount, website: p.websiteUri, id: p.id,
     })) ?? data
   })().catch(e => `error: ${e.message}`)
 
