@@ -60,5 +60,34 @@ export async function GET() {
     results.reviews_direct = data.result ?? data
   } catch (e: any) { results.reviews_direct_error = e.message }
 
+  // Test 5: Places API v1 (new) — more accurate search
+  results.reviews_new_api = await (async () => {
+    const key = process.env.GOOGLE_PLACES_API_KEY
+    const res = await fetch(
+      'https://places.googleapis.com/v1/places:searchText',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.id',
+        },
+        body: JSON.stringify({
+          textQuery: 'בסלון basalon.co.il',
+          languageCode: 'he',
+          regionCode: 'IL',
+        }),
+      }
+    )
+    const data = await res.json()
+    return data.places?.slice(0, 3).map((p: any) => ({
+      name: p.displayName?.text,
+      rating: p.rating,
+      count: p.userRatingCount,
+      website: p.websiteUri,
+      id: p.id,
+    })) ?? data
+  })().catch(e => `error: ${e.message}`)
+
   return Response.json(results)
 }
