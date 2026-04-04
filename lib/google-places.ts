@@ -136,6 +136,82 @@ function buildResult(
   }
 }
 
+async function getRatingViaGeminiSearch(
+  businessName: string,
+  domain: string,
+): Promise<PlaceDetailsResult | null> {
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!geminiKey) return null
+
+  try {
+    const prompt = `Find the Google Maps rating for the business "${businessName}" whose website is ${domain}. Return ONLY valid JSON: {"rating": X.X, "review_count": Y, "maps_url": "https://maps.google.com/..."} — use null values if not found.`
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+        }),
+      }
+    )
+    const data = await res.json()
+    if (data.error) {
+      console.error('[google-places] gemini-search API error:', JSON.stringify(data.error))
+      return null
+    }
+    const text: string = data.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? ''
+    console.log('[google-places] gemini-search raw:', text.slice(0, 400))
+    if (!text) return null
+
+    // Extract JSON from the response
+    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+    const s = clean.indexOf('{')
+    const e = clean.lastIndexOf('}')
+    let parsed: any = null
+    if (s !== -1 && e > s) {
+      try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { /* ignore */ }
+    }
+
+    let rating: number | null = null
+    let count: number | null = null
+    let mapsUrl: string | null = null
+
+    if (parsed) {
+      rating = typeof parsed.rating === 'number' ? parsed.rating : null
+      count = typeof parsed.review_count === 'number' ? parsed.review_count : null
+      mapsUrl = typeof parsed.maps_url === 'string' && parsed.maps_url.startsWith('http') ? parsed.maps_url : null
+    }
+
+    // Fallback: regex extraction if JSON parse failed
+    if (rating == null) {
+      const rm = text.match(/rating["\s:]+(\d+\.?\d*)/i)
+      if (rm) rating = parseFloat(rm[1])
+    }
+    if (count == null) {
+      const cm = text.match(/review_count["\s:]+(\d+)/i) || text.match(/(\d+)\s*(?:reviews?|ביקורות)/i)
+      if (cm) count = parseInt(cm[1])
+    }
+
+    if (rating == null || rating < 1.0 || rating > 5.0) {
+      console.log('[google-places] gemini-search: no valid rating found')
+      return null
+    }
+
+    console.log(`[google-places] gemini-search HIT: rating=${rating} count=${count} url=${mapsUrl}`)
+    return {
+      place_id: `gemini_${domain}`,
+      google_rating: rating,
+      google_review_count: count ?? 0,
+      google_maps_url: mapsUrl ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(businessName + ' ' + domain)}`,
+    }
+  } catch (err) {
+    console.error('[google-places] getRatingViaGeminiSearch error:', err)
+    return null
+  }
+}
+
 export async function getPlaceDetails(
   businessName: string,
   website: string,
@@ -222,6 +298,15 @@ export async function getPlaceDetails(
       }
     }
     console.log('[google-places] strategy 4 no website-matched result')
+
+    // ── Strategy 5: Gemini with Google Search grounding ─────────────────────
+    console.log('[google-places] trying strategy 5: Gemini web search for rating')
+    const geminiResult = await getRatingViaGeminiSearch(businessName, domain)
+    if (geminiResult) {
+      console.log(`[google-places] strategy 5 HIT: rating=${geminiResult.google_rating} count=${geminiResult.google_review_count}`)
+      return geminiResult
+    }
+    console.log('[google-places] strategy 5 no result')
 
     console.log('[google-places] all strategies exhausted — returning null')
     return null
