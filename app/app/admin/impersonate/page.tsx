@@ -16,7 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
-  CheckCircle2, XCircle, FileText, Minus,
+  CheckCircle2, XCircle, FileText, Minus, Trash2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -71,6 +71,10 @@ export default function ImpersonatePage() {
   const [triggering, setTriggering] = useState<Record<string, boolean>>({})
   // Polling: set of user IDs currently in 'running' state
   const [pollingUsers, setPollingUsers] = useState<Set<string>>(new Set())
+
+  // Delete user
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<UserRow | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   // Refresh All
   const [refreshingAll, setRefreshingAll] = useState(false)
@@ -257,6 +261,26 @@ export default function ImpersonatePage() {
     }
   }
 
+  async function deleteUser(targetUser: UserRow) {
+    setDeleteConfirmUser(null)
+    setDeleting(targetUser.id)
+    try {
+      const res = await fetch('/api/admin/delete-user', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: targetUser.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה במחיקת המשתמש')
+      setUsers(prev => prev.filter(u => u.id !== targetUser.id))
+      toast({ title: "המשתמש נמחק", description: targetUser.email })
+    } catch (e: any) {
+      toast({ title: "שגיאה במחיקה", description: e?.message, variant: "destructive" })
+    } finally {
+      setDeleting(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -378,6 +402,20 @@ export default function ImpersonatePage() {
                           }
                           התחבר
                         </Button>
+                        {/* Delete button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                          onClick={() => setDeleteConfirmUser(u)}
+                          disabled={deleting === u.id}
+                          title="מחק משתמש"
+                        >
+                          {deleting === u.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Trash2 className="h-3.5 w-3.5" />
+                          }
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -481,6 +519,37 @@ export default function ImpersonatePage() {
                 סנכרן עכשיו
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete user confirmation dialog */}
+      <Dialog open={!!deleteConfirmUser} onOpenChange={open => { if (!open) setDeleteConfirmUser(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              מחיקת משתמש
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              האם אתה בטוח שברצונך למחוק את המשתמש{' '}
+              <strong className="font-mono">{deleteConfirmUser?.email}</strong>?
+            </p>
+            <p className="text-muted-foreground">
+              פעולה זו תמחק את המשתמש ואת כל נתוני החברה שלו לצמיתות ואינה ניתנת לביטול.
+            </p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteConfirmUser(null)}>בטל</Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteConfirmUser && deleteUser(deleteConfirmUser)}
+            >
+              <Trash2 className="ml-2 h-4 w-4" />
+              מחק לצמיתות
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
