@@ -60,12 +60,12 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { competitorId, name, website: competitorWebsite } = await request.json()
+    const { competitorId, name, website: competitorWebsite, phone: competitorPhone } = await request.json()
     if (!competitorId || !name) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
     // Try Google Places first (accurate), fall back to Gemini
     const placesResult = competitorWebsite
-      ? await getPlaceDetails(name, competitorWebsite)
+      ? await getPlaceDetails(name, competitorWebsite, competitorPhone || undefined)
       : null
     const geminiResult = placesResult ? null : await fetchRatingWithGemini(name)
 

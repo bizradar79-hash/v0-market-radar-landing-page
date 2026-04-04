@@ -57,6 +57,7 @@ interface Competitor {
   company_id: string
   name: string
   website: string
+  phone?: string | null
   services: string
   pricing: string
   positioning: string
@@ -222,6 +223,7 @@ export default function CompetitorsPage() {
           competitorId: competitor.id,
           name: competitor.name,
           website: competitor.website || '',
+          phone: competitor.phone || undefined,
         }),
       })
       if (!res.ok) {

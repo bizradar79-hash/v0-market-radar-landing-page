@@ -983,16 +983,28 @@ export default function ProfilePage() {
                 </div>
               )}
 
-              {/* Google Maps fallback link */}
-              <a
-                href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
-              >
-                <ExternalLink className="h-4 w-4" />
-                {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'לחץ לצפייה ישירה בגוגל מאפס'}
-              </a>
+              {/* Google Maps rating + link */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {reviewAnalysis.google_rating != null && (
+                  <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
+                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-semibold">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                    {reviewAnalysis.google_review_count != null && (
+                      <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
+                    )}
+                    <span className="text-xs text-muted-foreground">גוגל מאפס</span>
+                  </div>
+                )}
+                <a
+                  href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'חפש בגוגל מאפס'}
+                </a>
+              </div>
 
               {reviewAnalysis.fetchedAt && (
                 <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
