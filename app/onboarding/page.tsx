@@ -70,6 +70,7 @@ const SCAN_STEPS = [
   { label: 'מדרג SEO...', route: '/api/generate-seo-ranking' },
   { label: 'מדרג GEO...', route: '/api/generate-geo-ranking' },
   { label: 'מנתח טרנדים בתעשייה...', route: '/api/industry-trends' },
+  { label: 'מנתח טרנדים לפי מילות מפתח...', route: '/api/scan-keyword-trends' },
   { label: 'מנתח טרנדים מתחרים...', route: '/api/competitor-trends' },
   { label: 'מחפש חדשות...', route: '/api/generate-news' },
   { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },

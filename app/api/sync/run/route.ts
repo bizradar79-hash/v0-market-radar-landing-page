@@ -81,7 +81,7 @@ export async function POST(request: Request) {
   // Check current sync status
   const { data: company } = await adminDb
     .from('companies')
-    .select('id, sync_status, last_sync_at, next_sync_at')
+    .select('id, sync_status, last_sync_at, next_sync_at, keywords')
     .eq('id', companyId)
     .single()
 
@@ -156,6 +156,29 @@ export async function POST(request: Request) {
       const r = await callModule(origin, '/api/industry-trends', companyId)
       addLog('industry_trends', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
+    }
+
+    // ── 4b. Keyword trends — refresh for each saved keyword ───────────────────
+    {
+      const keywords: string[] = ((company as any).keywords || []).slice(0, 8)
+      const adminHeaders = {
+        'Content-Type': 'application/json',
+        'x-admin-user-id': companyId,
+        'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      }
+      let kwUpdated = 0
+      for (const keyword of keywords) {
+        try {
+          const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
+            method: 'POST',
+            headers: adminHeaders,
+            body: JSON.stringify({ keyword, force: true }),
+          })
+          if (res.ok) kwUpdated++
+        } catch { /* continue */ }
+      }
+      addLog('keyword_trends', 'ok', `${kwUpdated}/${keywords.length} keywords updated`)
+      await new Promise(res => setTimeout(res, 1000))
     }
 
     // ── 5. Competitor trends ──────────────────────────────────────────────────

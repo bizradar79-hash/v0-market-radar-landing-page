@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   TrendingUp, TrendingDown, Minus, Loader2,
-  Plus, Hash, ChevronDown, X, RefreshCw,
+  Plus, Hash, ChevronDown, X,
   Zap, Users, Lightbulb,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
@@ -232,11 +232,11 @@ export default function TrendsPage() {
 
   async function addKeyword() {
     const kw = newKw.trim()
-    if (!kw || keywords.includes(kw) || keywords.length >= 10) return
+    if (!kw || keywords.includes(kw) || keywords.length >= 8) return
     setAddingKw(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setAddingKw(false); return }
-    const newList = [...keywords, kw]
+    const newList = [...keywords, kw].slice(0, 8)
     const { error } = await supabase.from('companies').update({ keywords: newList }).eq('id', user.id)
     if (!error) {
       setKeywords(newList)
@@ -346,13 +346,15 @@ export default function TrendsPage() {
         <div className="flex items-center justify-between border-b pb-2">
           <div>
             <h2 className="text-lg font-semibold text-foreground">טרנדים לפי מילות מפתח</h2>
-            <p className="text-sm text-muted-foreground">מה טרנדי השבוע עבור כל מילת מפתח ({keywords.length}/10)</p>
+            <p className="text-sm text-muted-foreground">מה טרנדי השבוע עבור כל מילת מפתח ({keywords.length}/8)</p>
           </div>
-          {keywords.length < 10 && !showAddKw && (
+          {keywords.length < 8 && !showAddKw ? (
             <Button variant="outline" size="sm" onClick={() => setShowAddKw(true)}>
               <Plus className="ml-2 h-3.5 w-3.5" />הוסף מילת מפתח
             </Button>
-          )}
+          ) : keywords.length >= 8 ? (
+            <span className="text-xs text-muted-foreground">הגעת למקסימום 8 מילות מפתח</span>
+          ) : null}
         </div>
 
         {/* Data source info box */}
@@ -425,9 +427,7 @@ export default function TrendsPage() {
                     <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>
                   <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refreshKeywordTrend(kw)} disabled={isLoading} title="רענן טרנדים">
-                      {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    </Button>
+                    {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeKeyword(kw)} title="הסר מילת מפתח">
                       <X className="h-3.5 w-3.5" />
                     </Button>
@@ -505,7 +505,7 @@ export default function TrendsPage() {
 
                 {isExpanded && !isLoading && !kwData && (
                   <div className="mt-3 text-center py-4 text-sm text-muted-foreground">
-                    <p>לחץ על כפתור הרענון כדי לטעון טרנדים עבור &quot;{kw}&quot;</p>
+                    <p>טרנדים עבור &quot;{kw}&quot; יטענו בסנכרון הבא</p>
                   </div>
                 )}
               </CardContent>
