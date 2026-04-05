@@ -82,7 +82,7 @@ const SCAN_STEPS = [
 // ──────────────────────────────────────────────────────────────────────────
 
 type Phase = 'intake' | 'analyzing' | 'wizard' | 'saving' | 'scanning'
-interface WizardCompetitor { name: string; website: string }
+interface WizardCompetitor { name: string; website: string; source: 'auto' | 'manual' }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Helper: removable tag list with inline add
@@ -229,7 +229,24 @@ export default function OnboardingPage() {
         setWIndustryTags(p.industryTags || [])
         setWPrimaryKw(p.primaryKeywords || [])
         setWSecondaryKw(p.secondaryKeywords || [])
-        setWCompetitors((p.directCompetitors || []).map(name => ({ name, website: '' })))
+        const autoCompetitors: WizardCompetitor[] = (p.directCompetitors || []).map(name => ({ name, website: '', source: 'auto' as const }))
+        setWCompetitors(autoCompetitors)
+        // Fetch websites for auto-detected competitors in background
+        autoCompetitors.forEach(async (comp) => {
+          try {
+            const r = await fetch('/api/lookup-competitor-website', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: comp.name }),
+            })
+            const { website: fetchedWebsite } = await r.json()
+            if (fetchedWebsite) {
+              setWCompetitors(prev => prev.map(c =>
+                c.name === comp.name && c.source === 'auto' ? { ...c, website: fetchedWebsite } : c
+              ))
+            }
+          } catch { /* silent */ }
+        })
         setWizardStep(1)
         setPhase('wizard')
       } else {
@@ -292,7 +309,7 @@ export default function OnboardingPage() {
               positioning: 'מתחרה ישיר',
               threat_score: Math.floor(Math.random() * 30) + 50,
               trend: 'stable',
-              source: 'manual',
+              source: c.source,
             }))
         )
       }
@@ -349,6 +366,7 @@ export default function OnboardingPage() {
     setWCompetitors([...wCompetitors, {
       name: newCompName.trim(),
       website: newCompWebsite.trim(),
+      source: 'manual',
     }])
     setNewCompName('')
     setNewCompWebsite('')

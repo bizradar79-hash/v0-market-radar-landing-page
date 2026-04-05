@@ -175,15 +175,14 @@ export default function CompetitorsPage() {
       .select("*")
 
     if (!error && data) {
-      // Manual competitors first (newest first), then auto (by threat_score desc)
-      const sorted = [
-        ...data.filter(c => c.source === 'manual').sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ),
-        ...data.filter(c => c.source !== 'manual').sort((a, b) =>
-          (b.threat_score || 0) - (a.threat_score || 0)
-        ),
-      ]
+      // Sort by threat_score desc; manual competitors appear first within same score group
+      const sorted = [...data].sort((a, b) => {
+        const scoreDiff = (b.threat_score || 0) - (a.threat_score || 0)
+        if (scoreDiff !== 0) return scoreDiff
+        const aManual = a.source === 'manual' ? 0 : 1
+        const bManual = b.source === 'manual' ? 0 : 1
+        return aManual - bManual
+      })
       // Trim to max 10 — delete excess auto competitors from DB
       if (sorted.length > 10) {
         const excess = sorted.slice(10).filter(c => c.source !== 'manual')
@@ -194,9 +193,12 @@ export default function CompetitorsPage() {
       } else {
         setCompetitors(sorted)
       }
-      // Auto-fetch ratings for manual competitors with missing google_rating (background, fire-and-forget)
-      const needsRating = sorted.filter(c => c.source === 'manual' && c.google_rating == null && c.website)
+      // Auto-fetch ratings for ALL competitors with missing google_rating (background, fire-and-forget)
+      const needsRating = sorted.filter(c => c.google_rating == null && c.website)
       needsRating.forEach(c => fetchGoogleRating(c))
+      // Auto-fetch services description for competitors with empty/null services
+      const needsServices = sorted.filter(c => !c.services || c.services === 'לא ידוע')
+      needsServices.forEach(c => fetchMissingServices(c))
     }
     setLoading(false)
   }
@@ -254,6 +256,23 @@ export default function CompetitorsPage() {
     } finally {
       setFetchingRating(prev => ({ ...prev, [competitor.id]: false }))
     }
+  }
+
+  async function fetchMissingServices(competitor: Competitor) {
+    try {
+      const res = await fetch('/api/lookup-competitor-services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: competitor.name }),
+      })
+      if (!res.ok) return
+      const { services } = await res.json()
+      if (!services) return
+      // Update in DB
+      await supabase.from('competitors').update({ services }).eq('id', competitor.id)
+      setCompetitors(prev => prev.map(c => c.id === competitor.id ? { ...c, services } : c))
+      setSelectedCompetitor(prev => prev?.id === competitor.id ? { ...prev, services } : prev)
+    } catch { /* silent */ }
   }
 
   async function fetchReviews(competitor: Competitor) {
