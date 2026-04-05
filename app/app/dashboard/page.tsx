@@ -8,9 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
-import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
-import MarketAnalysisBlock from "@/components/dashboard/MarketAnalysisBlock"
 import {
   Target,
   Star,
@@ -292,13 +289,6 @@ export default function AppDashboardPage() {
         })}
       </div>
 
-      {/* Weekly Actions */}
-      <WeeklyActionsBlock />
-
-      {/* Market Analysis */}
-      <MarketAnalysisBlock />
-
-
       {/* Smart Bottom Widgets */}
       {data && (
         data.competitorsCount === 0 && data.tendersCount === 0 && data.conferencesCount === 0 && data.trendsCount === 0 ? (
@@ -517,8 +507,6 @@ export default function AppDashboardPage() {
         )
       )}
 
-      {/* Niche Discovery — always at bottom */}
-      <NicheDiscoveryBlock />
     </div>
   )
 }

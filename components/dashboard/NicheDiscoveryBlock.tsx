@@ -9,8 +9,6 @@ import NicheDetailsPanel from "./NicheDetailsPanel"
 import type { NicheOpportunity, NicheOpportunityData, NicheStatus } from "@/types/niche-opportunity"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
 import { revenueInputFromNiche } from "@/lib/revenue-adapters"
-import SaveOpportunityButton from "@/components/opportunities/SaveOpportunityButton"
-
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: NicheOpportunityData | null = null
 
@@ -302,22 +300,6 @@ function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: Card
         </Badge>
         <span className="text-xs text-muted-foreground">ביטחון: {metrics.confidenceScore}%</span>
       </div>
-
-      <SaveOpportunityButton
-        sourceType="niche"
-        sourceId={niche.id}
-        data={{
-          title: niche.nicheTitle,
-          summary: niche.shortInsightSummary,
-          revenue_potential_score: metrics.revenuePotentialScore,
-          estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
-          estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
-          confidence_score: metrics.confidenceScore,
-          industry_tag: niche.category ?? '',
-          market_region: niche.region ?? '',
-        }}
-        size="sm"
-      />
 
       {/* Lead potential */}
       {niche.estimatedLeadPotential && (

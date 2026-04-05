@@ -9,8 +9,6 @@ import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
 import { revenueInputFromWeeklyAction } from "@/lib/revenue-adapters"
-import SaveOpportunityButton from "@/components/opportunities/SaveOpportunityButton"
-
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: WeeklyActionsData | null = null
 
@@ -231,24 +229,6 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
           💰 {metrics.revenueLevel}
         </Badge>
         <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
-      </div>
-
-      <div onClick={e => e.stopPropagation()} className="mt-1">
-        <SaveOpportunityButton
-          sourceType="weekly_action"
-          sourceId={action.id}
-          data={{
-            title: action.title,
-            summary: action.summary,
-            revenue_potential_score: metrics.revenuePotentialScore,
-            estimated_revenue_min: metrics.estimatedMonthlyRevenueMin,
-            estimated_revenue_max: metrics.estimatedMonthlyRevenueMax,
-            confidence_score: metrics.confidenceScore,
-            market_region: '',
-            industry_tag: '',
-          }}
-          size="sm"
-        />
       </div>
 
       <div className="mt-1 flex items-center justify-end gap-1 text-xs text-primary">
