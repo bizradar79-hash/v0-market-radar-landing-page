@@ -47,8 +47,6 @@ import {
   UserPlus,
   Bot,
   Star,
-  ThumbsUp,
-  ThumbsDown,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -91,25 +89,10 @@ interface RankingResult {
   isKnownCompetitor?: boolean
 }
 
-interface ReviewSource {
-  name: string
-  rating?: number | null
-  review_count?: number | null
-  url?: string | null
-}
-
 interface ReviewsAnalysis {
-  overallSentiment: 'חיובי' | 'מעורב' | 'שלילי'
-  totalReviewsFound: number
-  averageRating?: number | null
-  weighted_average?: number | null
-  sentiment_score?: number | null
-  positiveThemes: string[]
-  negativeThemes: string[]
-  recurringComplaints: string[]
-  opportunities: string[]
-  summary: string
-  sources: ReviewSource[] | string[]
+  google_rating: number | null
+  google_review_count: number | null
+  google_maps_url: string | null
 }
 
 type ModalTab = 'details' | 'ai' | 'reviews'
@@ -820,104 +803,40 @@ export default function CompetitorsPage() {
                 {activeTab === 'reviews' && (
                   <div>
                     {loadingReviews[selectedCompetitor.id] ? (
-                      <div className="space-y-4 animate-pulse py-4">
-                        <div className="h-8 rounded bg-muted w-1/3" />
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="h-32 rounded bg-muted" />
-                          <div className="h-32 rounded bg-muted" />
-                        </div>
-                        <div className="h-24 rounded bg-muted" />
+                      <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="text-sm text-muted-foreground">מחפש נתוני גוגל מאפס...</p>
                       </div>
                     ) : reviews[selectedCompetitor.id] ? (
-                      (() => {
-                        const rv = reviews[selectedCompetitor.id]
-                        const sentimentColor = rv.overallSentiment === 'חיובי' ? 'bg-green-100 text-green-700 border-green-200' : rv.overallSentiment === 'שלילי' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                        return (
-                          <div className="space-y-5">
-                            {/* Header */}
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <Badge variant="outline" className={sentimentColor}>{rv.overallSentiment}</Badge>
-                              {rv.totalReviewsFound > 0 && <span className="text-sm text-muted-foreground">{rv.totalReviewsFound} ביקורות נמצאו</span>}
-                            </div>
-                            {rv.summary && <p className="text-sm text-muted-foreground rounded-lg bg-muted/40 border px-3 py-2">{rv.summary}</p>}
-                            {/* Per-source breakdown */}
-                            {rv.sources.length > 0 && (
-                              <div className="rounded-lg border border-border overflow-hidden">
-                                <div className="bg-muted/40 px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground">
-                                  פירוט לפי מקור
-                                </div>
-                                <div className="divide-y divide-border">
-                                  {rv.sources.map((s: any, si: number) => {
-                                    const isObj = typeof s === 'object' && s !== null
-                                    const srcName = isObj ? s.name : s
-                                    const srcRating = isObj ? s.rating : null
-                                    const srcCount = isObj ? s.review_count : null
-                                    const srcUrl = isObj ? s.url : null
-                                    return (
-                                      <div key={si} className="flex items-center gap-3 px-3 py-2 text-sm">
-                                        <span className="flex-1 font-medium">{srcName}</span>
-                                        {srcRating != null && <span className="text-yellow-600 font-medium">⭐ {Number(srcRating).toFixed(1)}</span>}
-                                        {srcCount != null && <span className="text-muted-foreground text-xs">({Number(srcCount).toLocaleString()} ביקורות)</span>}
-                                        {srcUrl && (
-                                          <a href={srcUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary">
-                                            <ExternalLink className="h-3 w-3" />
-                                          </a>
-                                        )}
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                                {(rv.weighted_average != null || rv.sentiment_score != null) && (
-                                  <div className="bg-muted/20 px-3 py-2 border-t border-border flex items-center gap-4 text-xs text-muted-foreground">
-                                    {rv.weighted_average != null && <span>ממוצע משוקלל: <strong className="text-foreground">⭐ {Number(rv.weighted_average).toFixed(1)}</strong></span>}
-                                    {rv.sentiment_score != null && <span>ציון סנטימנט AI: <strong className="text-foreground">{Number(rv.sentiment_score).toFixed(1)}/10</strong> <span title="ציון משוקלל המשקף עומק ועקביות הביקורות">ℹ️</span></span>}
-                                  </div>
-                                )}
-                              </div>
+                      <div className="space-y-4">
+                        {reviews[selectedCompetitor.id].google_rating != null ? (
+                          <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1 w-fit">
+                            <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                            <span className="text-sm font-semibold">{reviews[selectedCompetitor.id].google_rating!.toFixed(1)}</span>
+                            {reviews[selectedCompetitor.id].google_review_count != null && (
+                              <span className="text-xs text-muted-foreground">({reviews[selectedCompetitor.id].google_review_count!.toLocaleString()} ביקורות)</span>
                             )}
-                            {/* Strengths / Weaknesses */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="rounded-lg border border-green-200 bg-green-50/50 p-4">
-                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-green-700 text-sm">
-                                  <ThumbsUp className="h-4 w-4" />✅ חוזקות לפי לקוחות
-                                </h4>
-                                <ul className="space-y-1">
-                                  {rv.positiveThemes.map((t, i) => <li key={i} className="text-sm text-green-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{t}</li>)}
-                                  {rv.positiveThemes.length === 0 && <li className="text-sm text-muted-foreground">לא נמצאו</li>}
-                                </ul>
-                              </div>
-                              <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
-                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-red-700 text-sm">
-                                  <ThumbsDown className="h-4 w-4" />❌ חולשות לפי לקוחות
-                                </h4>
-                                <ul className="space-y-1">
-                                  {[...rv.negativeThemes, ...rv.recurringComplaints].filter((v, i, a) => a.indexOf(v) === i).map((t, i) => (
-                                    <li key={i} className="text-sm text-red-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{t}</li>
-                                  ))}
-                                  {rv.negativeThemes.length === 0 && rv.recurringComplaints.length === 0 && <li className="text-sm text-muted-foreground">לא נמצאו</li>}
-                                </ul>
-                              </div>
-                            </div>
-                            {/* Opportunities */}
-                            {rv.opportunities.length > 0 && (
-                              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
-                                <h4 className="font-semibold mb-2 flex items-center gap-2 text-blue-700 text-sm">
-                                  <Lightbulb className="h-4 w-4" />הזדמנויות עבורך
-                                </h4>
-                                <ul className="space-y-1">
-                                  {rv.opportunities.map((o, i) => <li key={i} className="text-sm text-blue-700 flex items-start gap-1.5"><span className="mt-1 shrink-0">•</span>{o}</li>)}
-                                </ul>
-                              </div>
-                            )}
+                            <span className="text-xs text-muted-foreground">גוגל מאפס</span>
                           </div>
-                        )
-                      })()
+                        ) : (
+                          <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
+                        )}
+                        <a
+                          href={reviews[selectedCompetitor.id].google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedCompetitor.name + (selectedCompetitor.website ? ' ' + selectedCompetitor.website : ''))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
+                        >
+                          <ExternalLink className="ml-2 h-4 w-4" />
+                          {reviews[selectedCompetitor.id].google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'חפש בגוגל מאפס'}
+                        </a>
+                      </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-12 space-y-4">
                         <Star className="h-12 w-12 text-muted-foreground/50" />
-                        <p className="text-muted-foreground">לחץ לניתוח ביקורות {selectedCompetitor.name}</p>
+                        <p className="text-muted-foreground">לחץ לחיפוש דירוג גוגל מאפס של {selectedCompetitor.name}</p>
                         <Button onClick={() => fetchReviews(selectedCompetitor)}>
-                          <Star className="ml-2 h-4 w-4" />נתח ביקורות
+                          <Star className="ml-2 h-4 w-4" />חפש בגוגל מאפס
                         </Button>
                       </div>
                     )}

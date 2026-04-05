@@ -75,6 +75,7 @@ const SCAN_STEPS = [
   { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },
   { label: 'מגלה לידים...', route: '/api/generate-leads' },
   { label: 'מייצר פעולות שבועיות...', route: '/api/generate-weekly-actions' },
+  { label: 'מחפש דירוג גוגל מאפס...', route: '/api/analyze-company-reviews' },
 ]
 
 // ──────────────────────────────────────────────────────────────────────────

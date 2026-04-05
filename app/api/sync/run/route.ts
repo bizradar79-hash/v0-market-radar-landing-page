@@ -130,6 +130,13 @@ export async function POST(request: Request) {
       addLog('manual_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
     }
 
+    // ── 1c. Company Google Maps review data ──────────────────────────────────
+    {
+      const r = await callModule(origin, '/api/analyze-company-reviews', companyId)
+      addLog('review_analysis', r.ok ? 'ok' : 'error', r.ok ? (r.body?.google_rating != null ? `rating=${r.body.google_rating}` : 'no rating found') : (r.body?.error ?? `HTTP ${r.status}`))
+      await new Promise(res => setTimeout(res, 1000))
+    }
+
     // ── 2. SEO ranking ────────────────────────────────────────────────────────
     {
       const r = await callModule(origin, '/api/generate-seo-ranking', companyId)
