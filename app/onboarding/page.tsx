@@ -3,181 +3,203 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { Building2, Users, Tag, Settings, ChevronLeft, ChevronRight, Check, Plus, X, Loader2, Sparkles } from "lucide-react"
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Plus,
+  Sparkles,
+  X,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase/client"
-import { BusinessProfileConfirmation } from "@/components/onboarding/BusinessProfileConfirmation"
 import type { BusinessProfile } from "@/types/business-profile"
 
-const steps = [
-  { id: 1, title: "פרטי החברה", icon: Building2 },
-  { id: 2, title: "מתחרים", icon: Users },
-  { id: 3, title: "מילות מפתח", icon: Tag },
-  { id: 4, title: "בחר מודולים", icon: Settings },
-]
+// ──────────────────────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────────────────────
 
-const ISRAELI_CITIES = [
-  'כל הארץ',
-  'תל אביב',
-  'ירושלים',
-  'חיפה',
-  'באר שבע',
-  'ראשון לציון',
-  'פתח תקווה',
-  'אשדוד',
-  'נתניה',
-  'בני ברק',
-  'חולון',
-  'רמת גן',
-  'אשקלון',
-  'רחובות',
-  'בת ים',
-  'הרצליה',
-  'כפר סבא',
-  'מודיעין',
-  'רעננה',
-  'לוד',
-  'נהריה',
-  'טבריה',
-  'אילת',
-  'צפת',
-  'עפולה',
+const OWNER_ROLES = [
+  'מנכ"ל / בעלים',
+  'מנהל שיווק',
+  'מנהל מכירות',
+  'מנהל פיתוח עסקי',
+  'מנהל מוצר',
+  'יועץ עסקי',
+  'מנהל כללי',
   'אחר',
 ]
 
-const industries = [
-  "טכנולוגיה",
-  "פינטק",
-  "סייבר",
-  "בריאות דיגיטלית",
-  "מסחר אלקטרוני",
-  "SaaS",
-  "תוכנה",
-  "שירותים עסקיים",
-  "ייצור",
-  "נדל\"ן",
-  "חינוך",
-  "תחבורה",
-  "אנרגיה",
-  "מזון ומשקאות",
-  "קמעונאות",
-  "דפוס והפקה",
-  "שיווק ופרסום",
-  "בנייה ותשתיות",
-  "תיירות ואירוח",
-  "בריאות ורפואה",
-  "חקלאות",
-  "לוגיסטיקה",
-  "פארמה",
-  "ביטוח",
-  "פינאנס",
-  "משפטים",
-  "ספורט ופנאי",
-  "אחר",
+const GEOGRAPHIC_OPTIONS = [
+  { value: 'national', label: '🇮🇱 ארצי — פעיל בכל רחבי ישראל' },
+  { value: 'local', label: '🏙️ מקומי — פעיל באזור גיאוגרפי מוגדר' },
+  { value: 'international', label: '🌍 בינלאומי — פעיל גם מחוץ לישראל' },
 ]
 
-const companySizes = [
-  "1-10 עובדים",
-  "11-50 עובדים",
-  "51-200 עובדים",
-  "201-500 עובדים",
-  "500+ עובדים",
+const BUSINESS_MODEL_OPTIONS: Array<{ value: BusinessProfile['businessModel']; label: string }> = [
+  { value: 'B2B', label: 'B2B — מכירה לעסקים' },
+  { value: 'B2C', label: 'B2C — מכירה לצרכנים' },
+  { value: 'B2B2C', label: 'B2B2C — גם לעסקים וגם לצרכנים' },
+  { value: 'mixed', label: 'מעורב' },
 ]
 
-const modules = [
-  { id: "competitors", label: "מתחרים", description: "מעקב אחר פעילות מתחרים" },
-  { id: "leads", label: "לידים", description: "גילוי לידים חדשים" },
-  { id: "tenders", label: "מכרזים", description: "התראות על מכרזים רלוונטיים" },
-  { id: "trends", label: "טרנדים", description: "זיהוי מגמות בשוק" },
-  { id: "news", label: "חדשות", description: "חדשות רלוונטיות לעסק" },
-  { id: "conferences", label: "כנסים", description: "כנסים ואירועים מקצועיים" },
+const WIZARD_STEPS = [
+  { id: 1, title: 'פעילות עיקרית' },
+  { id: 2, title: 'מוצרים ושירותים' },
+  { id: 3, title: 'קהלי יעד וערוצים' },
+  { id: 4, title: 'תגיות ומילות מפתח' },
+  { id: 5, title: 'מתחרים' },
 ]
 
 const SCAN_STEPS = [
   { label: 'מנתח פרופיל עסקי...', route: '/api/generate-overview' },
   { label: 'מייצר ניתוח SWOT...', route: '/api/generate-swot' },
   { label: 'מגלה מתחרים...', route: '/api/find-competitors' },
-  { label: 'מגלה לידים...', route: '/api/generate-leads' },
-  { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },
+  { label: 'מדרג SEO...', route: '/api/generate-seo-ranking' },
+  { label: 'מדרג GEO...', route: '/api/generate-geo-ranking' },
+  { label: 'מנתח טרנדים בתעשייה...', route: '/api/industry-trends' },
+  { label: 'מנתח טרנדים מתחרים...', route: '/api/competitor-trends' },
   { label: 'מחפש חדשות...', route: '/api/generate-news' },
-  { label: 'מחפש כנסים...', route: '/api/generate-conferences' },
-  { label: 'מנתח טרנדים...', route: '/api/generate-trends' },
+  { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },
+  { label: 'מגלה לידים...', route: '/api/generate-leads' },
+  { label: 'מייצר פעולות שבועיות...', route: '/api/generate-weekly-actions' },
 ]
 
-interface Competitor {
-  name: string
-  website: string
-  threatScore?: number
+// ──────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────
+
+type Phase = 'intake' | 'analyzing' | 'wizard' | 'saving' | 'scanning'
+interface WizardCompetitor { name: string; website: string }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Helper: removable tag list with inline add
+// ──────────────────────────────────────────────────────────────────────────
+
+function TagList({
+  tags,
+  onChange,
+  placeholder,
+}: {
+  tags: string[]
+  onChange: (t: string[]) => void
+  placeholder: string
+}) {
+  const [input, setInput] = useState('')
+  const add = () => {
+    const v = input.trim()
+    if (v && !tags.includes(v)) onChange([...tags, v])
+    setInput('')
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+        {tags.map((t, i) => (
+          <Badge key={i} variant="secondary" className="gap-1 pr-1 text-sm py-1">
+            {t}
+            <button
+              type="button"
+              onClick={() => onChange(tags.filter((_, idx) => idx !== i))}
+              className="rounded hover:text-destructive"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+        {tags.length === 0 && (
+          <span className="text-sm text-muted-foreground">לא הוגדר</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); add() }
+          }}
+          placeholder={placeholder}
+          className="h-8 bg-background text-sm"
+        />
+        <Button type="button" variant="outline" size="sm" onClick={add} disabled={!input.trim()}>
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  )
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Main component
+// ──────────────────────────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const [currentStep, setCurrentStep] = useState(1)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isFindingCompetitors, setIsFindingCompetitors] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [isScanning, setIsScanning] = useState(false)
-  const [scanStep, setScanStep] = useState(0)
-  
-  // Step 1 - Company Details
-  const [companyName, setCompanyName] = useState("")
-  const [website, setWebsite] = useState("")
-  const [phone, setPhone] = useState("")
-  const [industry, setIndustry] = useState("")
-  const [city, setCity] = useState("כל הארץ")
-  const [cityCustom, setCityCustom] = useState("")
-  const [companySize, setCompanySize] = useState("")
-  const [description, setDescription] = useState("")
-  const [geographicScope, setGeographicScope] = useState<string[]>(['national'])
-  
-  // Step 2 - Competitors
-  const [competitors, setCompetitors] = useState<Competitor[]>([])
-  const [newCompetitorName, setNewCompetitorName] = useState("")
-  const [newCompetitorWebsite, setNewCompetitorWebsite] = useState("")
-  const [newCompetitorThreatScore, setNewCompetitorThreatScore] = useState("")
-  const [aiCompetitors, setAiCompetitors] = useState<Array<{ name: string; website: string; reason: string; similarity: number; selected: boolean }>>([])
-  const [competitorError, setCompetitorError] = useState<string | null>(null)
-  
-  // Step 3 - Keywords
-  const [keywords, setKeywords] = useState<string[]>([])
-  const [industriesTags, setIndustriesTags] = useState<string[]>([])
-  const [productsTags, setProductsTags] = useState<string[]>([])
-  const [newKeyword, setNewKeyword] = useState("")
-  const [newIndustry, setNewIndustry] = useState("")
-  const [newProduct, setNewProduct] = useState("")
-  
-  // Step 4 - Modules
-  const [selectedModules, setSelectedModules] = useState<Record<string, boolean>>({
-    competitors: true,
-    leads: true,
-    tenders: true,
-    trends: true,
-    news: true,
-    conferences: true,
-  })
 
-  // Industry "אחר" free text
-  const [industryCustom, setIndustryCustom] = useState("")
-  const effectiveIndustry = industry === 'אחר' ? industryCustom.trim() : industry
+  // Phase
+  const [phase, setPhase] = useState<Phase>('intake')
 
-  // Step 0 — AI Business Analysis
-  const [analysisPhase, setAnalysisPhase] = useState<'step0' | 'confirm' | 'wizard'>('step0')
-  const [analyzing, setAnalyzing] = useState(false)
+  // Intake form
+  const [companyName, setCompanyName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [website, setWebsite] = useState('')
+  const [description, setDescription] = useState('')
+  const [ownerRole, setOwnerRole] = useState('')
+  const [geographicScope, setGeographicScope] = useState('national')
+
+  // Errors
   const [analysisError, setAnalysisError] = useState<string | null>(null)
-  const [step0Name, setStep0Name] = useState("")
-  const [step0Website, setStep0Website] = useState("")
-  const [step0Description, setStep0Description] = useState("")
-  const [deepProfile, setDeepProfile] = useState<BusinessProfile | null>(null)
-  const [confirmingSave, setConfirmingSave] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const handleAnalyzeBusiness = async () => {
-    setAnalyzing(true)
+  // AI profile (raw result)
+  const [deepProfile, setDeepProfile] = useState<BusinessProfile | null>(null)
+
+  // Wizard navigation
+  const [wizardStep, setWizardStep] = useState(1)
+
+  // Wizard step 1 — core activity
+  const [wCoreActivity, setWCoreActivity] = useState('')
+  const [wBusinessModel, setWBusinessModel] = useState<BusinessProfile['businessModel']>('B2C')
+  const [wMarketPosition, setWMarketPosition] = useState('')
+
+  // Wizard step 2 — products
+  const [wProducts, setWProducts] = useState<BusinessProfile['products']>([])
+  const [newProductName, setNewProductName] = useState('')
+  const [newProductDesc, setNewProductDesc] = useState('')
+
+  // Wizard step 3 — audiences & channels
+  const [wAudiences, setWAudiences] = useState<string[]>([])
+  const [wChannels, setWChannels] = useState<string[]>([])
+
+  // Wizard step 4 — tags & keywords
+  const [wIndustryTags, setWIndustryTags] = useState<string[]>([])
+  const [wPrimaryKw, setWPrimaryKw] = useState<string[]>([])
+  const [wSecondaryKw, setWSecondaryKw] = useState<string[]>([])
+
+  // Wizard step 5 — competitors
+  const [wCompetitors, setWCompetitors] = useState<WizardCompetitor[]>([])
+  const [newCompName, setNewCompName] = useState('')
+  const [newCompWebsite, setNewCompWebsite] = useState('')
+
+  // Scanning
+  const [scanStep, setScanStep] = useState(0)
+
+  // ── Analyze ─────────────────────────────────────────────────────────────
+
+  async function handleAnalyze() {
+    if (!companyName.trim() || !phone.trim()) return
+    setPhase('analyzing')
     setAnalysisError(null)
     try {
       const supabase = createClient()
@@ -189,923 +211,722 @@ export default function OnboardingPage() {
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          companyName: step0Name,
-          website: step0Website,
-          shortDescription: step0Description,
+          companyName,
+          website,
+          shortDescription: description,
         }),
       })
       const data = await res.json()
       if (data.success && data.profile) {
-        setDeepProfile(data.profile)
-        setAnalysisPhase('confirm')
+        const p = data.profile as BusinessProfile
+        setDeepProfile(p)
+        setWCoreActivity(p.coreActivity || '')
+        setWBusinessModel(p.businessModel || 'B2C')
+        setWMarketPosition(p.marketPosition || '')
+        setWProducts(p.products || [])
+        setWAudiences(p.targetAudiences || [])
+        setWChannels(p.distributionChannels || [])
+        setWIndustryTags(p.industryTags || [])
+        setWPrimaryKw(p.primaryKeywords || [])
+        setWSecondaryKw(p.secondaryKeywords || [])
+        setWCompetitors((p.directCompetitors || []).map(name => ({ name, website: '' })))
+        setWizardStep(1)
+        setPhase('wizard')
       } else {
         setAnalysisError(data.error || 'שגיאה בניתוח העסק, נסה שנית')
+        setPhase('intake')
       }
     } catch {
       setAnalysisError('שגיאת רשת, נסה שנית')
-    } finally {
-      setAnalyzing(false)
+      setPhase('intake')
     }
   }
 
-  const handleConfirmProfile = async (confirmed: BusinessProfile) => {
-    setConfirmingSave(true)
-    try {
-      // Pre-fill wizard state from confirmed profile
-      if (step0Name) setCompanyName(step0Name)
-      if (step0Website) setWebsite(step0Website)
-      if (step0Description) setDescription(step0Description)
-      setKeywords(confirmed.primaryKeywords.slice(0, 10))
-      setIndustriesTags(confirmed.industryTags)
-      setCompetitors(
-        confirmed.directCompetitors.slice(0, 5).map(name => ({ name, website: '' }))
-      )
-      // Store confirmed profile to save later on final submit
-      setDeepProfile(confirmed)
-      setAnalysisPhase('wizard')
-    } finally {
-      setConfirmingSave(false)
-    }
-  }
+  // ── Submit (save + scan) ─────────────────────────────────────────────────
 
-  const addCompetitor = () => {
-    if (newCompetitorName.trim()) {
-      const scoreVal = parseInt(newCompetitorThreatScore)
-      setCompetitors([...competitors, {
-        name: newCompetitorName.trim(),
-        website: newCompetitorWebsite.trim(),
-        threatScore: !isNaN(scoreVal) ? Math.min(100, Math.max(0, scoreVal)) : undefined,
-      }])
-      setNewCompetitorName("")
-      setNewCompetitorWebsite("")
-      setNewCompetitorThreatScore("")
-    }
-  }
-
-  const removeCompetitor = (index: number) => {
-    setCompetitors(competitors.filter((_, i) => i !== index))
-  }
-
-  const findCompetitorsAuto = async () => {
-    setIsFindingCompetitors(true)
-    setCompetitorError(null)
-    setAiCompetitors([])
+  async function handleSubmit() {
+    setSubmitError(null)
+    setPhase('saving')
     try {
       const supabase = createClient()
-      const { data: { session } } = await supabase.auth.getSession()
-      const response = await fetch("/api/find-competitors", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({ industry, description, city, website }),
-      })
-      const data = await response.json()
-      if (data.success && data.competitors) {
-        // Show AI results as selectable cards
-        setAiCompetitors(data.competitors.map((c: { name: string; website: string; reason: string; similarity: number }) => ({
-          ...c,
-          selected: true, // default selected
-        })))
-      } else {
-        setCompetitorError(data.error || "לא הצלחנו למצוא מתחרים, נסה שנית")
-      }
-    } catch (error) {
-      console.error("Error finding competitors:", error)
-      setCompetitorError("לא הצלחנו למצוא מתחרים, נסה שנית")
-    } finally {
-      setIsFindingCompetitors(false)
-    }
-  }
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push('/login'); return }
 
-  const addSelectedCompetitors = () => {
-    const selected = aiCompetitors.filter(c => c.selected)
-    setCompetitors([...competitors, ...selected.map(c => ({ name: c.name, website: c.website }))])
-    setAiCompetitors([])
-  }
-
-  const toggleAiCompetitor = (index: number) => {
-    setAiCompetitors(prev => prev.map((c, i) => i === index ? { ...c, selected: !c.selected } : c))
-  }
-
-  const addTag = (type: "keyword" | "industry" | "product") => {
-    if (type === "keyword" && newKeyword.trim()) {
-      setKeywords([...keywords, newKeyword.trim()])
-      setNewKeyword("")
-    } else if (type === "industry" && newIndustry.trim()) {
-      setIndustriesTags([...industriesTags, newIndustry.trim()])
-      setNewIndustry("")
-    } else if (type === "product" && newProduct.trim()) {
-      setProductsTags([...productsTags, newProduct.trim()])
-      setNewProduct("")
-    }
-  }
-
-  const removeTag = (type: "keyword" | "industry" | "product", index: number) => {
-    if (type === "keyword") {
-      setKeywords(keywords.filter((_, i) => i !== index))
-    } else if (type === "industry") {
-      setIndustriesTags(industriesTags.filter((_, i) => i !== index))
-    } else if (type === "product") {
-      setProductsTags(productsTags.filter((_, i) => i !== index))
-    }
-  }
-
-  const effectiveCity = city === 'אחר' ? cityCustom.trim() || '' : city
-
-  const handleScopeToggle = (scope: string) => {
-    setGeographicScope(prev => {
-      const next = prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]
-      return next.length === 0 ? prev : next
-    })
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent, type: "keyword" | "industry" | "product") => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      addTag(type)
-    }
-  }
-
-  const handleSubmit = async () => {
-    setIsSubmitting(true)
-    setError(null)
-    
-    try {
-      const supabase = createClient()
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      
-      console.log("[v0] Onboarding submit - user:", user?.id, "error:", userError)
-      
-      if (userError || !user) {
-        console.log("[v0] No authenticated user, redirecting to login")
-        router.push("/login")
-        return
+      const updatedProfile: BusinessProfile = {
+        ...(deepProfile as BusinessProfile),
+        coreActivity: wCoreActivity,
+        businessModel: wBusinessModel,
+        marketPosition: wMarketPosition,
+        products: wProducts,
+        targetAudiences: wAudiences,
+        distributionChannels: wChannels,
+        industryTags: wIndustryTags,
+        primaryKeywords: wPrimaryKw,
+        secondaryKeywords: wSecondaryKw,
+        directCompetitors: wCompetitors.map(c => c.name),
       }
 
-      // Step 1: Save company profile
-      const companyData = {
+      const { error: upsertError } = await supabase.from('companies').upsert({
         id: user.id,
         name: companyName,
         website,
-        phone: phone.trim(),
-        industry: effectiveIndustry,
-        city: effectiveCity,
-        size: companySize,
+        phone,
         description,
-        competitors: competitors.map(c => ({ name: c.name, website: c.website })),
-        keywords: [...keywords, ...industriesTags, ...productsTags],
-        modules: Object.entries(selectedModules)
-          .filter(([, enabled]) => enabled)
-          .map(([id]) => id),
         onboarding_completed: true,
-        geographic_scope: geographicScope,
-        ...(deepProfile ? { business_profile: deepProfile } : {}),
-      }
-      
-      console.log("[v0] Saving company data:", companyData)
-      
-      const { data: companyResult, error: companyError } = await supabase.from("companies").upsert(companyData).select()
-      
-      console.log("[v0] Company save result:", companyResult, "error:", companyError)
+        geographic_scope: [geographicScope],
+        business_profile: updatedProfile,
+        keywords: [...wPrimaryKw, ...wSecondaryKw, ...wIndustryTags],
+        modules: ['competitors', 'leads', 'tenders', 'trends', 'news', 'conferences'],
+      })
 
-      if (companyError) {
-        setError(`שגיאה בשמירת נתוני החברה: ${companyError.message}`)
-        throw companyError
-      }
+      if (upsertError) throw upsertError
 
-      // Insert manually-added competitors — always preserved, never overwritten by AI scan
-      if (competitors.length > 0) {
-        const competitorRecords = competitors.map(c => ({
-          company_id: user.id,
-          name: c.name,
-          website: c.website,
-          services: industry,
-          positioning: "מתחרה ישיר",
-          threat_score: c.threatScore != null ? c.threatScore : Math.floor(Math.random() * 30) + 50,
-          trend: "stable",
-          source: "manual",
-        }))
-        await supabase.from("competitors").insert(competitorRecords)
+      if (wCompetitors.length > 0) {
+        await supabase.from('competitors').insert(
+          wCompetitors
+            .filter(c => c.name.trim())
+            .map(c => ({
+              company_id: user.id,
+              name: c.name.trim(),
+              website: c.website.trim(),
+              positioning: 'מתחרה ישיר',
+              threat_score: Math.floor(Math.random() * 30) + 50,
+              trend: 'stable',
+              source: 'manual',
+            }))
+        )
       }
 
-      // Welcome alert
-      await supabase.from("alerts").insert({
+      await supabase.from('alerts').insert({
         company_id: user.id,
-        title: "ברוך הבא ל-Market Radar!",
-        message: "החשבון שלך מוכן. התחל לגלות הזדמנויות עסקיות חדשות.",
-        type: "success",
+        title: 'ברוך הבא ל-Market Radar!',
+        message: 'החשבון שלך מוכן. התחל לגלות הזדמנויות עסקיות חדשות.',
+        type: 'success',
         is_read: false,
       })
 
-      // Start sequential AI scan
       const { data: { session } } = await supabase.auth.getSession()
       const authHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
-        ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
       }
 
-      setIsSubmitting(false)
-      setIsScanning(true)
+      setPhase('scanning')
+      setScanStep(0)
 
       for (let i = 0; i < SCAN_STEPS.length; i++) {
         setScanStep(i)
         try {
           await fetch(SCAN_STEPS[i].route, { method: 'POST', headers: authHeaders })
         } catch {
-          // ignore errors, continue to next step
+          // ignore errors, continue
         }
       }
 
-      // TODO: trigger initial scan after onboarding — call generate-trends, generate-leads,
-      // generate-tenders, generate-conferences, generate-news in sequence so first dashboard load
-      // shows real data instead of empty state (all routes now support ?force=true)
-      router.push("/app/dashboard")
-    } catch (error: unknown) {
-      console.error("[v0] Error saving onboarding data:", error)
-      if (error instanceof Error) {
-        setError(`שגיאה בשמירת הנתונים: ${error.message}`)
-      } else {
-        setError("שגיאה בלתי צפויה, נסה שוב")
-      }
-    } finally {
-      setIsSubmitting(false)
+      router.push('/app/dashboard')
+    } catch (err: any) {
+      setSubmitError(err?.message || 'שגיאה בלתי צפויה')
+      setPhase('wizard')
+      setWizardStep(5)
     }
   }
 
-  const canProceed = () => {
-    if (currentStep === 1) {
-      return companyName.trim() !== "" && phone.trim() !== ""
-    }
-    return true
+  // ── Wizard helpers ───────────────────────────────────────────────────────
+
+  function addProduct() {
+    if (!newProductName.trim()) return
+    setWProducts([...wProducts, {
+      name: newProductName.trim(),
+      description: newProductDesc.trim(),
+      targetAudience: '',
+    }])
+    setNewProductName('')
+    setNewProductDesc('')
   }
+
+  function addCompetitor() {
+    if (!newCompName.trim()) return
+    setWCompetitors([...wCompetitors, {
+      name: newCompName.trim(),
+      website: newCompWebsite.trim(),
+    }])
+    setNewCompName('')
+    setNewCompWebsite('')
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Background Effects */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-background to-background" dir="rtl">
+      {/* Background blobs */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute right-1/4 top-0 h-[600px] w-[600px] rounded-full bg-primary/5 blur-[120px]" />
-        <div className="absolute bottom-0 left-1/4 h-[400px] w-[400px] rounded-full bg-primary/3 blur-[100px]" />
+        <div className="absolute right-0 top-0 h-[600px] w-[600px] rounded-full bg-teal-500/6 blur-[130px]" />
+        <div className="absolute bottom-0 left-0 h-[400px] w-[400px] rounded-full bg-teal-600/4 blur-[100px]" />
       </div>
 
-      <div className="relative mx-auto max-w-3xl px-4 py-8">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <div className="mb-4 flex items-center justify-center">
-            <Image
-              src="/whitelogo.png"
-              alt="North Star Radar"
-              width={200}
-              height={56}
-              className="h-12 w-auto object-contain"
-              unoptimized
-            />
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">הגדרת החשבון</h1>
-          <p className="mt-2 text-muted-foreground">מלא את הפרטים כדי להתאים את המערכת לצרכים שלך</p>
-          {error && (
-            <div className="mt-4 rounded-lg bg-destructive/10 p-4 text-destructive text-sm">
-              {error}
-            </div>
-          )}
+      <div className="relative mx-auto max-w-2xl px-4 py-10">
+        {/* Logo */}
+        <div className="mb-8 flex justify-center">
+          <Image
+            src="/whitelogo.png"
+            alt="North Star Radar"
+            width={180}
+            height={50}
+            className="h-10 w-auto object-contain"
+            unoptimized
+          />
         </div>
 
-        {/* Progress Bar — only shown in wizard phase */}
-        {analysisPhase === 'wizard' && (
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            {steps.map((step, index) => {
-              const Icon = step.icon
-              const isActive = currentStep === step.id
-              const isCompleted = currentStep > step.id
+        <div className="rounded-2xl border border-border/60 bg-card/90 backdrop-blur-sm shadow-2xl p-8">
 
-              return (
-                <div key={step.id} className="flex flex-1 items-center">
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors ${
-                        isCompleted
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : isActive
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-card text-muted-foreground"
-                      }`}
-                    >
-                      {isCompleted ? <Check className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
-                    </div>
-                    <span
-                      className={`mt-2 hidden text-xs font-medium sm:block ${
-                        isActive || isCompleted ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                    >
-                      {step.title}
-                    </span>
-                  </div>
-                  {index < steps.length - 1 && (
-                    <div
-                      className={`mx-2 h-0.5 flex-1 transition-colors ${
-                        currentStep > step.id ? "bg-primary" : "bg-border"
-                      }`}
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-        )}
-
-        {/* Step Content */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-lg">
-
-          {/* Step 0 — AI Business Analysis */}
-          {analysisPhase === 'step0' && (
-            <div className="space-y-6" dir="rtl">
+          {/* ── INTAKE PHASE ──────────────────────────────────────────── */}
+          {phase === 'intake' && (
+            <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-foreground">ניתוח עסקי אוטומטי</h2>
+                <h1 className="text-2xl font-bold text-foreground">ברוך הבא!</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  AI יסרוק את האתר שלך ויבנה פרופיל עסקי מדויק — כולל מילות מפתח, מתחרים וקהלי יעד
+                  ספר לנו על העסק שלך ו-AI יבנה פרופיל עסקי מדויק תוך פחות מדקה
                 </p>
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="step0Name">שם החברה *</Label>
-                  <Input
-                    id="step0Name"
-                    value={step0Name}
-                    onChange={e => setStep0Name(e.target.value)}
-                    placeholder="שם החברה שלך"
-                    className="bg-background"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="step0Website">אתר אינטרנט</Label>
-                  <Input
-                    id="step0Website"
-                    type="url"
-                    dir="ltr"
-                    value={step0Website}
-                    onChange={e => setStep0Website(e.target.value)}
-                    placeholder="https://example.com"
-                    className="bg-background text-left"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="step0Desc">תיאור קצר</Label>
-                  <Textarea
-                    id="step0Desc"
-                    value={step0Description}
-                    onChange={e => setStep0Description(e.target.value)}
-                    placeholder="2-3 משפטים על מה שהעסק עושה, למי הוא מוכר ומה הוא מציע..."
-                    className="min-h-[90px] bg-background"
-                  />
-                </div>
-              </div>
-
               {analysisError && (
-                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive border border-destructive/20">
                   {analysisError}
                 </div>
               )}
 
-              {analyzing && (
-                <div className="flex flex-col items-center gap-3 py-4 text-center">
-                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                  <p className="font-medium text-foreground">AI סורק ומנתח את העסק שלך...</p>
-                  <p className="text-sm text-muted-foreground">(30–60 שניות)</p>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between pt-2 border-t border-border">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setAnalysisPhase('wizard')}
-                  disabled={analyzing}
-                  className="text-muted-foreground"
-                >
-                  דלג לטופס ידני
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleAnalyzeBusiness}
-                  disabled={analyzing || !step0Name.trim()}
-                  className="gap-2"
-                >
-                  {analyzing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
-                  {analyzing ? 'מנתח...' : 'נתח את העסק שלי 🔍'}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 0 confirm — show BusinessProfileConfirmation */}
-          {analysisPhase === 'confirm' && deepProfile && (
-            <BusinessProfileConfirmation
-              profile={deepProfile}
-              onConfirm={handleConfirmProfile}
-              onRetry={() => setAnalysisPhase('step0')}
-              isConfirming={confirmingSave}
-            />
-          )}
-
-          {analysisPhase === 'wizard' && (isScanning ? (
-            <div className="space-y-6">
-              <div className="text-center">
-                <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
-                <h2 className="mt-4 text-xl font-semibold text-foreground">סורק ומאתחל נתונים...</h2>
-                <p className="mt-1 text-muted-foreground">אנא המתן, זה עשוי לקחת כדקה</p>
-              </div>
-              <div className="space-y-2">
-                {SCAN_STEPS.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-background p-3">
-                    <div className="shrink-0">
-                      {i < scanStep
-                        ? <Check className="h-5 w-5 text-primary" />
-                        : i === scanStep
-                        ? <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                        : <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30" />
-                      }
-                    </div>
-                    <span className={`text-sm ${i < scanStep ? 'text-muted-foreground' : i === scanStep ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                      ({i + 1}/8) {step.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-          <>
-          {/* Step 1 - Company Details */}
-          {currentStep === 1 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">פרטי החברה</h2>
-                <p className="mt-1 text-sm text-muted-foreground">ספר לנו על העסק שלך</p>
-              </div>
-              
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="companyName">שם חברה *</Label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="companyName">שם החברה *</Label>
                   <Input
                     id="companyName"
                     value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
+                    onChange={e => setCompanyName(e.target.value)}
                     placeholder="שם החברה שלך"
                     className="bg-background"
                   />
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="phone">טלפון *</Label>
                   <Input
                     id="phone"
                     type="tel"
                     dir="ltr"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={e => setPhone(e.target.value)}
                     placeholder="05X-XXXXXXX"
                     className="bg-background text-left"
                   />
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5 sm:col-span-2">
                   <Label htmlFor="website">אתר אינטרנט</Label>
                   <Input
                     id="website"
                     type="url"
                     dir="ltr"
                     value={website}
-                    onChange={(e) => setWebsite(e.target.value)}
+                    onChange={e => setWebsite(e.target.value)}
                     placeholder="https://example.com"
                     className="bg-background text-left"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="city">עיר</Label>
-                  <Select value={city} onValueChange={(v) => { setCity(v); if (v !== 'אחר') setCityCustom("") }}>
+                <div className="space-y-1.5">
+                  <Label>תפקידך בחברה</Label>
+                  <Select value={ownerRole} onValueChange={setOwnerRole}>
                     <SelectTrigger className="bg-background">
-                      <SelectValue placeholder="בחר עיר..." />
+                      <SelectValue placeholder="בחר תפקיד..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {ISRAELI_CITIES.map((c) => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {city === 'אחר' && (
-                    <Input
-                      value={cityCustom}
-                      onChange={(e) => setCityCustom(e.target.value)}
-                      placeholder="פרט את העיר..."
-                      className="bg-background mt-2"
-                    />
-                  )}
-                </div>
-
-                <div className="space-y-3 md:col-span-2">
-                  <Label>היקף פעילות העסק</Label>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {[
-                      { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
-                      { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
-                      { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
-                    ].map(opt => (
-                      <label
-                        key={opt.value}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                          geographicScope.includes(opt.value)
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border bg-background hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          value={opt.value}
-                          checked={geographicScope.includes(opt.value)}
-                          onChange={() => handleScopeToggle(opt.value)}
-                          className="mt-1 accent-primary"
-                        />
-                        <div>
-                          <span className="font-medium text-foreground text-sm">{opt.emoji} {opt.label}</span>
-                          <p className="text-xs text-muted-foreground">{opt.desc}</p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                  {geographicScope.includes('international') && (
-                    <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
-                  )}
-                </div>
-
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="companySize">גודל חברה</Label>
-                  <Select value={companySize} onValueChange={setCompanySize}>
-                    <SelectTrigger className="bg-background">
-                      <SelectValue placeholder="בחר גודל" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {companySizes.map((size) => (
-                        <SelectItem key={size} value={size}>
-                          {size}
-                        </SelectItem>
+                      {OWNER_ROLES.map(r => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                
+
+                <div className="space-y-1.5">
+                  <Label>איזור פעילות</Label>
+                  <Select value={geographicScope} onValueChange={setGeographicScope}>
+                    <SelectTrigger className="bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GEOGRAPHIC_OPTIONS.map(o => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="description">תיאור קצר</Label>
+                  <Textarea
+                    id="description"
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    placeholder="2-3 משפטים על מה שהעסק עושה, למי הוא מוכר ומה הוא מציע..."
+                    className="min-h-[80px] bg-background"
+                  />
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Step 2 - Competitors */}
-          {currentStep === 2 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">מתחרים</h2>
-                <p className="mt-1 text-sm text-muted-foreground">הוסף מתחרים למעקב</p>
-              </div>
-
-              {/* Auto-find button */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={findCompetitorsAuto}
-                disabled={isFindingCompetitors || !companyName}
-                className="w-full border-primary/50 text-primary hover:bg-primary/10"
-              >
-                {isFindingCompetitors ? (
-                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="ml-2 h-4 w-4" />
-                )}
-                {isFindingCompetitors ? "מחפש מתחרים..." : "מצא מתחרים אוטומטית"}
-              </Button>
-
-              {/* Error message */}
-              {competitorError && (
-                <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                  {competitorError}
-                </div>
-              )}
-
-              {/* AI Competitor Results */}
-              {aiCompetitors.length > 0 && (
-                <div className="space-y-3">
-                  <Label>תוצאות AI - בחר מתחרים להוספה</Label>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {aiCompetitors.map((competitor, index) => (
-                      <div
-                        key={index}
-                        onClick={() => toggleAiCompetitor(index)}
-                        className={`cursor-pointer rounded-lg border p-4 transition-all ${
-                          competitor.selected
-                            ? "border-primary bg-primary/5"
-                            : "border-border bg-background opacity-60"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-foreground">{competitor.name}</span>
-                              <Badge variant="outline" className="bg-primary/10 text-primary text-xs">
-                                {competitor.similarity}% דמיון
-                              </Badge>
-                            </div>
-                            <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-                              {competitor.website}
-                            </p>
-                            <p className="mt-2 text-sm text-muted-foreground">
-                              {competitor.reason}
-                            </p>
-                          </div>
-                          <div className={`flex h-5 w-5 items-center justify-center rounded border ${
-                            competitor.selected 
-                              ? "border-primary bg-primary text-primary-foreground" 
-                              : "border-muted-foreground"
-                          }`}>
-                            {competitor.selected && <Check className="h-3 w-3" />}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={addSelectedCompetitors}
-                    disabled={!aiCompetitors.some(c => c.selected)}
-                    className="w-full"
-                  >
-                    <Plus className="ml-2 h-4 w-4" />
-                    הוסף {aiCompetitors.filter(c => c.selected).length} מתחרים נבחרים
-                  </Button>
-                </div>
-              )}
-
-              {/* Add competitor form */}
-              <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4 sm:flex-row">
-                <div className="flex-1">
-                  <Input
-                    value={newCompetitorName}
-                    onChange={(e) => setNewCompetitorName(e.target.value)}
-                    placeholder="שם המתחרה"
-                    className="bg-card"
-                  />
-                </div>
-                <div className="flex-1">
-                  <Input
-                    type="url"
-                    dir="ltr"
-                    value={newCompetitorWebsite}
-                    onChange={(e) => setNewCompetitorWebsite(e.target.value)}
-                    placeholder="https://competitor.com"
-                    className="bg-card text-left"
-                  />
-                </div>
-                <div className="w-24 shrink-0">
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={newCompetitorThreatScore}
-                    onChange={(e) => setNewCompetitorThreatScore(e.target.value)}
-                    placeholder="ציון"
-                    className="bg-card"
-                  />
-                </div>
-                <Button type="button" onClick={addCompetitor} disabled={!newCompetitorName.trim()}>
-                  <Plus className="ml-1 h-4 w-4" />
-                  הוסף
+              <div className="flex justify-end pt-1">
+                <Button
+                  onClick={handleAnalyze}
+                  disabled={!companyName.trim() || !phone.trim()}
+                  size="lg"
+                  className="gap-2 bg-teal-600 hover:bg-teal-700 text-white min-w-[200px]"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  נתח את העסק שלי
                 </Button>
               </div>
+            </div>
+          )}
 
-              {/* Competitors list */}
-              {competitors.length > 0 && (
-                <div className="space-y-2">
-                  <Label>מתחרים שנוספו ({competitors.length})</Label>
-                  <div className="space-y-2">
-                    {competitors.map((competitor, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between rounded-lg border border-border bg-background p-3"
-                      >
-                        <div>
-                          <span className="font-medium text-foreground">{competitor.name}</span>
-                          {competitor.website && (
-                            <span className="mr-2 text-sm text-muted-foreground" dir="ltr">
-                              {competitor.website}
-                            </span>
-                          )}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeCompetitor(index)}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
+          {/* ── ANALYZING PHASE ───────────────────────────────────────── */}
+          {phase === 'analyzing' && (
+            <div className="flex flex-col items-center gap-6 py-14 text-center">
+              <div className="relative">
+                <div className="absolute inset-0 animate-ping rounded-full bg-teal-400/20" style={{ animationDuration: '1.5s' }} />
+                <div className="relative rounded-full bg-teal-500/10 p-7">
+                  <Sparkles className="h-12 w-12 text-teal-500" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xl font-semibold text-foreground">AI מנתח את העסק שלך</p>
+                <p className="text-sm text-muted-foreground">סורק אתר, מזהה מתחרים, בונה פרופיל עסקי...</p>
+                <p className="text-xs text-muted-foreground">(30–60 שניות)</p>
+              </div>
+              <div className="w-full max-w-xs">
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-teal-500 rounded-full animate-pulse" style={{ width: '65%' }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── WIZARD PHASE ──────────────────────────────────────────── */}
+          {phase === 'wizard' && (
+            <div className="space-y-6">
+              {/* Progress bar */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-foreground">
+                    שלב {wizardStep}/5
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    {WIZARD_STEPS[wizardStep - 1].title}
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-teal-500 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${(wizardStep / 5) * 100}%` }}
+                  />
+                </div>
+                <div className="flex">
+                  {WIZARD_STEPS.map(s => (
+                    <div key={s.id} className="flex-1 flex flex-col items-center gap-1">
+                      <div className={`h-2 w-2 rounded-full transition-colors ${
+                        s.id < wizardStep
+                          ? 'bg-teal-500'
+                          : s.id === wizardStep
+                          ? 'bg-teal-400 ring-2 ring-teal-400/30'
+                          : 'bg-muted-foreground/20'
+                      }`} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Step 1: פעילות עיקרית */}
+              {wizardStep === 1 && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">פעילות עיקרית</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      AI ניתח את העסק שלך — בדוק ותקן אם צריך
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>מה העסק שלך עושה?</Label>
+                    <Textarea
+                      value={wCoreActivity}
+                      onChange={e => setWCoreActivity(e.target.value)}
+                      className="min-h-[80px] bg-background"
+                      placeholder="תיאור הפעילות העיקרית של העסק..."
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>מודל עסקי</Label>
+                    <Select
+                      value={wBusinessModel}
+                      onValueChange={v => setWBusinessModel(v as BusinessProfile['businessModel'])}
+                    >
+                      <SelectTrigger className="bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BUSINESS_MODEL_OPTIONS.map(o => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>מיצוב בשוק</Label>
+                    <Textarea
+                      value={wMarketPosition}
+                      onChange={e => setWMarketPosition(e.target.value)}
+                      className="min-h-[60px] bg-background"
+                      placeholder="איך העסק ממוצב ביחס למתחרים?"
+                    />
                   </div>
                 </div>
               )}
 
-              {competitors.length === 0 && (
-                <div className="rounded-lg border border-dashed border-border p-8 text-center">
-                  <Users className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                  <p className="mt-2 text-muted-foreground">עדיין לא נוספו מתחרים</p>
-                  <p className="text-sm text-muted-foreground">{"הוסף מתחרים ידנית או לחץ על \"מצא מתחרים אוטומטית\""}</p>
+              {/* ── Step 2: מוצרים ושירותים */}
+              {wizardStep === 2 && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">מוצרים ושירותים</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      המוצרים שזיהה AI — ניתן להסיר ולהוסיף
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {wProducts.map((p, i) => (
+                      <div
+                        key={i}
+                        className="flex items-start gap-3 rounded-lg border border-border bg-background p-4"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm text-foreground">{p.name}</p>
+                          {p.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                              {p.description}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setWProducts(wProducts.filter((_, idx) => idx !== i))}
+                          className="text-muted-foreground hover:text-destructive transition-colors shrink-0 mt-0.5"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {wProducts.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">
+                        לא זוהו מוצרים — הוסף ידנית
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">הוסף מוצר / שירות</p>
+                    <Input
+                      value={newProductName}
+                      onChange={e => setNewProductName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProduct() } }}
+                      placeholder="שם המוצר או השירות"
+                      className="bg-background"
+                    />
+                    <Input
+                      value={newProductDesc}
+                      onChange={e => setNewProductDesc(e.target.value)}
+                      placeholder="תיאור קצר (אופציונלי)"
+                      className="bg-background"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addProduct}
+                      disabled={!newProductName.trim()}
+                      className="gap-1"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      הוסף
+                    </Button>
+                  </div>
                 </div>
               )}
+
+              {/* ── Step 3: קהלי יעד וערוצי הפצה */}
+              {wizardStep === 3 && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">קהלי יעד וערוצי הפצה</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      מי הלקוחות שלך ואיפה אתה מגיע אליהם
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>קהלי יעד</Label>
+                    <TagList
+                      tags={wAudiences}
+                      onChange={setWAudiences}
+                      placeholder="הוסף קהל יעד..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>ערוצי הפצה ושיווק</Label>
+                    <TagList
+                      tags={wChannels}
+                      onChange={setWChannels}
+                      placeholder="הוסף ערוץ (אתר, גוגל, רשתות חברתיות...)..."
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Step 4: תגיות ומילות מפתח */}
+              {wizardStep === 4 && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">תגיות ומילות מפתח</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      בסיס לסריקת השוק — ניתן לערוך בכל עת מהפרופיל
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>תגיות תעשייה</Label>
+                    <TagList
+                      tags={wIndustryTags}
+                      onChange={setWIndustryTags}
+                      placeholder="הוסף תגית תעשייה..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>מילות מפתח ראשיות</Label>
+                    <TagList
+                      tags={wPrimaryKw}
+                      onChange={setWPrimaryKw}
+                      placeholder="הוסף מילת מפתח..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>מילות מפתח משניות</Label>
+                    <TagList
+                      tags={wSecondaryKw}
+                      onChange={setWSecondaryKw}
+                      placeholder="הוסף מילת מפתח משנית..."
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Step 5: מתחרים */}
+              {wizardStep === 5 && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-foreground">מתחרים</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      AI זיהה {wCompetitors.length} מתחרים — ניתן לערוך, להסיר ולהוסיף
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {wCompetitors.map((c, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-background p-3"
+                      >
+                        <div className="flex-1 grid sm:grid-cols-2 gap-2">
+                          <Input
+                            value={c.name}
+                            onChange={e => setWCompetitors(
+                              wCompetitors.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x)
+                            )}
+                            placeholder="שם המתחרה"
+                            className="h-8 bg-card text-sm"
+                          />
+                          <Input
+                            value={c.website}
+                            dir="ltr"
+                            onChange={e => setWCompetitors(
+                              wCompetitors.map((x, xi) => xi === i ? { ...x, website: e.target.value } : x)
+                            )}
+                            placeholder="https://..."
+                            className="h-8 bg-card text-sm text-left"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setWCompetitors(wCompetitors.filter((_, xi) => xi !== i))}
+                          className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {wCompetitors.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-3 border border-dashed border-border rounded-lg">
+                        לא זוהו מתחרים — הוסף ידנית
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-dashed border-border bg-background/50 p-3 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">הוסף מתחרה</p>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      <Input
+                        value={newCompName}
+                        onChange={e => setNewCompName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCompetitor() } }}
+                        placeholder="שם המתחרה"
+                        className="bg-background"
+                      />
+                      <Input
+                        value={newCompWebsite}
+                        onChange={e => setNewCompWebsite(e.target.value)}
+                        dir="ltr"
+                        placeholder="https://..."
+                        className="bg-background text-left"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addCompetitor}
+                      disabled={!newCompName.trim()}
+                      className="gap-1"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      הוסף
+                    </Button>
+                  </div>
+
+                  {submitError && (
+                    <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive border border-destructive/20">
+                      {submitError}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex items-center justify-between border-t border-border pt-5 mt-4">
+                <Button
+                  variant="ghost"
+                  onClick={() => setWizardStep(s => s - 1)}
+                  disabled={wizardStep === 1}
+                  className="gap-1 text-muted-foreground"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  הקודם
+                </Button>
+
+                {wizardStep < 5 ? (
+                  <Button
+                    onClick={() => setWizardStep(s => s + 1)}
+                    className="gap-1 bg-teal-600 hover:bg-teal-700 text-white"
+                  >
+                    הבא
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleSubmit}
+                    className="gap-2 bg-teal-600 hover:bg-teal-700 text-white min-w-[160px]"
+                  >
+                    <Check className="h-4 w-4" />
+                    סיים והמשך
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Step 3 - Keywords */}
-          {currentStep === 3 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">מילות מפתח</h2>
-                <p className="mt-1 text-sm text-muted-foreground">הגדר מילות מפתח למעקב</p>
-              </div>
-
-              <p className="text-sm font-medium text-foreground -mt-2">מילות המפתח הן הבסיס לאיכות המידע שתקבל מהמערכת</p>
-
-              <div className="rounded-lg bg-teal-50 border border-teal-100 p-4 text-sm text-teal-900 space-y-1">
-                <p className="font-semibold">💡 למה מילות מפתח חשובות?</p>
-                <p>המערכת משתמשת במילות המפתח שלך כדי לסרוק את השוק בצורה ממוקדת.</p>
-                <p>ככל שהמילים מדויקות יותר — כך הטרנדים, ההזדמנויות והמודיעין שתקבל</p>
-                <p>יהיו רלוונטיים יותר לעסק שלך.</p>
-              </div>
-
-              {/* Keywords */}
-              <div className="space-y-3">
-                <Label>מילות מפתח למעקב</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newKeyword}
-                    onChange={(e) => setNewKeyword(e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(e, "keyword")}
-                    placeholder="הוסף מילת מפתח..."
-                    className="bg-background"
-                  />
-                  <Button type="button" onClick={() => addTag("keyword")} disabled={!newKeyword.trim()}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {keywords.map((keyword, index) => (
-                    <Badge key={index} variant="secondary" className="gap-1 py-1.5">
-                      {keyword}
-                      <button type="button" onClick={() => removeTag("keyword", index)}>
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">ניתן להוסיף עד 10 מילות מפתח. ניתן לשנות בכל עת מהגדרות הפרופיל.</p>
-              </div>
-
-              {/* Industries */}
-              <div className="space-y-3">
-                <Label>תעשיות</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newIndustry}
-                    onChange={(e) => setNewIndustry(e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(e, "industry")}
-                    placeholder="הוסף תעשייה..."
-                    className="bg-background"
-                  />
-                  <Button type="button" onClick={() => addTag("industry")} disabled={!newIndustry.trim()}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {industriesTags.map((ind, index) => (
-                    <Badge key={index} variant="secondary" className="gap-1 py-1.5">
-                      {ind}
-                      <button type="button" onClick={() => removeTag("industry", index)}>
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Products/Services */}
-              <div className="space-y-3">
-                <Label>מוצרים/שירותים</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={newProduct}
-                    onChange={(e) => setNewProduct(e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(e, "product")}
-                    placeholder="הוסף מוצר או שירות..."
-                    className="bg-background"
-                  />
-                  <Button type="button" onClick={() => addTag("product")} disabled={!newProduct.trim()}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {productsTags.map((product, index) => (
-                    <Badge key={index} variant="secondary" className="gap-1 py-1.5">
-                      {product}
-                      <button type="button" onClick={() => removeTag("product", index)}>
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+          {/* ── SAVING PHASE ──────────────────────────────────────────── */}
+          {phase === 'saving' && (
+            <div className="flex flex-col items-center gap-4 py-14 text-center">
+              <Loader2 className="h-12 w-12 animate-spin text-teal-500" />
+              <p className="text-lg font-semibold text-foreground">שומר את הפרופיל שלך...</p>
+              <p className="text-sm text-muted-foreground">עוד שנייה</p>
             </div>
           )}
 
-          {/* Step 4 - Modules */}
-          {currentStep === 4 && (
+          {/* ── SCANNING PHASE ────────────────────────────────────────── */}
+          {phase === 'scanning' && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">בחר מודולים</h2>
-                <p className="mt-1 text-sm text-muted-foreground">בחר אילו מודולים להפעיל</p>
+              <div className="text-center">
+                <div className="relative inline-block mb-5">
+                  <div
+                    className="absolute inset-0 animate-ping rounded-full bg-teal-400/20"
+                    style={{ animationDuration: '1.5s' }}
+                  />
+                  <div className="relative rounded-full bg-teal-500/10 p-5">
+                    <Sparkles className="h-9 w-9 text-teal-500" />
+                  </div>
+                </div>
+                <h2 className="text-xl font-semibold text-foreground">מאתחל את החשבון שלך</h2>
+                <p className="mt-1 text-sm text-muted-foreground">AI סורק ומנתח — עוד כמה רגעים ואתה מוכן</p>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {modules.map((module) => (
-                  <label
-                    key={module.id}
-                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
-                      selectedModules[module.id]
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background hover:border-primary/50"
+              {/* Progress bar */}
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-teal-500 rounded-full transition-all duration-700"
+                  style={{ width: `${((scanStep + 1) / SCAN_STEPS.length) * 100}%` }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                {SCAN_STEPS.map((step, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+                      i === scanStep
+                        ? 'border-teal-500/30 bg-teal-500/5'
+                        : i < scanStep
+                        ? 'border-border bg-background opacity-60'
+                        : 'border-border bg-background'
                     }`}
                   >
-                    <Checkbox
-                      checked={selectedModules[module.id]}
-                      onCheckedChange={(checked) =>
-                        setSelectedModules({ ...selectedModules, [module.id]: checked as boolean })
-                      }
-                      className="mt-0.5"
-                    />
-                    <div>
-                      <span className="font-medium text-foreground">{module.label}</span>
-                      <p className="text-sm text-muted-foreground">{module.description}</p>
+                    <div className="shrink-0">
+                      {i < scanStep ? (
+                        <Check className="h-4 w-4 text-teal-500" />
+                      ) : i === scanStep ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-teal-500" />
+                      ) : (
+                        <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/25" />
+                      )}
                     </div>
-                  </label>
+                    <span className={`text-sm flex-1 ${
+                      i === scanStep
+                        ? 'text-foreground font-medium'
+                        : i < scanStep
+                        ? 'text-muted-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      ({i + 1}/{SCAN_STEPS.length}) {step.label}
+                    </span>
+                    {i < scanStep && (
+                      <span className="text-xs text-teal-600 font-medium shrink-0">הושלם</span>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Navigation */}
-          <div className="mt-8 flex items-center justify-between border-t border-border pt-6">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setCurrentStep(currentStep - 1)}
-              disabled={currentStep === 1}
-            >
-              <ChevronRight className="ml-1 h-4 w-4" />
-              הקודם
-            </Button>
-
-            {currentStep < 4 ? (
-              <Button
-                type="button"
-                onClick={() => setCurrentStep(currentStep + 1)}
-                disabled={!canProceed()}
-              >
-                הבא
-                <ChevronLeft className="mr-1 h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                {isSubmitting ? (
-                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Check className="ml-2 h-4 w-4" />
-                )}
-                סיים והמשך
-              </Button>
-            )}
-          </div>
-          </>
-          ))}
         </div>
       </div>
     </div>

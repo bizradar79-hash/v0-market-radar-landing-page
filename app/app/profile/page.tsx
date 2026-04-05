@@ -159,7 +159,7 @@ export default function ProfilePage() {
   const [generatingOverview, setGeneratingOverview] = useState(false)
   const [generatingSwot, setGeneratingSwot] = useState(false)
   const [loadingPlaces, setLoadingPlaces] = useState(false)
-  const [analyzingDeep, setAnalyzingDeep] = useState(false)
+
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
@@ -361,27 +361,6 @@ export default function ProfilePage() {
     } finally { setLoadingReviewAnalysis(false) }
   }
 
-  async function analyzeDeep() {
-    setAnalyzingDeep(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: company } = await supabase.from('companies').select('name, website, description').eq('id', user.id).single()
-      const res = await fetch('/api/analyze-business-deep', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyName: company?.name || '', website: company?.website || '', shortDescription: company?.description || '' }),
-      })
-      const data = await res.json()
-      if (data.success && data.profile) {
-        setBusinessProfile(data.profile)
-        // API already saves to DB; also save directly for reliability
-        await supabase.from('companies').update({ business_profile: data.profile }).eq('id', user.id)
-        toast({ title: "פרופיל עסקי עודכן", description: "המידע ישמש לשיפור כל הניתוחים" })
-      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו לנתח את העסק", variant: "destructive" })
-    } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
-    finally { setAnalyzingDeep(false) }
-  }
 
   if (loading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
@@ -493,15 +472,9 @@ export default function ProfilePage() {
             <div>
               <h3 className="text-lg font-semibold text-foreground">הפרופיל העסקי שלך עדיין לא נותח</h3>
               <p className="mt-1 text-sm text-muted-foreground max-w-sm">
-                לחץ כדי לנתח את העסק שלך עם AI ולקבל תובנות מעמיקות — מוצרים, קהלי יעד, מתחרים, מילות מפתח ועוד.
+                הפרופיל העסקי נוצר אוטומטית במהלך ההרשמה. אם אינך רואה נתונים, פנה לתמיכה.
               </p>
             </div>
-            <Button onClick={analyzeDeep} disabled={analyzingDeep} size="lg" className="gap-2">
-              {analyzingDeep
-                ? <><Loader2 className="h-4 w-4 animate-spin" />מנתח...</>
-                : <><Search className="h-4 w-4" />נתח עכשיו 🔍</>
-              }
-            </Button>
           </CardContent>
         </Card>
       ) : (
