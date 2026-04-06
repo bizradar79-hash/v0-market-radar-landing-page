@@ -63,9 +63,8 @@ export default function AppHeader({ onMenuClick }: AppHeaderProps) {
     setUnreadCount(prev => Math.max(0, prev - 1))
     
     // Refresh sidebar counts
-    if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
-      (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
-    }
+    const win = window as typeof window & { refreshSidebarCounts?: () => void }
+    if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
   }
 
   async function markAllAsRead() {
@@ -80,9 +79,8 @@ export default function AppHeader({ onMenuClick }: AppHeaderProps) {
     setAlerts(prev => prev.map(a => ({ ...a, is_read: true })))
     setUnreadCount(0)
     
-    if ((window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts) {
-      (window as typeof window & { refreshSidebarCounts?: () => void }).refreshSidebarCounts()
-    }
+    const win = window as typeof window & { refreshSidebarCounts?: () => void }
+    if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
   }
 
   function handleAlertClick(alert: Alert) {
@@ -151,7 +149,7 @@ export default function AppHeader({ onMenuClick }: AppHeaderProps) {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80" dir="rtl">
+          <DropdownMenuContent align="end" className="w-80" style={{ direction: 'rtl' }}>
             <div className="flex items-center justify-between px-3 py-2 border-b border-border">
               <span className="font-semibold text-sm">התראות</span>
               {unreadCount > 0 && (

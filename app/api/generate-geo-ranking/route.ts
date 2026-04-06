@@ -24,7 +24,7 @@ function isOwnResult(r: any, companyName: string, companyDomain: string): boolea
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-const ENGINES = ['chatgpt', 'gemini', 'grok'] as const
+const ENGINES = ['general', 'chatgpt', 'gemini', 'grok'] as const
 type Engine = typeof ENGINES[number]
 
 // ── Query generation ───────────────────────────────────────────────────────

@@ -5,9 +5,10 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -25,7 +26,7 @@ export async function PATCH(
     const { error } = await ctx.supabase
       .from('ai_opportunities')
       .update(updates)
-      .eq('id', params.id)
+      .eq('id', id)
       .eq('company_id', ctx.user.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -38,16 +39,17 @@ export async function PATCH(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { error } = await ctx.supabase
       .from('ai_opportunities')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
       .eq('company_id', ctx.user.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

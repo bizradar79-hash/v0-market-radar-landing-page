@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       ctx.supabase.from('conferences').select('name, date, location').gte('date', today).order('date', { ascending: true }).limit(5),
     ])
 
-    const highThreatCount = (competitors || []).filter(c => (c.threat_score || 0) >= 70).length
+    const highThreatCount = (competitors || []).filter((c: any) => (c.threat_score || 0) >= 70).length
     const topTrend = trends?.[0]
     const topNews = news?.[0]
     const nextConf = conferences?.[0]

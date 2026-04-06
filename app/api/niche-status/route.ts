@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
     const updated: NicheOpportunityData = {
       fetchedAt: current?.fetchedAt || new Date().toISOString(),
-      opportunities: [...deduped, { ...niche, status: 'tracking', source: 'market_analysis' }],
+      opportunities: [...deduped, { ...niche, status: 'tracking' } as NicheOpportunity],
     }
 
     const { error: updateError } = await ctx.supabase

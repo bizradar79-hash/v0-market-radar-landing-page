@@ -75,9 +75,9 @@ export function TrendRadar({ trends }: TrendRadarProps) {
                   borderRadius: "8px",
                   color: "#f0f4f8",
                 }}
-                formatter={(value: number, name: string, props: { payload: { fullName: string; direction: string } }) => [
-                  `${value} - ${props.payload.direction === "עולה" ? "עולה" : props.payload.direction === "יציב" ? "יציב" : "יורד"}`,
-                  props.payload.fullName,
+                formatter={(value: number, _name: string, props: any) => [
+                  `${value} - ${props?.payload?.direction === "עולה" ? "עולה" : props?.payload?.direction === "יציב" ? "יציב" : "יורד"}`,
+                  props?.payload?.fullName ?? '',
                 ]}
                 labelStyle={{ color: "#f0f4f8" }}
               />
