@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   BarChart2,
   Truck,
+  SlidersHorizontal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -231,6 +232,19 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                 >
                   <ShieldCheck className="h-5 w-5" />
                   <span>לוח אדמין</span>
+                </Link>
+                <Link
+                  href="/app/admin/prompts"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/prompts"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <SlidersHorizontal className="h-5 w-5" />
+                  <span>ניהול פרומפטים</span>
                 </Link>
               </div>
             </div>
