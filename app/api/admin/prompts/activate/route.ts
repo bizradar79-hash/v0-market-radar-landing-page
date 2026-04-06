@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     .from('prompt_versions')
     .select('module')
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (fetchErr || !row) return NextResponse.json({ error: 'version not found' }, { status: 404 })
 

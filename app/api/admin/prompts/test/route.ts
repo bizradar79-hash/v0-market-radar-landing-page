@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       .from('companies')
       .select('name, industry, description, website, city')
       .eq('id', company_id)
-      .single()
+      .maybeSingle()
     if (company) {
       const ctx = `חברה: ${company.name || ''}
 תעשייה: ${company.industry || ''}

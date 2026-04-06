@@ -435,12 +435,15 @@ export default function PromptsPage() {
               {/* Company selector */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">חברה לבדיקה</label>
-                <Select value={sbCompanyId} onValueChange={setSbCompanyId}>
+                <Select
+                  value={sbCompanyId || "none"}
+                  onValueChange={v => setSbCompanyId(v === "none" ? "" : v)}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="בחר חברה (אופציונלי)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">ללא הקשר חברה</SelectItem>
+                    <SelectItem value="none">ללא הקשר חברה</SelectItem>
                     {companies.map(c => (
                       <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                     ))}

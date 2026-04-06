@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     .eq('module', module_)
     .order('version', { ascending: false })
     .limit(1)
-    .single()
+    .maybeSingle()
 
   const nextVersion = (latest?.version ?? 0) + 1
 
