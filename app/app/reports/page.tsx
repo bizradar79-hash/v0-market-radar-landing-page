@@ -151,7 +151,7 @@ export default function ReportsPage() {
     else setLoading(true)
     setError(null)
     try {
-      const url = `/api/generate-weekly-report${force ? "?force=true" : ""}`
+      const url = `/api/weekly-report${force ? "?force=true" : ""}`
       const res = await fetch(url, { method: "POST" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה ביצירת הדוח")
