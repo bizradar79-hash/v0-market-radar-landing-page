@@ -93,7 +93,7 @@ export default function PromptsPage() {
   const [activeModule, setActiveModule] = useState('news')
   const [versions, setVersions] = useState<PromptVersion[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
-  const [loading, setLoading] = useState(true)
+  const [versionsLoading, setVersionsLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [activating, setActivating] = useState(false)
@@ -113,11 +113,11 @@ export default function PromptsPage() {
 
   // ── Load ────────────────────────────────────────────────────────────────
   const loadVersions = useCallback(async (module_: string) => {
-    setLoading(true)
+    setVersionsLoading(true)
     const res = await fetch(`/api/admin/prompts?module=${module_}`)
     const data = await res.json()
     setVersions(data.versions ?? [])
-    setLoading(false)
+    setVersionsLoading(false)
   }, [])
 
   const loadCompanies = useCallback(async () => {
@@ -332,7 +332,7 @@ export default function PromptsPage() {
         ))}
       </div>
 
-      {loading ? (
+      {versionsLoading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
