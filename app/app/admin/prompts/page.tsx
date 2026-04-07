@@ -48,6 +48,7 @@ interface PromptVersion {
   model_name: string
   version: number
   is_active: boolean
+  was_active: boolean
   created_by: string | null
   created_at: string
   test_result: any | null
@@ -538,7 +539,7 @@ export default function PromptsPage() {
       )}
 
       {/* ── Version history ── */}
-      {versions.length > 0 && (
+      {versions.some(v => v.is_active || v.was_active) && (
         <div className="space-y-3">
           <h2 className="font-semibold text-base border-t pt-4">היסטוריית גרסאות</h2>
           <div className="rounded-xl border overflow-hidden">
@@ -555,7 +556,10 @@ export default function PromptsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {versions.slice(0, 5).map(v => (
+                {[
+                  ...versions.filter(v => v.is_active),
+                  ...versions.filter(v => !v.is_active && v.was_active),
+                ].slice(0, 5).map(v => (
                   <tr key={v.id} className={v.is_active ? 'bg-green-50/50' : 'hover:bg-muted/30'}>
                     <td className="px-4 py-3 font-mono font-semibold">v{v.version}</td>
                     <td className="px-4 py-3 hidden md:table-cell">

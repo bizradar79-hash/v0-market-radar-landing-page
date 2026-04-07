@@ -25,15 +25,15 @@ export async function POST(req: Request) {
     if (company_id) {
       const { data: company } = await supabase
         .from('companies')
-        .select('name, industry, description, website, city')
+        .select('name, website, industry, business_profile, business_overview')
         .eq('id', company_id)
         .maybeSingle()
       if (company) {
-        const ctx = `חברה: ${company.name || ''}
-תעשייה: ${company.industry || ''}
-תיאור: ${company.description || ''}
+        const ctx = `הקשר חברה:
+שם: ${company.name || ''}
+תחום: ${company.industry || ''}
 אתר: ${company.website || ''}
-עיר: ${company.city || ''}
+תיאור: ${company.business_overview || company.business_profile || ''}
 
 `
         fullPrompt = ctx + prompt

@@ -24,10 +24,10 @@ export async function POST(req: Request) {
     .update({ is_active: false })
     .eq('module', row.module)
 
-  // Activate the selected one
+  // Activate the selected one and mark was_active permanently
   const { error } = await supabase
     .from('prompt_versions')
-    .update({ is_active: true })
+    .update({ is_active: true, was_active: true })
     .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
