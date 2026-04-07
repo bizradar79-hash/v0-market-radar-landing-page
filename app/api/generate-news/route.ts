@@ -109,13 +109,11 @@ export async function POST(request: Request) {
       const companyName = ctx.company?.name || ''
       const industry = ctx.company?.industry || coreActivity
 
-      // Inject company directly into prompt instructions so xAI treats it as search intent
-      let fullPrompt = activePrompt.prompt
-        .replace('לתעשייה ולשוק הישראלי', `לתחום "${industry}" ולשוק הישראלי`)
-        .replace('לתעשייה ולמוצרים של החברה', `לחברה "${companyName}" שעוסקת ב: ${coreActivity}. מוצרים: ${products}`)
+      // Prepend company intent as first instruction so xAI uses it as search context
+      const fullPrompt = `חפש 10 חדשות עדכניות ורלוונטיות לחברה "${companyName}" שעוסקת ב${coreActivity} (${products}).
+רלוונטיות לשוק הישראלי בתחום ${industry}.
 
-      // Prepend short context so model has company name in scope
-      fullPrompt = `חברה: ${companyName} | תחום: ${industry} | מוצרים: ${products}\n\n${fullPrompt}`
+${activePrompt.prompt}`
 
       try {
         const aiResult = await callModel(activePrompt.model_provider as ModelProvider, activePrompt.model_name, fullPrompt)

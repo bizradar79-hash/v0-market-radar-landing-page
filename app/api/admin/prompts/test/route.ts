@@ -48,13 +48,13 @@ export async function POST(req: Request) {
         const coreActivity = bp?.coreActivity || company.description || company.industry || ''
         const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
 
-        // Inject company directly into prompt instructions so xAI treats it as search intent
-        fullPrompt = prompt
-          .replace('לתעשייה ולשוק הישראלי', `לתחום "${company.industry || coreActivity}" ולשוק הישראלי`)
-          .replace('לתעשייה ולמוצרים של החברה', `לחברה "${company.name}" שעוסקת ב: ${coreActivity}. מוצרים: ${products}`)
+        // Prepend company intent as first instruction so xAI uses it as search context
+        fullPrompt = `חפש 10 חדשות עדכניות ורלוונטיות לחברה "${company.name}" שעוסקת ב${coreActivity} (${products}).
+רלוונטיות לשוק הישראלי בתחום ${company.industry || coreActivity}.
 
-        // Also prepend short context so model has company name in scope
-        fullPrompt = `חברה: ${company.name} | תחום: ${company.industry || coreActivity} | מוצרים: ${products}\n\n${fullPrompt}`
+${prompt}`
+
+        console.log('FINAL PROMPT:', fullPrompt.substring(0, 300))
       }
     }
 
