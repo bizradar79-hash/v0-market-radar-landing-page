@@ -3,7 +3,6 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
@@ -99,7 +98,6 @@ export default function PromptsPage() {
   const [sandboxVersionId, setSandboxVersionId] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<any | null>(null)
 
-  const supabase = createClient()
   const { toast } = useToast()
 
   const activeVersion = versions.find(v => v.is_active) ?? null
@@ -114,8 +112,10 @@ export default function PromptsPage() {
   }, [])
 
   const loadCompanies = useCallback(async () => {
-    const { data } = await supabase.from('companies').select('id, name, website').order('name')
-    setCompanies(data ?? [])
+    const res = await fetch('/api/admin/companies')
+    const data = await res.json()
+    console.log('companies loaded:', data.companies, data.error)
+    setCompanies(data.companies ?? [])
   }, [])
 
   useEffect(() => {
