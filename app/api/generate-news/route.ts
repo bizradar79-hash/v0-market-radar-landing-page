@@ -5,7 +5,6 @@ import { search } from '@/lib/search'
 import { callModel } from '@/lib/call-model'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
-import type { ModelProvider } from '@/lib/available-models'
 
 export const maxDuration = 60
 
@@ -109,25 +108,29 @@ export async function POST(request: Request) {
       const companyName = ctx.company?.name || ''
       const industry = ctx.company?.industry || coreActivity
 
-      // Prepend company intent as first instruction so xAI uses it as search context
-      const fullPrompt = `חפש 10 חדשות עדכניות ורלוונטיות לחברה "${companyName}" שעוסקת ב${coreActivity} (${products}).
-רלוונטיות לשוק הישראלי בתחום ${industry}.
-
-${activePrompt.prompt}`
+      const companyContext = `הקשר חברה:
+שם: ${companyName}
+תחום: ${industry}
+פעילות עיקרית: ${coreActivity}
+מוצרים: ${products}
+מילות מפתח: ${keywords.join(', ')}
+---
+`
+      const finalPrompt = companyContext + activePrompt.prompt
 
       try {
-        const aiResult = await callModel(activePrompt.model_provider as ModelProvider, activePrompt.model_name, fullPrompt)
-        steps.aiResult = { latency_ms: aiResult.latency_ms, tokens: aiResult.tokens_used }
+        const rawText = await callModel(activePrompt.model_provider, activePrompt.model_name, finalPrompt)
+        steps.aiResult = { chars: rawText.length }
 
         // Parse JSON — strip markdown fences first, then try regex extraction
         let newsItems: any[] = []
         try {
-          const clean = aiResult.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          const clean = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
           const parsed = JSON.parse(clean)
           newsItems = Array.isArray(parsed) ? parsed : (parsed.news || [])
         } catch {
           try {
-            const match = aiResult.text.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+            const match = rawText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
             if (match) {
               const parsed = JSON.parse(match[0])
               newsItems = Array.isArray(parsed) ? parsed : (parsed.news || [])
