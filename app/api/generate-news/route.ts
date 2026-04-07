@@ -2,8 +2,10 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { search } from '@/lib/search'
+import { callModel } from '@/lib/call-model'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
+import type { ModelProvider } from '@/lib/available-models'
 
 export const maxDuration = 60
 
@@ -89,6 +91,81 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── AI path: use active prompt from prompt_versions if available ──────────
+    const { data: activePrompt } = await ctx.supabase
+      .from('prompt_versions')
+      .select('prompt, model_provider, model_name')
+      .eq('module', 'news')
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (activePrompt) {
+      steps.aiPath = { provider: activePrompt.model_provider, model: activePrompt.model_name }
+      const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+      const keywords: string[] = ctx.company?.keywords || []
+
+      const contextStr = `הקשר חברה:
+שם: ${ctx.company?.name || ''}
+תחום: ${ctx.company?.industry || ''}
+פעילות: ${bp?.coreActivity || ctx.company?.description || ''}
+מוצרים: ${bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 2).join(', ') || ''}
+מילות מפתח: ${bp?.primaryKeywords?.join(', ') || keywords.join(', ') || ''}
+
+`
+      const fullPrompt = contextStr + activePrompt.prompt
+
+      try {
+        const aiResult = await callModel(activePrompt.model_provider as ModelProvider, activePrompt.model_name, fullPrompt)
+        steps.aiResult = { latency_ms: aiResult.latency_ms, tokens: aiResult.tokens_used }
+
+        // Parse JSON — strip markdown fences first, then try regex extraction
+        let newsItems: any[] = []
+        try {
+          const clean = aiResult.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          const parsed = JSON.parse(clean)
+          newsItems = Array.isArray(parsed) ? parsed : (parsed.news || [])
+        } catch {
+          try {
+            const match = aiResult.text.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+            if (match) {
+              const parsed = JSON.parse(match[0])
+              newsItems = Array.isArray(parsed) ? parsed : (parsed.news || [])
+            }
+          } catch {}
+        }
+
+        steps.aiParsed = { count: newsItems.length }
+
+        if (newsItems.length > 0) {
+          await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+          const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
+            newsItems.map((n: any) => ({
+              title: n.title || '',
+              source: n.source || '',
+              url: n.url || '',
+              category: n.category || 'ישראל',
+              sentiment: n.sentiment || 'neutral',
+              summary: n.summary || '',
+              company_id: ctx.user.id,
+              published_at: new Date().toISOString(),
+            }))
+          ).select()
+          if (insertError) {
+            steps.db = { ok: false, error: insertError.message }
+            return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
+          }
+          steps.db = { ok: true, saved: saved?.length }
+          return NextResponse.json({ success: true, news: saved, count: saved?.length || 0, steps })
+        }
+        // AI returned 0 items — fall through to Tavily
+        steps.aiPath = { ...steps.aiPath, fallback: 'ai returned 0 items' }
+      } catch (aiErr: any) {
+        console.warn('[generate-news] AI path failed, falling back to Tavily:', aiErr?.message)
+        steps.aiPath = { ...steps.aiPath, fallback: aiErr?.message }
+      }
+    }
+
+    // ── Tavily fallback path ───────────────────────────────────────────────
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const industry = ctx.company?.industry || ''
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null

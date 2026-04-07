@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { callModel } from '@/lib/call-model'
 import type { ModelProvider } from '@/lib/available-models'
+import type { BusinessProfile } from '@/types/business-profile'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -30,21 +31,27 @@ export async function POST(req: Request) {
 
     const supabase = await createClient()
 
-    // Build company context if company_id provided
+    // Build company context — same format as generate-news uses in production
     let fullPrompt = prompt
     if (company_id) {
       const { data: company, error: companyErr } = await supabase
         .from('companies')
-        .select('name, website, industry, business_profile, business_overview')
+        .select('name, website, industry, description, keywords, business_profile')
         .eq('id', company_id)
         .maybeSingle()
+
       console.log('[prompts/test] company fetch:', company?.name ?? 'not found', companyErr?.message ?? 'ok')
+
       if (company) {
+        const bp = (company.business_profile ?? null) as BusinessProfile | null
+        const keywords: string[] = (company as any).keywords || []
+
         const ctx = `הקשר חברה:
 שם: ${company.name || ''}
 תחום: ${company.industry || ''}
-אתר: ${company.website || ''}
-תיאור: ${(company as any).business_overview || (company as any).business_profile || ''}
+פעילות: ${bp?.coreActivity || company.description || ''}
+מוצרים: ${bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 2).join(', ') || ''}
+מילות מפתח: ${bp?.primaryKeywords?.join(', ') || keywords.join(', ') || ''}
 
 `
         fullPrompt = ctx + prompt
@@ -55,12 +62,17 @@ export async function POST(req: Request) {
     const result = await callModel(model_provider as ModelProvider, model_name, fullPrompt)
     console.log('[prompts/test] callModel done, latency_ms:', result.latency_ms, 'tokens:', result.tokens_used)
 
-    // Try to parse result as JSON for display
+    // Parse JSON — strip markdown fences first, then try regex extraction
     let parsed: any = null
     try {
-      const match = result.text.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
-      if (match) parsed = JSON.parse(match[0])
-    } catch {}
+      const clean = result.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      parsed = JSON.parse(clean)
+    } catch {
+      try {
+        const match = result.text.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+        if (match) parsed = JSON.parse(match[0])
+      } catch {}
+    }
 
     const testResult = {
       raw_text: result.text.slice(0, 5000),
