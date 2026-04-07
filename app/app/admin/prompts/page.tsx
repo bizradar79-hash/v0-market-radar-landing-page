@@ -219,49 +219,54 @@ export default function PromptsPage() {
     setTesting(true)
     setTestResult(null)
 
-    // Save first if not saved yet
-    let versionId = sandboxVersionId
-    if (!versionId) {
-      const saveRes = await fetch('/api/admin/prompts', {
+    try {
+      // Save first if not saved yet
+      let versionId = sandboxVersionId
+      if (!versionId) {
+        const saveRes = await fetch('/api/admin/prompts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            module: activeModule,
+            prompt: sbPrompt,
+            model_provider: sbProvider,
+            model_name: sbModel,
+            created_by: 'admin',
+          }),
+        })
+        const saved = await saveRes.json()
+        if (saved.version?.id) {
+          versionId = saved.version.id
+          setSandboxVersionId(versionId)
+        }
+      }
+
+      const res = await fetch('/api/admin/prompts/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          module: activeModule,
           prompt: sbPrompt,
           model_provider: sbProvider,
           model_name: sbModel,
-          created_by: 'admin',
+          company_id: sbCompanyId || null,
+          module: activeModule,
+          version_id: versionId,
         }),
       })
-      const saved = await saveRes.json()
-      if (saved.version?.id) {
-        versionId = saved.version.id
-        setSandboxVersionId(versionId)
-        await loadVersions(activeModule)
+      const data = await res.json()
+      if (data.success) {
+        setTestResult(data.results)
+        toast({ title: 'בדיקה הושלמה', description: `${data.results.latency_ms}ms · ${data.results.tokens_used} טוקנים` })
+        // Reload versions in background — don't await so it doesn't hide results
+        loadVersions(activeModule)
+      } else {
+        toast({ title: 'שגיאה בבדיקה', description: data.error ?? JSON.stringify(data), variant: 'destructive' })
       }
+    } catch (e: any) {
+      toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setTesting(false)
     }
-
-    const res = await fetch('/api/admin/prompts/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: sbPrompt,
-        model_provider: sbProvider,
-        model_name: sbModel,
-        company_id: sbCompanyId || null,
-        module: activeModule,
-        version_id: versionId,
-      }),
-    })
-    const data = await res.json()
-    if (data.success) {
-      setTestResult(data.results)
-      await loadVersions(activeModule)
-      toast({ title: 'בדיקה הושלמה', description: `${data.results.latency_ms}ms · ${data.results.tokens_used} טוקנים` })
-    } else {
-      toast({ title: 'שגיאה בבדיקה', description: data.error, variant: 'destructive' })
-    }
-    setTesting(false)
   }
 
   // ── Push to production ───────────────────────────────────────────────────
@@ -473,68 +478,68 @@ export default function PromptsPage() {
               </div>
             </div>
 
-            {/* Test Results */}
-            {testResult && (
-              <div className="rounded-xl border bg-card p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-sm">תוצאות בדיקה</h3>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {testResult.latency_ms}ms
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Zap className="h-3 w-3" />
-                      {testResult.tokens_used} טוקנים
-                    </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Test Results (outside grid so loadVersions can't hide them) ── */}
+      {testResult && (
+        <div className="rounded-xl border bg-card p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-semibold text-base">תוצאות בדיקה</h3>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {testResult.latency_ms}ms
+              </span>
+              <span className="flex items-center gap-1">
+                <Zap className="h-3 w-3" />
+                {testResult.tokens_used} טוקנים
+              </span>
+              <Badge variant="outline" className="text-xs">{testResult.model_provider} / {testResult.model_name}</Badge>
+            </div>
+          </div>
+
+          {/* Parsed news items */}
+          {Array.isArray(testResult.parsed?.news) && testResult.parsed.news.length > 0 ? (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {testResult.parsed.news.map((item: any, i: number) => (
+                <div key={i} className="rounded-lg bg-muted/50 p-3 text-xs space-y-1">
+                  <div className="font-medium text-sm">{item.title}</div>
+                  <div className="text-muted-foreground">{item.summary?.slice(0, 150)}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline" className="text-[10px]">{item.source}</Badge>
+                    {item.category && <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>}
+                    {item.sentiment && (
+                      <Badge className={`text-[10px] ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                        {item.sentiment}
+                      </Badge>
+                    )}
                   </div>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <pre className="text-sm whitespace-pre-wrap bg-muted p-4 rounded max-h-96 overflow-auto">
+              {testResult.raw_text || '(no output)'}
+            </pre>
+          )}
 
-                {/* Parsed news items */}
-                {Array.isArray(testResult.parsed?.news) && testResult.parsed.news.length > 0 ? (
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {testResult.parsed.news.map((item: any, i: number) => (
-                      <div key={i} className="rounded-lg bg-muted/50 p-3 text-xs space-y-1">
-                        <div className="font-medium text-sm">{item.title}</div>
-                        <div className="text-muted-foreground">{item.summary?.slice(0, 120)}</div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px]">{item.source}</Badge>
-                          {item.category && <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>}
-                          {item.sentiment && (
-                            <Badge className={`text-[10px] ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
-                              {item.sentiment}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-lg bg-muted/50 p-3">
-                    <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-all text-muted-foreground">
-                      {testResult.raw_text?.slice(0, 800)}
-                    </pre>
-                  </div>
-                )}
-
-                {/* Push to production */}
-                {sandboxVersionId && (
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => activate(sandboxVersionId)}
-                    disabled={activating}
-                  >
-                    {activating ? (
-                      <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="ml-2 h-4 w-4" />
-                    )}
-                    ✓ דחוף לפרודקשיין
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Push to production */}
+          {sandboxVersionId && (
+            <Button
+              className="w-full bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => activate(sandboxVersionId)}
+              disabled={activating}
+            >
+              {activating ? (
+                <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="ml-2 h-4 w-4" />
+              )}
+              דחוף לפרודקשיין ✓
+            </Button>
+          )}
         </div>
       )}
 
