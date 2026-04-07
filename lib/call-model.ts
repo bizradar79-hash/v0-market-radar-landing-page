@@ -40,8 +40,8 @@ export async function callModel(
   }
 
   if (provider === 'gemini') {
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error('GEMINI key not set')
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY)
+    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not set')
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
     const model = genAI.getGenerativeModel({ model: modelName })
     const result = await model.generateContent(prompt)
     const text = result.response.text()
