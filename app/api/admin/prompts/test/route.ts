@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { callModel } from '@/lib/call-model'
 import type { ModelProvider } from '@/lib/available-models'
@@ -8,40 +7,53 @@ export const maxDuration = 60
 
 // POST { prompt, model_provider, model_name, company_id, module, version_id? }
 export async function POST(req: Request) {
+  // Log raw body before any parsing so crashes don't swallow context
+  try {
+    const rawBody = await req.clone().json()
+    console.log('test called with body:', JSON.stringify({
+      ...rawBody,
+      prompt: rawBody.prompt?.slice(0, 80) + '...',
+    }))
+  } catch (logErr) {
+    console.log('test called — could not parse body for logging:', logErr)
+  }
+
   try {
     const body = await req.json()
-    console.log('test route called with:', JSON.stringify({ ...body, prompt: body.prompt?.slice(0, 80) + '...' }))
-
     const { prompt, model_provider, model_name, company_id, module: module_, version_id } = body
 
     if (!prompt || !model_provider || !model_name) {
-      return NextResponse.json({ error: 'prompt, model_provider, model_name required' }, { status: 400 })
+      return Response.json({ error: 'prompt, model_provider, model_name required' }, { status: 400 })
     }
+
+    console.log(`[prompts/test] provider=${model_provider} model=${model_name} company_id=${company_id ?? 'none'}`)
 
     const supabase = await createClient()
 
     // Build company context if company_id provided
     let fullPrompt = prompt
     if (company_id) {
-      const { data: company } = await supabase
+      const { data: company, error: companyErr } = await supabase
         .from('companies')
         .select('name, website, industry, business_profile, business_overview')
         .eq('id', company_id)
         .maybeSingle()
+      console.log('[prompts/test] company fetch:', company?.name ?? 'not found', companyErr?.message ?? 'ok')
       if (company) {
         const ctx = `הקשר חברה:
 שם: ${company.name || ''}
 תחום: ${company.industry || ''}
 אתר: ${company.website || ''}
-תיאור: ${company.business_overview || company.business_profile || ''}
+תיאור: ${(company as any).business_overview || (company as any).business_profile || ''}
 
 `
         fullPrompt = ctx + prompt
       }
     }
 
+    console.log('[prompts/test] calling callModel...')
     const result = await callModel(model_provider as ModelProvider, model_name, fullPrompt)
-    console.log('callModel done, latency_ms:', result.latency_ms, 'tokens:', result.tokens_used)
+    console.log('[prompts/test] callModel done, latency_ms:', result.latency_ms, 'tokens:', result.tokens_used)
 
     // Try to parse result as JSON for display
     let parsed: any = null
@@ -62,15 +74,16 @@ export async function POST(req: Request) {
 
     // Save test result to version row if version_id provided
     if (version_id) {
-      await supabase
+      const { error: saveErr } = await supabase
         .from('prompt_versions')
         .update({ test_result: testResult, tested_with_company_id: company_id ?? null })
         .eq('id', version_id)
+      if (saveErr) console.warn('[prompts/test] save test_result failed:', saveErr.message)
     }
 
-    return NextResponse.json({ success: true, results: testResult })
+    return Response.json({ success: true, results: testResult })
   } catch (e: any) {
-    console.error('[prompts/test] error:', e?.message, e?.stack)
-    return NextResponse.json({ error: e?.message ?? 'Unknown error' }, { status: 500 })
+    console.error('[prompts/test] CRASH:', e?.message, '\nStack:', e?.stack)
+    return Response.json({ error: e?.message ?? 'Unknown error', stack: e?.stack }, { status: 500 })
   }
 }
