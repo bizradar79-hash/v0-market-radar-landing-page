@@ -58,7 +58,7 @@ interface PromptVersion {
 interface Company {
   id: string
   name: string
-  owner_email?: string
+  website?: string
 }
 
 const MODULE_TABS = [
@@ -114,7 +114,7 @@ export default function PromptsPage() {
   }, [])
 
   const loadCompanies = useCallback(async () => {
-    const { data } = await supabase.from('companies').select('id, name').order('name')
+    const { data } = await supabase.from('companies').select('id, name, website').order('name')
     setCompanies(data ?? [])
   }, [])
 
@@ -445,7 +445,9 @@ export default function PromptsPage() {
                   <SelectContent>
                     <SelectItem value="none">ללא הקשר חברה</SelectItem>
                     {companies.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}{c.website ? ` (${c.website})` : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
