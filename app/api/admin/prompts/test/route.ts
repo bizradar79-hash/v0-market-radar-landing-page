@@ -1,8 +1,17 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServerClient } from '@supabase/ssr'
 import { callModel } from '@/lib/call-model'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
+
+// Service-role client — bypasses RLS so admin can fetch any company
+function adminSupabase() {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { cookies: { getAll: () => [], setAll: () => {} } },
+  )
+}
 
 // POST { prompt, model_provider, model_name, company_id, module, version_id? }
 export async function POST(req: Request) {
@@ -16,18 +25,19 @@ export async function POST(req: Request) {
 
     console.log(`[prompts/test] provider=${model_provider} model=${model_name} company_id=${company_id ?? 'none'}`)
 
-    const supabase = await createClient()
+    const supabase = adminSupabase()
 
-    // Build company context
+    // Fetch company using service role so RLS doesn't block admin access
     let companyContext = ''
     if (company_id) {
-      const { data: company } = await supabase
+      const { data: company, error: companyErr } = await supabase
         .from('companies')
         .select('name, website, industry, description, keywords, business_profile')
         .eq('id', company_id)
         .maybeSingle()
 
-      console.log('[prompts/test] company:', company?.name ?? 'not found')
+      console.log('COMPANY DATA:', JSON.stringify(company))
+      if (companyErr) console.error('[prompts/test] company fetch error:', companyErr.message)
 
       if (company) {
         const bp = (company as any).business_profile
@@ -47,12 +57,12 @@ export async function POST(req: Request) {
     }
 
     const finalPrompt = companyContext + prompt
-    console.log('FINAL PROMPT:', finalPrompt.substring(0, 300))
+    console.log('FINAL PROMPT:', finalPrompt.substring(0, 400))
 
     const start = Date.now()
     const rawText = await callModel(model_provider, model_name, finalPrompt)
     const latency_ms = Date.now() - start
-    console.log('[prompts/test] done, latency_ms:', latency_ms)
+    console.log('[prompts/test] done, latency_ms:', latency_ms, 'raw_text[:200]:', rawText.substring(0, 200))
 
     // Parse JSON — strip markdown fences first, then try regex extraction
     let parsed: any = null
