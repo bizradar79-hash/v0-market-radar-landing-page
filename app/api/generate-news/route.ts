@@ -104,15 +104,18 @@ export async function POST(request: Request) {
       const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
       const keywords: string[] = ctx.company?.keywords || []
 
-      const contextStr = `הקשר חברה:
-שם: ${ctx.company?.name || ''}
-תחום: ${ctx.company?.industry || ''}
-פעילות: ${bp?.coreActivity || ctx.company?.description || ''}
-מוצרים: ${bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 2).join(', ') || ''}
-מילות מפתח: ${bp?.primaryKeywords?.join(', ') || keywords.join(', ') || ''}
+      const coreActivity = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
+      const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
+      const companyName = ctx.company?.name || ''
+      const industry = ctx.company?.industry || coreActivity
 
-`
-      const fullPrompt = contextStr + activePrompt.prompt
+      // Inject company directly into prompt instructions so xAI treats it as search intent
+      let fullPrompt = activePrompt.prompt
+        .replace('לתעשייה ולשוק הישראלי', `לתחום "${industry}" ולשוק הישראלי`)
+        .replace('לתעשייה ולמוצרים של החברה', `לחברה "${companyName}" שעוסקת ב: ${coreActivity}. מוצרים: ${products}`)
+
+      // Prepend short context so model has company name in scope
+      fullPrompt = `חברה: ${companyName} | תחום: ${industry} | מוצרים: ${products}\n\n${fullPrompt}`
 
       try {
         const aiResult = await callModel(activePrompt.model_provider as ModelProvider, activePrompt.model_name, fullPrompt)
