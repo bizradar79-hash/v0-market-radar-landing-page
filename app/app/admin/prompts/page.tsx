@@ -74,6 +74,14 @@ function formatDate(iso: string) {
   catch { return iso }
 }
 
+function parseNewsResults(raw: string): any[] | null {
+  try {
+    const clean = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const parsed = JSON.parse(clean)
+    return parsed.news || null
+  } catch { return null }
+}
+
 function modelLabel(provider: string, modelId: string): string {
   const p = AVAILABLE_MODELS[provider as ModelProvider]
   if (!p) return modelId
@@ -500,30 +508,29 @@ export default function PromptsPage() {
             </div>
           </div>
 
-          {/* Parsed news items */}
-          {Array.isArray(testResult.parsed?.news) && testResult.parsed.news.length > 0 ? (
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {testResult.parsed.news.map((item: any, i: number) => (
-                <div key={i} className="rounded-lg bg-muted/50 p-3 text-xs space-y-1">
-                  <div className="font-medium text-sm">{item.title}</div>
-                  <div className="text-muted-foreground">{item.summary?.slice(0, 150)}</div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className="text-[10px]">{item.source}</Badge>
-                    {item.category && <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>}
-                    {item.sentiment && (
-                      <Badge className={`text-[10px] ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
-                        {item.sentiment}
-                      </Badge>
-                    )}
+          {/* Results — news cards or raw fallback */}
+          {(() => {
+            const news = parseNewsResults(testResult.raw_text)
+            if (news && news.length > 0) return (
+              <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                {news.map((item: any, i: number) => (
+                  <div key={i} className="border rounded-lg p-3 bg-background">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h4 className="font-medium text-sm">{item.title}</h4>
+                      <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+                        {item.source && <span className="text-xs bg-muted px-2 py-0.5 rounded">{item.source}</span>}
+                        {item.sentiment && <span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{item.sentiment}</span>}
+                        {item.category && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{item.category}</span>}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{item.summary}</p>
+                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline mt-1 block">קרא עוד ↗</a>}
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <pre className="text-sm whitespace-pre-wrap bg-muted p-4 rounded max-h-96 overflow-auto">
-              {testResult.raw_text || '(no output)'}
-            </pre>
-          )}
+                ))}
+              </div>
+            )
+            return <pre className="text-xs bg-muted p-3 rounded max-h-96 overflow-auto whitespace-pre-wrap">{testResult.raw_text || '(no output)'}</pre>
+          })()}
 
           {/* Push to production */}
           {sandboxVersionId && (
