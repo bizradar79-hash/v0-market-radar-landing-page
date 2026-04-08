@@ -444,6 +444,34 @@ export default function PromptsPage() {
                   className="font-mono text-xs resize-none"
                   dir="rtl"
                 />
+                <details className="mt-2">
+                  <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                    📋 משתני תבנית זמינים (לחץ להצגה)
+                  </summary>
+                  <div className="mt-2 p-3 bg-muted rounded-lg text-xs space-y-1 font-mono">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      <span className="text-blue-600">{"{{"+"company_name"+"}}"}</span>
+                      <span className="text-muted-foreground">שם החברה</span>
+                      <span className="text-blue-600">{"{{"+"industry"+"}}"}</span>
+                      <span className="text-muted-foreground">תעשייה / תחום עיסוק</span>
+                      <span className="text-blue-600">{"{{"+"core_activity"+"}}"}</span>
+                      <span className="text-muted-foreground">פעילות עיקרית של החברה</span>
+                      <span className="text-blue-600">{"{{"+"products"+"}}"}</span>
+                      <span className="text-muted-foreground">מוצרים ושירותים (מופרדים בפסיקים)</span>
+                      <span className="text-blue-600">{"{{"+"keywords"+"}}"}</span>
+                      <span className="text-muted-foreground">מילות מפתח (מופרדות בפסיקים)</span>
+                      <span className="text-blue-600">{"{{"+"website"+"}}"}</span>
+                      <span className="text-muted-foreground">כתובת האתר</span>
+                      <span className="text-blue-600">{"{{"+"target_audience"+"}}"}</span>
+                      <span className="text-muted-foreground">קהלי יעד</span>
+                      <span className="text-blue-600">{"{{"+"competitors"+"}}"}</span>
+                      <span className="text-muted-foreground">שמות המתחרים</span>
+                    </div>
+                    <p className="text-muted-foreground mt-2 text-xs not-italic">
+                      * המשתנים מוחלפים אוטומטית בנתוני החברה הנבחרת בזמן הרצת הבדיקה
+                    </p>
+                  </div>
+                </details>
               </div>
 
               {/* Company selector */}

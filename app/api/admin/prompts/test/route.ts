@@ -17,9 +17,9 @@ function adminSupabase() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { prompt, model_provider, model_name, company_id, version_id } = body
+    const { prompt: rawPrompt, model_provider, model_name, company_id, version_id } = body
 
-    if (!prompt || !model_provider || !model_name) {
+    if (!rawPrompt || !model_provider || !model_name) {
       return Response.json({ error: 'prompt, model_provider, model_name required' }, { status: 400 })
     }
 
@@ -29,10 +29,12 @@ export async function POST(req: Request) {
 
     // Fetch company using service role so RLS doesn't block admin access
     let companyContext = ''
+    let resolvedPrompt = rawPrompt
+
     if (company_id) {
       const { data: company, error: companyErr } = await supabase
         .from('companies')
-        .select('name, website, industry, description, keywords, business_profile')
+        .select('name, website, industry, description, keywords, business_profile, target_customers')
         .eq('id', company_id)
         .maybeSingle()
 
@@ -44,6 +46,12 @@ export async function POST(req: Request) {
         const coreActivity = bp?.coreActivity || company.description || ''
         const products = bp?.products?.map((p: any) => p.name).join(', ') || ''
         const keywords = (bp?.primaryKeywords || (company as any).keywords || []).join(', ')
+        const targetAudience = (bp?.targetAudiences || (company as any).target_customers || []).join(', ')
+
+        // Fetch competitor names for this company
+        const { data: competitors } = await supabase
+          .from('competitors').select('name').eq('company_id', company_id)
+        const competitorNames = competitors?.map((c: any) => c.name).join(', ') || ''
 
         companyContext = `הקשר חברה:
 שם: ${company.name}
@@ -51,12 +59,24 @@ export async function POST(req: Request) {
 פעילות עיקרית: ${coreActivity}
 מוצרים: ${products}
 מילות מפתח: ${keywords}
+קהל יעד: ${targetAudience}
+מתחרים: ${competitorNames}
 ---
 `
+        // Replace template variables with actual company data
+        resolvedPrompt = rawPrompt
+          .replace(/\{\{company_name\}\}/g, company.name || '')
+          .replace(/\{\{industry\}\}/g, company.industry || coreActivity || '')
+          .replace(/\{\{core_activity\}\}/g, coreActivity || '')
+          .replace(/\{\{products\}\}/g, products || '')
+          .replace(/\{\{keywords\}\}/g, keywords || '')
+          .replace(/\{\{website\}\}/g, company.website || '')
+          .replace(/\{\{target_audience\}\}/g, targetAudience || '')
+          .replace(/\{\{competitors\}\}/g, competitorNames || '')
       }
     }
 
-    const finalPrompt = companyContext + prompt
+    const finalPrompt = companyContext + resolvedPrompt
     console.log('FINAL PROMPT:', finalPrompt.substring(0, 400))
 
     const start = Date.now()

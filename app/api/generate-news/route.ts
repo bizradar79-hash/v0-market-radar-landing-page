@@ -107,6 +107,8 @@ export async function POST(request: Request) {
       const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
       const companyName = ctx.company?.name || ''
       const industry = ctx.company?.industry || coreActivity
+      const targetAudience = (bp?.targetAudiences || ctx.company?.target_customers || []).join(', ')
+      const competitorNames = (ctx.competitors || []).map((c: any) => c.name).join(', ')
 
       const companyContext = `הקשר חברה:
 שם: ${companyName}
@@ -114,9 +116,22 @@ export async function POST(request: Request) {
 פעילות עיקרית: ${coreActivity}
 מוצרים: ${products}
 מילות מפתח: ${keywords.join(', ')}
+קהל יעד: ${targetAudience}
+מתחרים: ${competitorNames}
 ---
 `
-      const finalPrompt = companyContext + activePrompt.prompt
+      // Replace template variables in the active prompt
+      const resolvedPrompt = activePrompt.prompt
+        .replace(/\{\{company_name\}\}/g, companyName)
+        .replace(/\{\{industry\}\}/g, industry)
+        .replace(/\{\{core_activity\}\}/g, coreActivity)
+        .replace(/\{\{products\}\}/g, products)
+        .replace(/\{\{keywords\}\}/g, keywords.join(', '))
+        .replace(/\{\{website\}\}/g, ctx.company?.website || '')
+        .replace(/\{\{target_audience\}\}/g, targetAudience)
+        .replace(/\{\{competitors\}\}/g, competitorNames)
+
+      const finalPrompt = companyContext + resolvedPrompt
 
       try {
         const rawText = await callModel(activePrompt.model_provider, activePrompt.model_name, finalPrompt)
