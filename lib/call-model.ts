@@ -40,7 +40,28 @@ export async function callModel(provider: string, modelName: string, prompt: str
     console.log('Gemini status:', res.status, rawText.slice(0, 200))
     if (!res.ok) throw new Error(`Gemini error ${res.status}: ${rawText.slice(0, 200)}`)
     const data = JSON.parse(rawText)
-    return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
+
+    // Extract real URLs from grounding metadata
+    const groundingChunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks || []
+    const realUrls: Record<number, string> = {}
+    groundingChunks.forEach((chunk: any, i: number) => {
+      if (chunk.web?.uri) realUrls[i] = chunk.web.uri
+    })
+
+    // Get the text
+    let text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
+
+    // Replace vertexaisearch redirect URLs with real URLs from grounding chunks
+    const groundingSupport = data.candidates?.[0]?.groundingMetadata?.groundingSupports || []
+    groundingSupport.forEach((support: any) => {
+      support.groundingChunkIndices?.forEach((idx: number) => {
+        if (realUrls[idx]) {
+          text = text.replace(/https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\/[^\s"]+/g, realUrls[idx])
+        }
+      })
+    })
+
+    return text
   }
 
   if (provider === 'groq') {
