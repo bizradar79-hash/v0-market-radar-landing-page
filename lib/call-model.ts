@@ -1,21 +1,30 @@
 export async function callModel(provider: string, modelName: string, prompt: string): Promise<string> {
 
   if (provider === 'xai') {
-    const res = await fetch('https://api.x.ai/v1/messages', {
+    const res = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`
+      },
       body: JSON.stringify({
         model: modelName,
-        max_tokens: 4000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', description: 'Search the web for current information and news' }],
-        messages: [{ role: 'user', content: prompt }]
+        tools: [{ type: 'web_search_20250305' }],
+        input: prompt
       })
     })
-    const rawText = await res.text()
-    console.log('xAI status:', res.status, rawText.slice(0, 300))
-    if (!res.ok) throw new Error(`xAI error ${res.status}: ${rawText.slice(0, 200)}`)
-    const data = JSON.parse(rawText)
-    return data.content?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || ''
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(`xAI error ${res.status}: ${errText}`)
+    }
+    const data = await res.json()
+    const text = data.output
+      ?.filter((b: any) => b.type === 'message')
+      .flatMap((b: any) => b.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('') || ''
+    return text
   }
 
   if (provider === 'gemini') {
