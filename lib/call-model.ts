@@ -36,22 +36,25 @@ export async function callModel(provider: string, modelName: string, prompt: str
         tools: [{ google_search: {} }]
       })
     })
-    const rawText = await res.text()
-    console.log('Gemini status:', res.status, rawText.slice(0, 200))
-    if (!res.ok) throw new Error(`Gemini error ${res.status}: ${rawText.slice(0, 200)}`)
-    const data = JSON.parse(rawText)
+    if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`)
+    const data = await res.json()
 
-    // Get real URLs from grounding chunks in order
+    // Get real URLs from grounding metadata
     const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks || []
-    const realUrls = chunks.map((c: any) => c.web?.uri).filter(Boolean)
+    const realUrls: string[] = chunks.map((c: any) => c.web?.uri).filter(Boolean)
 
-    // Get text
-    let text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
+    // Get the text response
+    let text = data.candidates?.[0]?.content?.parts
+      ?.filter((p: any) => p.text)
+      .map((p: any) => p.text)
+      .join('') || ''
 
-    // Replace each vertexaisearch redirect URL in order with the real URL
-    let urlIndex = 0
-    text = text.replace(/https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\/[A-Za-z0-9_\-=]+/g, () => {
-      return realUrls[urlIndex++] || ''
+    // Replace vertexaisearch redirect URLs with real URLs in sequence
+    let idx = 0
+    text = text.replace(/https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\/[^\s"\\]+/g, () => {
+      const real = realUrls[idx] || ''
+      idx++
+      return real
     })
 
     return text
