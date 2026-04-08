@@ -9,7 +9,7 @@ export async function callModel(provider: string, modelName: string, prompt: str
       },
       body: JSON.stringify({
         model: modelName,
-        tools: [{ type: 'web_search_20250305' }],
+        tools: [{ type: 'web_search' }],
         input: prompt
       })
     })
