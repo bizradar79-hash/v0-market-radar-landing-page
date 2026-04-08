@@ -7,7 +7,7 @@ export async function callModel(provider: string, modelName: string, prompt: str
       body: JSON.stringify({
         model: modelName,
         max_tokens: 4000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search', description: 'Search the web for current information and news' }],
         messages: [{ role: 'user', content: prompt }]
       })
     })
