@@ -28,34 +28,40 @@ export async function callModel(provider: string, modelName: string, prompt: str
   }
 
   if (provider === 'gemini') {
+    const modifiedPrompt = prompt + '\n\nחשוב: אל תכלול URLs בתגובה. השדה url יישאר ריק.'
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: [{ text: modifiedPrompt }] }],
         tools: [{ google_search: {} }]
       })
     })
     if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text()}`)
     const data = await res.json()
 
-    // Get real URLs from grounding metadata
+    // Extract real URLs from grounding metadata
     const chunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks || []
     const realUrls: string[] = chunks.map((c: any) => c.web?.uri).filter(Boolean)
 
-    // Get the text response
+    // Get text response
     let text = data.candidates?.[0]?.content?.parts
       ?.filter((p: any) => p.text)
       .map((p: any) => p.text)
       .join('') || ''
 
-    // Replace vertexaisearch redirect URLs with real URLs in sequence
-    let idx = 0
-    text = text.replace(/https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\/[^\s"\\]+/g, () => {
-      const real = realUrls[idx] || ''
-      idx++
-      return real
-    })
+    // Inject real URLs into parsed JSON by index
+    try {
+      const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      const parsed = JSON.parse(clean)
+      if (parsed.news) {
+        parsed.news = parsed.news.map((item: any, i: number) => ({
+          ...item,
+          url: realUrls[i] || item.url || ''
+        }))
+        text = JSON.stringify(parsed)
+      }
+    } catch {}
 
     return text
   }
