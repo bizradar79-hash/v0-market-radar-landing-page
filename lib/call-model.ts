@@ -11,8 +11,10 @@ export async function callModel(provider: string, modelName: string, prompt: str
         messages: [{ role: 'user', content: prompt }]
       })
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(`xAI error ${res.status}: ${JSON.stringify(data).slice(0, 200)}`)
+    const rawText = await res.text()
+    console.log('xAI status:', res.status, rawText.slice(0, 300))
+    if (!res.ok) throw new Error(`xAI error ${res.status}: ${rawText.slice(0, 200)}`)
+    const data = JSON.parse(rawText)
     return data.content?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('') || ''
   }
 
@@ -25,8 +27,10 @@ export async function callModel(provider: string, modelName: string, prompt: str
         tools: [{ google_search: {} }]
       })
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(`Gemini error ${res.status}: ${JSON.stringify(data).slice(0, 200)}`)
+    const rawText = await res.text()
+    console.log('Gemini status:', res.status, rawText.slice(0, 200))
+    if (!res.ok) throw new Error(`Gemini error ${res.status}: ${rawText.slice(0, 200)}`)
+    const data = JSON.parse(rawText)
     return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
   }
 
@@ -40,8 +44,10 @@ export async function callModel(provider: string, modelName: string, prompt: str
         max_tokens: 4000
       })
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(`Groq error ${res.status}: ${JSON.stringify(data).slice(0, 200)}`)
+    const rawText = await res.text()
+    console.log('Groq status:', res.status, rawText.slice(0, 200))
+    if (!res.ok) throw new Error(`Groq error ${res.status}: ${rawText.slice(0, 200)}`)
+    const data = JSON.parse(rawText)
     return data.choices?.[0]?.message?.content || ''
   }
 
