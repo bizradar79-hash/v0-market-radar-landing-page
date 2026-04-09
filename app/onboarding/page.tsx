@@ -169,6 +169,7 @@ export default function OnboardingPage() {
 
   // Wizard navigation
   const [wizardStep, setWizardStep] = useState(1)
+  const [termsAccepted, setTermsAccepted] = useState(false)
 
   // Wizard step 1 — core activity
   const [wCoreActivity, setWCoreActivity] = useState('')
@@ -862,13 +863,30 @@ export default function OnboardingPage() {
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                 ) : (
-                  <Button
-                    onClick={handleSubmit}
-                    className="gap-2 bg-teal-600 hover:bg-teal-700 text-white min-w-[160px]"
-                  >
-                    <Check className="h-4 w-4" />
-                    סיים והמשך
-                  </Button>
+                  <div className="flex flex-col items-end gap-3">
+                    <label className="flex items-start gap-2 cursor-pointer text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={termsAccepted}
+                        onChange={e => setTermsAccepted(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-border accent-teal-600 cursor-pointer"
+                      />
+                      <span>
+                        קראתי ואני מסכים/ה ל
+                        <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline mx-1">תנאי השימוש</a>
+                        ול
+                        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline mx-1">מדיניות הפרטיות</a>
+                      </span>
+                    </label>
+                    <Button
+                      onClick={handleSubmit}
+                      disabled={!termsAccepted}
+                      className="gap-2 bg-teal-600 hover:bg-teal-700 text-white min-w-[160px] disabled:opacity-50"
+                    >
+                      <Check className="h-4 w-4" />
+                      סיים והמשך
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>

@@ -2,9 +2,9 @@
 
 /**
  * OTP Email Template for Supabase (set in dashboard):
- * 
+ *
  * Go to: Supabase Dashboard → Authentication → Email Templates → Confirm signup
- * 
+ *
  * Subject: אימות חשבון - Market Radar Israel
  * Body:
  * קוד האימות שלך הוא: {{ .Token }}
@@ -23,9 +23,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useState, useRef } from 'react'
-import { Radar, Loader2, Mail, KeyRound } from 'lucide-react'
+import { Radar, Loader2, KeyRound } from 'lucide-react'
 
 type Step = 'signup' | 'otp'
 
@@ -39,8 +40,27 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isResending, setIsResending] = useState(false)
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const router = useRouter()
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  const handleGoogleSignup = async () => {
+    const supabase = createClient()
+    setIsGoogleLoading(true)
+    setError(null)
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+      if (error) throw error
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'שגיאה בהרשמה עם Google')
+      setIsGoogleLoading(false)
+    }
+  }
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,11 +92,11 @@ export default function SignupPage() {
   const handleOtpChange = (index: number, value: string) => {
     // Only allow digits
     if (value && !/^\d$/.test(value)) return
-    
+
     const newOtp = [...otpCode]
     newOtp[index] = value
     setOtpCode(newOtp)
-    
+
     // Auto-focus next input
     if (value && index < 7) {
       otpRefs.current[index + 1]?.focus()
@@ -186,7 +206,7 @@ export default function SignupPage() {
             <CardContent>
               <form onSubmit={handleVerifyOtp}>
                 <div className="flex flex-col gap-6">
-                  {/* 6-digit OTP input */}
+                  {/* 8-digit OTP input */}
                   <div className="flex justify-center gap-2" dir="ltr">
                     {otpCode.map((digit, index) => (
                       <Input
@@ -211,9 +231,9 @@ export default function SignupPage() {
                     </div>
                   )}
 
-                  <Button 
-                    type="submit" 
-                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90" 
+                  <Button
+                    type="submit"
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
                     disabled={isLoading || otpCode.join('').length !== 8}
                   >
                     {isLoading ? (
@@ -260,6 +280,31 @@ export default function SignupPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {/* Google signup */}
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full mb-4 gap-2 border-border"
+                onClick={handleGoogleSignup}
+                disabled={isGoogleLoading || isLoading}
+              >
+                {isGoogleLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Image src="/google-icon.svg" alt="Google" width={18} height={18} unoptimized />
+                )}
+                הירשם עם Google
+              </Button>
+
+              <div className="relative mb-4">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs text-muted-foreground">
+                  <span className="bg-card px-2">או עם פרטים</span>
+                </div>
+              </div>
+
               <form onSubmit={handleSignUp}>
                 <div className="flex flex-col gap-5">
                   <div className="grid gap-2">
@@ -318,10 +363,10 @@ export default function SignupPage() {
                       {error}
                     </div>
                   )}
-                  <Button 
-                    type="submit" 
-                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90" 
-                    disabled={isLoading}
+                  <Button
+                    type="submit"
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                    disabled={isLoading || isGoogleLoading}
                   >
                     {isLoading ? (
                       <>
@@ -350,9 +395,9 @@ export default function SignupPage() {
         {step === 'signup' && (
           <p className="mt-6 text-center text-xs text-muted-foreground">
             בלחיצה על &quot;צור חשבון&quot; אתה מסכים ל
-            <Link href="#" className="text-primary hover:underline">תנאי השימוש</Link>
+            <Link href="/terms" className="text-primary hover:underline">תנאי השימוש</Link>
             {' '}ול
-            <Link href="#" className="text-primary hover:underline">מדיניות הפרטיות</Link>
+            <Link href="/privacy" className="text-primary hover:underline">מדיניות הפרטיות</Link>
           </p>
         )}
       </div>

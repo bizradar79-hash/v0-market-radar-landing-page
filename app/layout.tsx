@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Heebo } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { CookieBanner } from '@/components/cookie-banner'
 import './globals.css'
 
 const heebo = Heebo({ 
@@ -40,6 +41,7 @@ export default function RootLayout({
     <html lang="he" dir="rtl">
       <body className={`${heebo.variable} font-sans antialiased`}>
         {children}
+        <CookieBanner />
         <Analytics />
       </body>
     </html>

@@ -22,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -36,7 +37,7 @@ export default function LoginPage() {
         password,
       })
       if (error) throw error
-      
+
       // Check if user has completed onboarding
       if (authData.user) {
         const { data: company } = await supabase
@@ -44,19 +45,36 @@ export default function LoginPage() {
           .select('onboarding_completed')
           .eq('id', authData.user.id)
           .single()
-        
-        // If no company or onboarding not completed, redirect to onboarding
+
         if (!company || !company.onboarding_completed) {
           router.push('/onboarding')
           return
         }
       }
-      
+
       router.push('/app/dashboard')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'אימייל או סיסמה שגויים')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleGoogleLogin = async () => {
+    const supabase = createClient()
+    setIsGoogleLoading(true)
+    setError(null)
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
+      if (error) throw error
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : 'שגיאה בהתחברות עם Google')
+      setIsGoogleLoading(false)
     }
   }
 
@@ -82,6 +100,31 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Google login */}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full mb-4 gap-2 border-border"
+              onClick={handleGoogleLogin}
+              disabled={isGoogleLoading || isLoading}
+            >
+              {isGoogleLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Image src="/google-icon.svg" alt="Google" width={18} height={18} unoptimized />
+              )}
+              התחבר עם Google
+            </Button>
+
+            <div className="relative mb-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs text-muted-foreground">
+                <span className="bg-card px-2">או עם אימייל וסיסמה</span>
+              </div>
+            </div>
+
             <form onSubmit={handleLogin}>
               <div className="flex flex-col gap-5">
                 <div className="grid gap-2">
@@ -123,10 +166,10 @@ export default function LoginPage() {
                     {error}
                   </div>
                 )}
-                <Button 
-                  type="submit" 
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90" 
-                  disabled={isLoading}
+                <Button
+                  type="submit"
+                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                  disabled={isLoading || isGoogleLoading}
                 >
                   {isLoading ? (
                     <>
@@ -146,6 +189,11 @@ export default function LoginPage() {
                 >
                   צור חשבון
                 </Link>
+              </div>
+              <div className="mt-4 text-center text-xs text-muted-foreground">
+                <Link href="/terms" className="text-primary hover:underline">תנאי שימוש</Link>
+                {' '}·{' '}
+                <Link href="/privacy" className="text-primary hover:underline">מדיניות פרטיות</Link>
               </div>
             </form>
           </CardContent>

@@ -568,8 +568,9 @@ export default function LandingPage() {
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
               <a href="#features" className="hover:text-gray-900 transition-colors">מוצר</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
-              <Link href="/login" className="hover:text-gray-900 transition-colors">צור קשר</Link>
-              <Link href="/login" className="hover:text-gray-900 transition-colors">פרטיות</Link>
+              <a href="mailto:support@nsradar.co.il" className="hover:text-gray-900 transition-colors">צור קשר</a>
+              <Link href="/terms" className="hover:text-gray-900 transition-colors">תנאי שימוש</Link>
+              <Link href="/privacy" className="hover:text-gray-900 transition-colors">פרטיות</Link>
             </nav>
           </div>
           <p className="mt-8 text-center text-xs text-gray-400">© 2026 North Star Radar. כל הזכויות שמורות.</p>
