@@ -16,7 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
-  CheckCircle2, XCircle, FileText, Minus, Trash2,
+  CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -44,6 +44,20 @@ interface UserRow {
   } | null
 }
 
+type ModuleState = 'idle' | 'running' | 'ok' | 'error'
+
+const SYNC_MODULES = [
+  { id: 'news',        label: 'חדשות',      emoji: '📰' },
+  { id: 'conferences', label: 'כנסים',      emoji: '🏛️' },
+  { id: 'tenders',     label: 'מכרזים',     emoji: '📋' },
+  { id: 'competitors', label: 'מתחרים',     emoji: '👥' },
+  { id: 'seo',         label: 'SEO',         emoji: '📈' },
+  { id: 'geo',         label: 'GEO',         emoji: '🌐' },
+  { id: 'trends',      label: 'טרנדים',     emoji: '📊' },
+  { id: 'reviews',     label: 'ביקורות',    emoji: '⭐' },
+  { id: 'report',      label: 'דוח שבועי',  emoji: '📄' },
+]
+
 function SyncStatusBadge({ status }: { status: string | null }) {
   if (status === 'running') {
     return (
@@ -58,8 +72,36 @@ function SyncStatusBadge({ status }: { status: string | null }) {
   if (status === 'error') {
     return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">✗ שגיאה</Badge>
   }
-  // idle or null
   return <Badge className="bg-gray-100 text-gray-500 border-gray-200 text-xs">— ממתין</Badge>
+}
+
+function ModuleButton({ state, emoji, label, onClick, disabled }: {
+  state: ModuleState
+  emoji: string
+  label: string
+  onClick: () => void
+  disabled: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || state === 'running'}
+      className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-xs font-medium transition-all min-w-[64px] ${
+        state === 'running'
+          ? 'border-blue-300 bg-blue-50 text-blue-700 cursor-wait'
+          : state === 'ok'
+          ? 'border-green-300 bg-green-50 text-green-700'
+          : state === 'error'
+          ? 'border-red-300 bg-red-50 text-red-700'
+          : 'border-border hover:border-primary/50 hover:bg-muted/50 text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+      }`}
+    >
+      <span className="text-base leading-none">
+        {state === 'running' ? '⟳' : state === 'ok' ? '✅' : state === 'error' ? '❌' : emoji}
+      </span>
+      <span>{label}</span>
+    </button>
+  )
 }
 
 export default function ImpersonatePage() {
@@ -67,22 +109,21 @@ export default function ImpersonatePage() {
   const [loading, setLoading] = useState(true)
   const [impersonating, setImpersonating] = useState<string | null>(null)
 
-  // Per-user sync trigger state (while waiting for running status to appear)
   const [triggering, setTriggering] = useState<Record<string, boolean>>({})
-  // Polling: set of user IDs currently in 'running' state
   const [pollingUsers, setPollingUsers] = useState<Set<string>>(new Set())
 
-  // Delete user
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<UserRow | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
-  // Refresh All
   const [refreshingAll, setRefreshingAll] = useState(false)
   const [refreshAllProgress, setRefreshAllProgress] = useState(0)
   const [showConfirmAll, setShowConfirmAll] = useState(false)
 
-  // Details modal
   const [logModalUser, setLogModalUser] = useState<UserRow | null>(null)
+
+  // Per-module sync state: { userId: { moduleId: ModuleState } }
+  const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
+  const [moduleSyncUser, setModuleSyncUser] = useState<UserRow | null>(null)
 
   const supabase = createClient()
   const router = useRouter()
@@ -92,7 +133,6 @@ export default function ImpersonatePage() {
     checkAdminAndLoad()
   }, [])
 
-  // Poll Supabase for sync_status updates every 5s when any user is running
   useEffect(() => {
     if (pollingUsers.size === 0) return
     const interval = setInterval(async () => {
@@ -118,15 +158,11 @@ export default function ImpersonatePage() {
         }
       }))
 
-      // Remove users that are no longer running
       const stillRunning = new Set(
-        data
-          .filter(d => d.sync_status === 'running')
-          .map(d => d.id)
+        data.filter(d => d.sync_status === 'running').map(d => d.id)
       )
       setPollingUsers(stillRunning)
 
-      // Show toast for completed users
       data.forEach(d => {
         if (!pollingUsers.has(d.id)) return
         if (d.sync_status === 'done' || d.sync_status === 'error') {
@@ -158,7 +194,6 @@ export default function ImpersonatePage() {
     const data = await res.json()
     if (data.users) {
       setUsers(data.users)
-      // Start polling for any already-running syncs
       const running = new Set<string>(
         (data.users as UserRow[])
           .filter(u => u.company?.sync_status === 'running')
@@ -209,23 +244,58 @@ export default function ImpersonatePage() {
   async function triggerSync(userId: string) {
     setTriggering(prev => ({ ...prev, [userId]: true }))
     try {
-      // Optimistically set status to running in UI
       setUsers(prev => prev.map(u => u.id === userId && u.company
         ? { ...u, company: { ...u.company, sync_status: 'running' } }
         : u
       ))
-      // Fire-and-forget
       fetch('/api/sync/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_id: userId, force: true }),
       }).catch(() => {})
-      // Start polling this user
       setPollingUsers(prev => new Set([...prev, userId]))
     } catch (e: any) {
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
     } finally {
       setTriggering(prev => ({ ...prev, [userId]: false }))
+    }
+  }
+
+  async function syncModule(userId: string, moduleId: string) {
+    setModuleStates(prev => ({
+      ...prev,
+      [userId]: { ...(prev[userId] || {}), [moduleId]: 'running' },
+    }))
+    try {
+      const res = await fetch('/api/admin/sync-module', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: userId, module: moduleId }),
+      })
+      const ok = res.ok
+      setModuleStates(prev => ({
+        ...prev,
+        [userId]: { ...(prev[userId] || {}), [moduleId]: ok ? 'ok' : 'error' },
+      }))
+      const data = await res.json().catch(() => ({}))
+      toast({
+        title: ok ? `✅ ${SYNC_MODULES.find(m => m.id === moduleId)?.label} עודכן` : `❌ שגיאה ב-${SYNC_MODULES.find(m => m.id === moduleId)?.label}`,
+        description: ok ? `${data.company_name}` : (data.results?.[0]?.body?.error ?? 'שגיאה לא ידועה'),
+        variant: ok ? 'default' : 'destructive',
+      })
+      // Reset to idle after 4s
+      setTimeout(() => {
+        setModuleStates(prev => ({
+          ...prev,
+          [userId]: { ...(prev[userId] || {}), [moduleId]: 'idle' },
+        }))
+      }, 4000)
+    } catch (e: any) {
+      setModuleStates(prev => ({
+        ...prev,
+        [userId]: { ...(prev[userId] || {}), [moduleId]: 'error' },
+      }))
+      toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
     }
   }
 
@@ -238,7 +308,6 @@ export default function ImpersonatePage() {
       for (let i = 0; i < users.length; i++) {
         const u = users[i]
         setRefreshAllProgress(i + 1)
-        // Optimistically mark as running
         setUsers(prev => prev.map(pu => pu.id === u.id && pu.company
           ? { ...pu, company: { ...pu.company, sync_status: 'running' } }
           : pu
@@ -365,8 +434,8 @@ export default function ImpersonatePage() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        {/* Sync button */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Full sync button */}
                         <Button
                           size="sm"
                           variant="outline"
@@ -378,6 +447,16 @@ export default function ImpersonatePage() {
                             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             : <RefreshCw className="h-3.5 w-3.5" />
                           }
+                        </Button>
+                        {/* Per-module sync */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setModuleSyncUser(u)}
+                          title="סנכרון מודולים"
+                        >
+                          <Cpu className="h-3.5 w-3.5 ml-1" />
+                          מודולים
                         </Button>
                         {/* Details button */}
                         <Button
@@ -426,7 +505,49 @@ export default function ImpersonatePage() {
         </CardContent>
       </Card>
 
-      {/* Sync Log Details Modal */}
+      {/* ── Per-module sync dialog ── */}
+      <Dialog open={!!moduleSyncUser} onOpenChange={open => { if (!open) setModuleSyncUser(null) }}>
+        <DialogContent className="max-w-lg" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Cpu className="h-4 w-4" />
+              סנכרון מודולים — {moduleSyncUser?.company?.name || moduleSyncUser?.email}
+            </DialogTitle>
+          </DialogHeader>
+
+          {moduleSyncUser && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                לחץ על מודול להרצה בנפרד. כל לחיצה קוראת ל-API עם force=true.
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {SYNC_MODULES.map(mod => {
+                  const state: ModuleState = moduleStates[moduleSyncUser.id]?.[mod.id] ?? 'idle'
+                  return (
+                    <ModuleButton
+                      key={mod.id}
+                      state={state}
+                      emoji={mod.emoji}
+                      label={mod.label}
+                      onClick={() => syncModule(moduleSyncUser.id, mod.id)}
+                      disabled={false}
+                    />
+                  )
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                ✅ = הצליח · ❌ = שגיאה · ⟳ = רץ · האייקון המקורי = ממתין
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModuleSyncUser(null)}>סגור</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Sync Log Details Modal ── */}
       <Dialog open={!!logModalUser} onOpenChange={open => { if (!open) setLogModalUser(null) }}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
@@ -438,7 +559,6 @@ export default function ImpersonatePage() {
 
           {logModalUser && (
             <div className="space-y-4">
-              {/* Status + dates */}
               <div className="flex flex-wrap gap-3 text-sm">
                 <div>
                   <span className="text-muted-foreground ml-1">סטטוס:</span>
@@ -462,7 +582,6 @@ export default function ImpersonatePage() {
                 )}
               </div>
 
-              {/* Log table */}
               {logModalUser.company?.sync_log && logModalUser.company.sync_log.length > 0 ? (
                 <div className="rounded-lg border overflow-hidden">
                   <Table>
@@ -523,7 +642,7 @@ export default function ImpersonatePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete user confirmation dialog */}
+      {/* ── Delete user confirmation ── */}
       <Dialog open={!!deleteConfirmUser} onOpenChange={open => { if (!open) setDeleteConfirmUser(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -554,7 +673,7 @@ export default function ImpersonatePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm Refresh All dialog */}
+      {/* ── Confirm Refresh All ── */}
       <Dialog open={showConfirmAll} onOpenChange={setShowConfirmAll}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

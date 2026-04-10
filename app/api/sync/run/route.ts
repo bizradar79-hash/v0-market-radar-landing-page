@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const SYNC_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes hard limit
 
 function getAdminSupabase() {
   return createServerClient(
@@ -57,7 +58,6 @@ export async function POST(request: Request) {
   let adminDb = getAdminSupabase()
 
   if (!callerIsAdmin) {
-    // Check admin session
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
@@ -78,7 +78,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing company_id' }, { status: 400 })
   }
 
-  // Check current sync status
   const { data: company } = await adminDb
     .from('companies')
     .select('id, sync_status, last_sync_at, next_sync_at, keywords')
@@ -107,8 +106,9 @@ export async function POST(request: Request) {
     log.push({ module, status, message, updated_at: ts() })
   }
 
-  try {
-    // ── 1. Competitors — only if auto count < 10 ──────────────────────────────
+  // ── Inner function with all module calls ──────────────────────────────────
+  async function runAllModules() {
+    // 1. Competitors
     const { count: autoCount } = await adminDb
       .from('competitors')
       .select('id', { count: 'exact', head: true })
@@ -116,54 +116,53 @@ export async function POST(request: Request) {
       .neq('source', 'manual')
 
     if ((autoCount ?? 0) < 10) {
-      const r = await callModule(origin, '/api/find-competitors', companyId, false)
+      const r = await callModule(origin, '/api/find-competitors', companyId!, false)
       addLog('competitors', r.ok ? 'ok' : 'error', r.ok ? `found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`))
-      // Small delay to avoid AI rate limits
       await new Promise(res => setTimeout(res, 2000))
     } else {
       addLog('competitors', 'skipped', `already have ${autoCount} auto competitors`)
     }
 
-    // ── 1b. Manual competitor ratings — fill missing google_rating for manual entries ─
+    // 1b. Manual competitor ratings
     {
-      const r = await callModule(origin, '/api/patch-manual-ratings', companyId)
+      const r = await callModule(origin, '/api/patch-manual-ratings', companyId!)
       addLog('manual_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
     }
 
-    // ── 1c. Company Google Maps review data ──────────────────────────────────
+    // 1c. Company Google Maps review data
     {
-      const r = await callModule(origin, '/api/analyze-company-reviews', companyId)
+      const r = await callModule(origin, '/api/analyze-company-reviews', companyId!)
       addLog('review_analysis', r.ok ? 'ok' : 'error', r.ok ? (r.body?.google_rating != null ? `rating=${r.body.google_rating}` : 'no rating found') : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 1000))
     }
 
-    // ── 2. SEO ranking ────────────────────────────────────────────────────────
+    // 2. SEO ranking
     {
-      const r = await callModule(origin, '/api/generate-seo-ranking', companyId)
+      const r = await callModule(origin, '/api/generate-seo-ranking', companyId!)
       addLog('seo_ranking', r.ok ? 'ok' : 'error', r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 3. GEO ranking ────────────────────────────────────────────────────────
+    // 3. GEO ranking
     {
-      const r = await callModule(origin, '/api/generate-geo-ranking', companyId)
+      const r = await callModule(origin, '/api/generate-geo-ranking', companyId!)
       addLog('geo_ranking', r.ok ? 'ok' : 'error', r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 4. Industry trends ────────────────────────────────────────────────────
+    // 4. Industry trends
     {
-      const r = await callModule(origin, '/api/industry-trends', companyId)
+      const r = await callModule(origin, '/api/industry-trends', companyId!)
       addLog('industry_trends', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 4b. Keyword trends — refresh for each saved keyword ───────────────────
+    // 4b. Keyword trends
     {
       const keywords: string[] = ((company as any).keywords || []).slice(0, 8)
       const adminHeaders = {
         'Content-Type': 'application/json',
-        'x-admin-user-id': companyId,
+        'x-admin-user-id': companyId!,
         'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
       }
       let kwUpdated = 0
@@ -181,25 +180,25 @@ export async function POST(request: Request) {
       await new Promise(res => setTimeout(res, 1000))
     }
 
-    // ── 5. Competitor trends ──────────────────────────────────────────────────
+    // 5. Competitor trends
     {
-      const r = await callModule(origin, '/api/competitor-trends', companyId)
+      const r = await callModule(origin, '/api/competitor-trends', companyId!)
       addLog('competitor_trends', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.competitor_data?.length ?? 0} competitors` : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 6. News ───────────────────────────────────────────────────────────────
+    // 6. News
     {
-      const r = await callModule(origin, '/api/generate-news', companyId)
+      const r = await callModule(origin, '/api/generate-news', companyId!)
       addLog('news', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.count ?? 0} articles` : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 7. Tenders ────────────────────────────────────────────────────────────
+    // 7. Tenders
     {
       const { count: existingTenders } = await adminDb
         .from('tenders').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
-      const r = await callModule(origin, '/api/generate-tenders', companyId)
+      const r = await callModule(origin, '/api/generate-tenders', companyId!)
       const newCount = r.body?.count ?? 0
       if (r.ok && newCount >= (existingTenders ?? 0)) {
         addLog('tenders', 'ok', `${newCount} tenders`)
@@ -211,12 +210,12 @@ export async function POST(request: Request) {
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 8. Leads — only if current count < 5 ─────────────────────────────────
+    // 8. Leads
     {
       const { count: leadsCount } = await adminDb
         .from('leads').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
       if ((leadsCount ?? 0) < 5) {
-        const r = await callModule(origin, '/api/generate-leads', companyId)
+        const r = await callModule(origin, '/api/generate-leads', companyId!)
         addLog('leads', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.count ?? 0} leads` : (r.body?.error ?? `HTTP ${r.status}`))
         await new Promise(res => setTimeout(res, 2000))
       } else {
@@ -224,16 +223,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 9. Weekly actions — always regenerate ─────────────────────────────────
+    // 9. Weekly actions
     {
-      const r = await callModule(origin, '/api/generate-weekly-actions', companyId)
+      const r = await callModule(origin, '/api/generate-weekly-actions', companyId!)
       addLog('weekly_actions', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.actions?.length ?? 0} actions` : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // ── 10. Niche opportunities — regenerate + preserve user statuses ─────────
+    // 10. Niche opportunities
     {
-      // Save current user-set statuses (non-new) before regenerating
       const { data: prevCompany } = await adminDb
         .from('companies').select('niche_opportunities').eq('id', companyId).single()
       const prevNiches: any[] = (prevCompany?.niche_opportunities as any)?.opportunities ?? []
@@ -244,10 +242,9 @@ export async function POST(request: Request) {
         }
       }
 
-      const r = await callModule(origin, '/api/generate-niche-opportunities', companyId)
+      const r = await callModule(origin, '/api/generate-niche-opportunities', companyId!)
       addLog('niche_opportunities', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.opportunities?.length ?? 0} niches` : (r.body?.error ?? `HTTP ${r.status}`))
 
-      // Re-apply preserved statuses if we have any
       if (r.ok && preservedStatuses.size > 0) {
         const { data: freshCompany } = await adminDb
           .from('companies').select('niche_opportunities').eq('id', companyId).single()
@@ -272,29 +269,45 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 11. Weekly report — always regenerate ────────────────────────────────
+    // 11. Weekly report
     {
-      const r = await callModule(origin, '/api/generate-weekly-report', companyId)
+      const r = await callModule(origin, '/api/generate-weekly-report', companyId!)
       addLog('weekly_report', r.ok ? 'ok' : 'error', r.ok ? (r.body?.report?.generated_at ? `generated at ${r.body.report.generated_at}` : 'generated') : (r.body?.error ?? `HTTP ${r.status}`))
       await new Promise(res => setTimeout(res, 2000))
     }
+  }
 
-    // ── Done ──────────────────────────────────────────────────────────────────
-    const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS)
-    await adminDb.from('companies').update({
-      sync_status: 'done',
-      last_sync_at: new Date().toISOString(),
-      next_sync_at: nextSync.toISOString(),
-      sync_log: log,
-    } as any).eq('id', companyId)
+  // ── Run with timeout + guaranteed finally cleanup ─────────────────────────
+  let finalStatus: 'done' | 'error' | 'idle' = 'idle'
+  let returnResponse: NextResponse
 
-    return NextResponse.json({ success: true, company_id: companyId, log })
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Sync timeout: exceeded 10 minutes')), SYNC_TIMEOUT_MS)
+    )
+
+    await Promise.race([runAllModules(), timeoutPromise])
+
+    finalStatus = 'done'
+    returnResponse = NextResponse.json({ success: true, company_id: companyId, log })
   } catch (e: any) {
     addLog('sync', 'error', e?.message ?? 'unexpected error')
-    await adminDb.from('companies').update({
-      sync_status: 'error',
-      sync_log: log,
-    } as any).eq('id', companyId)
-    return NextResponse.json({ success: false, error: e?.message, log }, { status: 500 })
+    finalStatus = 'error'
+    returnResponse = NextResponse.json({ success: false, error: e?.message, log }, { status: 500 })
+  } finally {
+    const now = new Date().toISOString()
+    const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()
+    try {
+      await adminDb.from('companies').update({
+        sync_status: finalStatus,
+        last_sync_at: now,
+        ...(finalStatus === 'done' ? { next_sync_at: nextSync } : {}),
+        sync_log: log,
+      } as any).eq('id', companyId)
+    } catch (dbErr: any) {
+      console.error('[sync/run] finally DB update failed:', dbErr?.message)
+    }
   }
+
+  return returnResponse!
 }
