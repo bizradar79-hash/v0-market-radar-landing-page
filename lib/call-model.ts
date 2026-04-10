@@ -1,3 +1,118 @@
+// ── Two-stage pipeline: Gemini (content) → xAI (URLs) ────────────────────────
+// Stage 1: Gemini finds tender details (title, publisher, deadline, description, budget) — NO URLs
+// Stage 2: For each tender, xAI searches for the real page URL via web_search
+// Returns JSON string: { tenders: [...] }
+export async function callModelTwoStage(prompt: string, _company?: any): Promise<string> {
+  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const XAI_MODEL = 'grok-4-fast-non-reasoning'
+
+  // ── Stage 1: Gemini ──────────────────────────────────────────────────────
+  const geminiPrompt = prompt +
+    '\n\nחשוב: אל תכלול URLs או קישורים בתשובה. השאר את שדה ה-url ריק לחלוטין. ' +
+    'רק תוכן: כותרת, גוף מפרסם, תאריך הגשה, תיאור, תקציב.'
+
+  const geminiRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: geminiPrompt }] }],
+        tools: [{ google_search: {} }],
+      }),
+    }
+  )
+  if (!geminiRes.ok) throw new Error(`Gemini (stage 1) error ${geminiRes.status}: ${await geminiRes.text()}`)
+  const geminiData = await geminiRes.json()
+
+  const geminiText = geminiData.candidates?.[0]?.content?.parts
+    ?.filter((p: any) => p.text)
+    .map((p: any) => p.text)
+    .join('') || ''
+
+  // Parse tenders from Gemini response
+  let tenders: any[] = []
+  try {
+    const clean = geminiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const parsed = JSON.parse(clean)
+    tenders = Array.isArray(parsed) ? parsed : (parsed.tenders || [])
+  } catch {
+    try {
+      const match = geminiText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+      if (match) {
+        const parsed = JSON.parse(match[0])
+        tenders = Array.isArray(parsed) ? parsed : (parsed.tenders || [])
+      }
+    } catch {}
+  }
+
+  if (tenders.length === 0) {
+    console.warn('[callModelTwoStage] Stage 1 returned 0 tenders, returning raw text')
+    return geminiText
+  }
+
+  console.log(`[callModelTwoStage] Stage 1 ok: ${tenders.length} tenders. Starting Stage 2 URL lookup...`)
+
+  // ── Stage 2: xAI — find real URL for each tender ──────────────────────────
+  const urlResults = await Promise.all(
+    tenders.slice(0, 10).map(async (tender: any) => {
+      const title = tender.title || ''
+      const publisher = tender.publisher || tender.organization || tender.ministry || ''
+      const urlPrompt = `מצא את הקישור הרשמי לדף המכרז: "${title}" של ${publisher || 'הגוף הממשלתי'}.
+הקישור חייב להיות לדף HTML של המכרז הספציפי — לא PDF, לא דף ראשי.
+החזר JSON בלבד: {"url": "https://..."}`
+
+      try {
+        const xaiRes = await fetch('https://api.x.ai/v1/responses', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: XAI_MODEL,
+            tools: [{ type: 'web_search' }],
+            input: urlPrompt,
+          }),
+        })
+        if (!xaiRes.ok) return ''
+        const xaiData = await xaiRes.json()
+        const xaiText = xaiData.output
+          ?.filter((b: any) => b.type === 'message')
+          .flatMap((b: any) => b.content)
+          .filter((c: any) => c.type === 'output_text')
+          .map((c: any) => c.text)
+          .join('') || ''
+
+        // Parse URL from JSON response
+        try {
+          const clean = xaiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          const parsed = JSON.parse(clean)
+          return parsed.url || ''
+        } catch {
+          // Fallback: extract first https URL from text
+          const match = xaiText.match(/https?:\/\/[^\s"',\]]+/)
+          return match?.[0] || ''
+        }
+      } catch (e: any) {
+        console.warn(`[callModelTwoStage] Stage 2 failed for "${title}":`, e?.message)
+        return ''
+      }
+    })
+  )
+
+  console.log('[callModelTwoStage] Stage 2 ok. URLs found:', urlResults.filter(Boolean).length)
+
+  // ── Merge: Gemini content + xAI URLs ─────────────────────────────────────
+  const merged = tenders.slice(0, 10).map((tender: any, i: number) => ({
+    ...tender,
+    url: urlResults[i] || tender.url || '',
+  }))
+
+  return JSON.stringify({ tenders: merged })
+}
+
+// ── Single-provider call ───────────────────────────────────────────────────
 export async function callModel(provider: string, modelName: string, prompt: string): Promise<string> {
 
   if (provider === 'xai') {

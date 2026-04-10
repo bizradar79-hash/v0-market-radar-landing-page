@@ -543,6 +543,17 @@ export default function PromptsPage() {
                   className="font-mono text-xs resize-none"
                   dir="rtl"
                 />
+                {activeModule === 'tenders' && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-700">
+                    <span className="text-base">🔄</span>
+                    <span>
+                      <strong>חיפוש דו-שלבי: Gemini + xAI</strong> —
+                      שלב 1: Gemini מוצא תוכן מכרזים (ללא URLs).
+                      שלב 2: xAI מחפש את הקישור הרשמי לכל מכרז.
+                      הספק/מודל הנבחר למעלה אינו בשימוש במכרזים.
+                    </span>
+                  </div>
+                )}
                 <details className="mt-2">
                   <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
                     📋 משתני תבנית זמינים (לחץ להצגה)

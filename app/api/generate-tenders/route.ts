@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
-import { callModel } from '@/lib/call-model'
+import { callModelTwoStage } from '@/lib/call-model'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -96,8 +96,9 @@ export async function POST(request: Request) {
       const finalPrompt = companyContext + resolvedPrompt
 
       try {
-        const rawText = await callModel(activePrompt.model_provider, activePrompt.model_name, finalPrompt)
-        steps.aiResult = { chars: rawText.length }
+        // Two-stage pipeline: Gemini finds content → xAI finds URLs
+        const rawText = await callModelTwoStage(finalPrompt, ctx.company)
+        steps.aiResult = { chars: rawText.length, pipeline: 'gemini+xai' }
 
         let tenderItems: any[] = []
         try {

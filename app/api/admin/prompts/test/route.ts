@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
-import { callModel } from '@/lib/call-model'
+import { callModel, callModelTwoStage } from '@/lib/call-model'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -17,7 +17,7 @@ function adminSupabase() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { prompt: rawPrompt, model_provider, model_name, company_id, version_id } = body
+    const { prompt: rawPrompt, model_provider, model_name, company_id, module, version_id } = body
 
     if (!rawPrompt || !model_provider || !model_name) {
       return Response.json({ error: 'prompt, model_provider, model_name required' }, { status: 400 })
@@ -80,9 +80,13 @@ export async function POST(req: Request) {
     console.log('FINAL PROMPT:', finalPrompt.substring(0, 400))
 
     const start = Date.now()
-    const rawText = await callModel(model_provider, model_name, finalPrompt)
+    // Tenders use two-stage pipeline (Gemini content + xAI URLs)
+    const rawText = module === 'tenders'
+      ? await callModelTwoStage(finalPrompt)
+      : await callModel(model_provider, model_name, finalPrompt)
     const latency_ms = Date.now() - start
-    console.log('[prompts/test] done, latency_ms:', latency_ms, 'raw_text[:200]:', rawText.substring(0, 200))
+    const pipeline = module === 'tenders' ? 'gemini+xai (two-stage)' : `${model_provider}/${model_name}`
+    console.log(`[prompts/test] done, pipeline=${pipeline}, latency_ms:`, latency_ms, 'raw_text[:200]:', rawText.substring(0, 200))
 
     // Parse JSON — strip markdown fences first, then try regex extraction
     let parsed: any = null
@@ -101,8 +105,8 @@ export async function POST(req: Request) {
       parsed,
       latency_ms,
       tokens_used: 0,
-      model_provider,
-      model_name,
+      model_provider: module === 'tenders' ? 'gemini+xai' : model_provider,
+      model_name: module === 'tenders' ? 'two-stage' : model_name,
       tested_at: new Date().toISOString(),
     }
 
