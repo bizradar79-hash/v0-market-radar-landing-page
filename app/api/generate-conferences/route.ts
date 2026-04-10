@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { callModel } from '@/lib/call-model'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -35,6 +36,99 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── AI path: use active prompt from prompt_versions if available ──────
+    const { data: activePrompt } = await ctx.supabase
+      .from('prompt_versions')
+      .select('prompt, model_provider, model_name')
+      .eq('module', 'conferences')
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (activePrompt) {
+      steps.aiPath = { provider: activePrompt.model_provider, model: activePrompt.model_name }
+      const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+      const keywords: string[] = ctx.company?.keywords || []
+      const coreActivity = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
+      const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
+      const companyName = ctx.company?.name || ''
+      const industry = ctx.company?.industry || coreActivity
+      const targetAudience = (bp?.targetAudiences || ctx.company?.target_customers || []).join(', ')
+      const competitorNames = (ctx.competitors || []).map((c: any) => c.name).join(', ')
+
+      const companyContext = `הקשר חברה:
+שם: ${companyName}
+תחום: ${industry}
+פעילות עיקרית: ${coreActivity}
+מוצרים: ${products}
+מילות מפתח: ${keywords.join(', ')}
+קהל יעד: ${targetAudience}
+מתחרים: ${competitorNames}
+---
+`
+      const resolvedPrompt = activePrompt.prompt
+        .replace(/\{\{company_name\}\}/g, companyName)
+        .replace(/\{\{industry\}\}/g, industry)
+        .replace(/\{\{core_activity\}\}/g, coreActivity)
+        .replace(/\{\{products\}\}/g, products)
+        .replace(/\{\{keywords\}\}/g, keywords.join(', '))
+        .replace(/\{\{website\}\}/g, ctx.company?.website || '')
+        .replace(/\{\{target_audience\}\}/g, targetAudience)
+        .replace(/\{\{competitors\}\}/g, competitorNames)
+
+      const finalPrompt = companyContext + resolvedPrompt
+
+      try {
+        const rawText = await callModel(activePrompt.model_provider, activePrompt.model_name, finalPrompt)
+        steps.aiResult = { chars: rawText.length }
+
+        let conferenceItems: any[] = []
+        try {
+          const clean = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          const parsed = JSON.parse(clean)
+          conferenceItems = Array.isArray(parsed) ? parsed : (parsed.conferences || [])
+        } catch {
+          try {
+            const match = rawText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+            if (match) {
+              const parsed = JSON.parse(match[0])
+              conferenceItems = Array.isArray(parsed) ? parsed : (parsed.conferences || [])
+            }
+          } catch {}
+        }
+
+        steps.aiParsed = { count: conferenceItems.length }
+
+        if (conferenceItems.length > 0) {
+          const today = new Date().toISOString().split('T')[0]
+          conferenceItems = conferenceItems.filter((c: any) => !c.date || c.date >= today)
+
+          await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
+          const { data: saved, error: insertError } = await ctx.supabase.from('conferences').insert(
+            conferenceItems.map((c: any) => ({
+              name: c.name || '',
+              date: c.date || null,
+              location: c.location || '',
+              description: c.description || '',
+              url: c.url || c.website || '',
+              category: c.relevance || c.category || '',
+              company_id: ctx.user.id,
+            }))
+          ).select()
+          if (insertError) {
+            steps.db = { ok: false, error: insertError.message }
+            return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
+          }
+          steps.db = { ok: true, saved: saved?.length }
+          return NextResponse.json({ success: true, conferences: saved, count: saved?.length || 0, steps })
+        }
+        steps.aiPath = { ...steps.aiPath, fallback: 'ai returned 0 items' }
+      } catch (aiErr: any) {
+        console.warn('[generate-conferences] AI path failed, falling back to xAI:', aiErr?.message)
+        steps.aiPath = { ...steps.aiPath, fallback: aiErr?.message }
+      }
+    }
+
+    // ── Fallback: hardcoded xAI call ──────────────────────────────────────
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
@@ -83,7 +177,6 @@ ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומ�
       .map((c: any) => c.text)
       .join('')
 
-    // Strip markdown fences, parse JSON array
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const start = clean.indexOf('[')
     const end = clean.lastIndexOf(']')
@@ -91,14 +184,11 @@ ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומ�
 
     steps.ai = { ok: true, count: list.length }
 
-    // Filter to 2025+ only
     list = list.filter((c: any) => c.date === null || isRecentYear(c.date || ''))
 
-    // Filter out past events
     const today = new Date().toISOString().split('T')[0]
     list = list.filter((c: any) => !c.date || c.date >= today)
 
-    // Deduplicate by website
     const seenUrls = new Set<string>()
     list = list.filter((c: any) => {
       const url = (c.website || '').toLowerCase()

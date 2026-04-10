@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { callModel } from '@/lib/call-model'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -15,15 +16,12 @@ function isValidDate(d: string | null | undefined): boolean {
 function isValidTenderUrl(url: string): boolean {
   try {
     const { hostname, pathname } = new URL(url)
-    // Must be Israeli gov or org domain
     const isIL = hostname.endsWith('.gov.il') || hostname.endsWith('.org.il') ||
                  hostname.endsWith('.co.il') || hostname.endsWith('.ac.il') ||
                  hostname.endsWith('.muni.il')
     if (!isIL) return false
-    // Must not be a PDF or Word doc
     const lower = pathname.toLowerCase()
     if (lower.endsWith('.pdf') || lower.endsWith('.doc') || lower.endsWith('.docx')) return false
-    // Must have a real path (not just homepage)
     const path = pathname.replace(/\/$/, '')
     if (!path || path === '') return false
     return true
@@ -54,6 +52,104 @@ export async function POST(request: Request) {
       }
     }
 
+    const today = new Date().toISOString().split('T')[0]
+
+    // ── AI path: use active prompt from prompt_versions if available ──────
+    const { data: activePrompt } = await ctx.supabase
+      .from('prompt_versions')
+      .select('prompt, model_provider, model_name')
+      .eq('module', 'tenders')
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (activePrompt) {
+      steps.aiPath = { provider: activePrompt.model_provider, model: activePrompt.model_name }
+      const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+      const keywords: string[] = ctx.company?.keywords || []
+      const coreActivity = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
+      const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
+      const companyName = ctx.company?.name || ''
+      const industry = ctx.company?.industry || coreActivity
+      const targetAudience = (bp?.targetAudiences || ctx.company?.target_customers || []).join(', ')
+      const competitorNames = (ctx.competitors || []).map((c: any) => c.name).join(', ')
+
+      const companyContext = `הקשר חברה:
+שם: ${companyName}
+תחום: ${industry}
+פעילות עיקרית: ${coreActivity}
+מוצרים: ${products}
+מילות מפתח: ${keywords.join(', ')}
+קהל יעד: ${targetAudience}
+מתחרים: ${competitorNames}
+---
+`
+      const resolvedPrompt = activePrompt.prompt
+        .replace(/\{\{company_name\}\}/g, companyName)
+        .replace(/\{\{industry\}\}/g, industry)
+        .replace(/\{\{core_activity\}\}/g, coreActivity)
+        .replace(/\{\{products\}\}/g, products)
+        .replace(/\{\{keywords\}\}/g, keywords.join(', '))
+        .replace(/\{\{website\}\}/g, ctx.company?.website || '')
+        .replace(/\{\{target_audience\}\}/g, targetAudience)
+        .replace(/\{\{competitors\}\}/g, competitorNames)
+
+      const finalPrompt = companyContext + resolvedPrompt
+
+      try {
+        const rawText = await callModel(activePrompt.model_provider, activePrompt.model_name, finalPrompt)
+        steps.aiResult = { chars: rawText.length }
+
+        let tenderItems: any[] = []
+        try {
+          const clean = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          const parsed = JSON.parse(clean)
+          tenderItems = Array.isArray(parsed) ? parsed : (parsed.tenders || [])
+        } catch {
+          try {
+            const match = rawText.match(/\{[\s\S]*\}|\[[\s\S]*\]/)
+            if (match) {
+              const parsed = JSON.parse(match[0])
+              tenderItems = Array.isArray(parsed) ? parsed : (parsed.tenders || [])
+            }
+          } catch {}
+        }
+
+        steps.aiParsed = { count: tenderItems.length }
+
+        if (tenderItems.length > 0) {
+          // Filter: deadline in future
+          tenderItems = tenderItems.filter((t: any) => !t.deadline || t.deadline > today)
+          // URL validation (relaxed — just require http)
+          tenderItems = tenderItems.filter((t: any) => !t.url || t.url.startsWith('http'))
+
+          await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
+          const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
+            tenderItems.map((t: any) => ({
+              title: t.title || '',
+              organization: t.publisher || t.organization || t.ministry || '',
+              deadline: isValidDate(t.deadline) ? t.deadline : null,
+              budget: t.budget || 'לא צוין',
+              description: t.description || '',
+              link: t.url || '',
+              relevance_score: 75,
+              company_id: ctx.user.id,
+            }))
+          ).select()
+          if (insertError) {
+            steps.db = { ok: false, error: insertError.message }
+            return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
+          }
+          steps.db = { ok: true, saved: saved?.length }
+          return NextResponse.json({ success: true, tenders: saved, count: saved?.length || 0, steps })
+        }
+        steps.aiPath = { ...steps.aiPath, fallback: 'ai returned 0 items' }
+      } catch (aiErr: any) {
+        console.warn('[generate-tenders] AI path failed, falling back to xAI:', aiErr?.message)
+        steps.aiPath = { ...steps.aiPath, fallback: aiErr?.message }
+      }
+    }
+
+    // ── Fallback: hardcoded xAI call ──────────────────────────────────────
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const keywords = (ctx.companyProfile?.keywords || []).join(', ')
     const industry = ctx.companyProfile?.industry || ''
@@ -63,8 +159,6 @@ export async function POST(request: Request) {
     const industryTags = businessProfile?.industryTags?.join(', ') || industry
     const targetAudiences = businessProfile?.targetAudiences?.join(', ') || ''
     const geoMarkets = businessProfile?.geographicMarkets?.join(', ') || ''
-
-    const today = new Date().toISOString().split('T')[0]
 
     const prompt = `אתה מומחה למכרזים ממשלתיים בישראל.
 
@@ -134,19 +228,15 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     steps.ai = { ok: true, raw: list.length, titles: list.map((t: any) => t.title) }
 
-    // 1. Filter: relevance_score >= 75
     list = list.filter((t: any) => (t.relevance_score ?? 0) >= 75)
     steps.afterRelevance = list.length
 
-    // 2. Filter: deadline in the future
     list = list.filter((t: any) => !t.deadline || t.deadline > today)
     steps.afterDeadline = list.length
 
-    // 3. Filter: must be Israeli .gov.il / .org.il HTML page (no PDFs)
     list = list.filter((t: any) => isValidTenderUrl(t.url || ''))
     steps.afterUrl = list.length
 
-    // 4. Deduplicate by URL
     const seenUrls = new Set<string>()
     list = list.filter((t: any) => {
       const url = (t.url || '').toLowerCase()

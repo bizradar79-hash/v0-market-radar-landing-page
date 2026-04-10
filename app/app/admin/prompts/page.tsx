@@ -16,8 +16,12 @@ import {
 } from "lucide-react"
 import { AVAILABLE_MODELS, type ModelProvider } from "@/lib/available-models"
 
-// ── Default news prompt (seeded on first load) ─────────────────────────────
-const DEFAULT_NEWS_PROMPT = `חפש 10 חדשות עדכניות ורלוונטיות לתעשייה ולשוק הישראלי.
+// ── Default prompts per module ─────────────────────────────────────────────
+const DEFAULT_PROMPTS: Record<string, { prompt: string; provider: ModelProvider; model: string }> = {
+  news: {
+    provider: 'xai',
+    model: 'grok-4-fast-non-reasoning',
+    prompt: `חפש 10 חדשות עדכניות ורלוונטיות לתעשייה ולשוק הישראלי.
 
 הנחיות:
 - חדשות מהחודש האחרון בלבד
@@ -37,7 +41,32 @@ const DEFAULT_NEWS_PROMPT = `חפש 10 חדשות עדכניות ורלוונט�
       "summary": "תקציר קצר עד 150 מילים"
     }
   ]
-}`
+}`,
+  },
+  conferences: {
+    provider: 'xai',
+    model: 'grok-4-fast-non-reasoning',
+    prompt: `חפש 10 כנסים, ימי עיון ואירועים מקצועיים רלוונטיים לתחום החברה בישראל ובעולם.
+הנחיות:
+- אירועים מהחודשים הקרובים בלבד
+- רלוונטיים לתחום: {{industry}} ולמוצרים: {{products}}
+- כלול כנסים בישראל ובחו"ל
+- כלול שם האירוע, תאריך, מיקום, קישור
+החזר JSON בלבד:
+{"conferences": [{"name": "", "date": "", "location": "", "url": "", "description": "", "relevance": ""}]}`,
+  },
+  tenders: {
+    provider: 'xai',
+    model: 'grok-4-fast-non-reasoning',
+    prompt: `חפש 10 מכרזים פעילים רלוונטיים לחברה בישראל.
+הנחיות:
+- מכרזים פעילים בלבד (לא פגי תוקף)
+- רלוונטיים לתחום: {{industry}} ולמוצרים: {{products}}
+- כלול מכרזי ממשלה, עיריות וגופים ציבוריים
+החזר JSON בלבד:
+{"tenders": [{"title": "", "publisher": "", "deadline": "", "url": "", "description": "", "budget": ""}]}`,
+  },
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface PromptVersion {
@@ -63,6 +92,8 @@ interface Company {
 
 const MODULE_TABS = [
   { id: 'news', label: 'חדשות', active: true },
+  { id: 'conferences', label: 'כנסים', active: true },
+  { id: 'tenders', label: 'מכרזים', active: true },
   { id: 'trends', label: 'טרנדים', active: false },
   { id: 'competitors', label: 'מתחרים', active: false },
   { id: 'seo', label: 'SEO', active: false },
@@ -74,11 +105,16 @@ function formatDate(iso: string) {
   catch { return iso }
 }
 
-function parseNewsResults(raw: string): any[] | null {
+function parseModuleResults(module: string, raw: string): { items: any[]; type: string } | null {
   try {
     const clean = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const parsed = JSON.parse(clean)
-    return parsed.news || null
+    if (module === 'news' && parsed.news) return { items: parsed.news, type: 'news' }
+    if (module === 'conferences' && parsed.conferences) return { items: parsed.conferences, type: 'conferences' }
+    if (module === 'tenders' && parsed.tenders) return { items: parsed.tenders, type: 'tenders' }
+    // Try as array
+    if (Array.isArray(parsed) && parsed.length > 0) return { items: parsed, type: module }
+    return null
   } catch { return null }
 }
 
@@ -86,6 +122,66 @@ function modelLabel(provider: string, modelId: string): string {
   const p = AVAILABLE_MODELS[provider as ModelProvider]
   if (!p) return modelId
   return p.models.find(m => m.id === modelId)?.label ?? modelId
+}
+
+// ── Result card components ────────────────────────────────────────────────
+function NewsCard({ item }: { item: any }) {
+  return (
+    <div className="border rounded-lg p-3 bg-background">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <h4 className="font-medium text-sm">{item.title}</h4>
+        <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+          {item.source && <span className="text-xs bg-muted px-2 py-0.5 rounded">{item.source}</span>}
+          {item.sentiment && (
+            <span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+              {item.sentiment}
+            </span>
+          )}
+          {item.category && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{item.category}</span>}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">{item.summary}</p>
+      {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline mt-1 block">קרא עוד ↗</a>}
+    </div>
+  )
+}
+
+function ConferenceCard({ item }: { item: any }) {
+  return (
+    <div className="border rounded-lg p-3 bg-background">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <h4 className="font-medium text-sm">{item.name}</h4>
+        <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+          {item.date && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{item.date}</span>}
+          {item.relevance && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">{item.relevance}</span>}
+        </div>
+      </div>
+      {item.location && <p className="text-xs text-muted-foreground mb-1">📍 {item.location}</p>}
+      {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
+      {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline mt-1 block">פרטים נוספים ↗</a>}
+    </div>
+  )
+}
+
+function TenderCard({ item }: { item: any }) {
+  const today = new Date().toISOString().split('T')[0]
+  const isSoon = item.deadline && item.deadline <= new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+  return (
+    <div className="border rounded-lg p-3 bg-background">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <h4 className="font-medium text-sm">{item.title}</h4>
+        {item.deadline && (
+          <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${isSoon ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+            {isSoon ? '⚠️ ' : ''}עד {item.deadline}
+          </span>
+        )}
+      </div>
+      {item.publisher && <p className="text-xs text-muted-foreground mb-1">🏛 {item.publisher}</p>}
+      {item.budget && item.budget !== 'לא צוין' && <p className="text-xs text-muted-foreground mb-1">💰 {item.budget}</p>}
+      {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
+      {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline mt-1 block">לדף המכרז ↗</a>}
+    </div>
+  )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
@@ -123,7 +219,6 @@ export default function PromptsPage() {
   const loadCompanies = useCallback(async () => {
     const res = await fetch('/api/admin/companies')
     const data = await res.json()
-    console.log('companies loaded:', data.companies, data.error)
     setCompanies(data.companies ?? [])
   }, [])
 
@@ -132,17 +227,19 @@ export default function PromptsPage() {
   }, [loadCompanies])
 
   useEffect(() => {
+    setTestResult(null)
+    setSandboxVersionId(null)
+    setSbPrompt('')
     loadVersions(activeModule).then(() => {
-      // After loading, seed default if no versions exist for 'news'
-      if (activeModule === 'news') {
-        seedDefaultIfEmpty()
-      }
+      seedDefaultIfEmpty(activeModule)
     })
   }, [activeModule, loadVersions])
 
-  // Seed default news prompt if none exists
-  async function seedDefaultIfEmpty() {
-    const res = await fetch('/api/admin/prompts?module=news')
+  // Seed default prompt if none exists for this module
+  async function seedDefaultIfEmpty(module: string) {
+    const def = DEFAULT_PROMPTS[module]
+    if (!def) return
+    const res = await fetch(`/api/admin/prompts?module=${module}`)
     const data = await res.json()
     if ((data.versions ?? []).length === 0) {
       setSeeding(true)
@@ -150,23 +247,22 @@ export default function PromptsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          module: 'news',
-          prompt: DEFAULT_NEWS_PROMPT,
-          model_provider: 'xai',
-          model_name: 'grok-4-fast-non-reasoning',
+          module,
+          prompt: def.prompt,
+          model_provider: def.provider,
+          model_name: def.model,
           created_by: 'system',
         }),
       })
       const saved = await saveRes.json()
       if (saved.version?.id) {
-        // Activate it
         await fetch('/api/admin/prompts/activate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: saved.version.id }),
         })
       }
-      await loadVersions('news')
+      await loadVersions(module)
       setSeeding(false)
     }
   }
@@ -265,7 +361,6 @@ export default function PromptsPage() {
       if (data.success) {
         setTestResult(data.results)
         toast({ title: 'בדיקה הושלמה', description: `${data.results.latency_ms}ms · ${data.results.tokens_used} טוקנים` })
-        // Reload versions in background — don't await so it doesn't hide results
         loadVersions(activeModule)
       } else {
         toast({ title: 'שגיאה בבדיקה', description: data.error ?? JSON.stringify(data), variant: 'destructive' })
@@ -294,6 +389,8 @@ export default function PromptsPage() {
     }
     setActivating(false)
   }
+
+  const defaultPromptForModule = DEFAULT_PROMPTS[activeModule]?.prompt ?? ''
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -380,9 +477,11 @@ export default function PromptsPage() {
               <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">
                 <FileCode2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">אין גרסה פעילה עדיין</p>
-                <Button className="mt-4" size="sm" onClick={() => setSbPrompt(DEFAULT_NEWS_PROMPT)}>
-                  התחל מפרומפט ברירת מחדל
-                </Button>
+                {defaultPromptForModule && (
+                  <Button className="mt-4" size="sm" onClick={() => setSbPrompt(defaultPromptForModule)}>
+                    התחל מפרומפט ברירת מחדל
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -536,27 +635,21 @@ export default function PromptsPage() {
             </div>
           </div>
 
-          {/* Results — news cards or raw fallback */}
+          {/* Results — module-specific cards or raw fallback */}
           {(() => {
-            const news = parseNewsResults(testResult.raw_text)
-            if (news && news.length > 0) return (
-              <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {news.map((item: any, i: number) => (
-                  <div key={i} className="border rounded-lg p-3 bg-background">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <h4 className="font-medium text-sm">{item.title}</h4>
-                      <div className="flex gap-1 shrink-0 flex-wrap justify-end">
-                        {item.source && <span className="text-xs bg-muted px-2 py-0.5 rounded">{item.source}</span>}
-                        {item.sentiment && <span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{item.sentiment}</span>}
-                        {item.category && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{item.category}</span>}
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{item.summary}</p>
-                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline mt-1 block">קרא עוד ↗</a>}
-                  </div>
-                ))}
-              </div>
-            )
+            const parsed = parseModuleResults(activeModule, testResult.raw_text ?? '')
+            if (parsed && parsed.items.length > 0) {
+              return (
+                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                  {parsed.items.map((item: any, i: number) => {
+                    if (parsed.type === 'news') return <NewsCard key={i} item={item} />
+                    if (parsed.type === 'conferences') return <ConferenceCard key={i} item={item} />
+                    if (parsed.type === 'tenders') return <TenderCard key={i} item={item} />
+                    return <pre key={i} className="text-xs bg-muted p-2 rounded">{JSON.stringify(item, null, 2)}</pre>
+                  })}
+                </div>
+              )
+            }
             return <pre className="text-xs bg-muted p-3 rounded max-h-96 overflow-auto whitespace-pre-wrap">{testResult.raw_text || '(no output)'}</pre>
           })()}
 
