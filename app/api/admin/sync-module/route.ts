@@ -26,6 +26,13 @@ const MODULE_ROUTES: Record<string, string[]> = {
   report:      ['/api/generate-weekly-report'],
 }
 
+// Tables to clear before regenerating (cache bust)
+const MODULE_TABLES: Record<string, string> = {
+  news:        'news',
+  conferences: 'conferences',
+  tenders:     'tenders',
+}
+
 export async function POST(request: Request) {
   // Verify admin
   const supabase = await createClient()
@@ -61,6 +68,13 @@ export async function POST(request: Request) {
     'Content-Type': 'application/json',
     'x-admin-user-id': company_id,
     'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  }
+
+  // Clear cached table rows before regenerating
+  const tableToDelete = MODULE_TABLES[module]
+  if (tableToDelete) {
+    await adminDb.from(tableToDelete).delete().eq('company_id', company_id)
+    console.log(`[sync-module] cleared ${tableToDelete} for company ${company_id}`)
   }
 
   const results: { route: string; ok: boolean; status: number; body?: any }[] = []

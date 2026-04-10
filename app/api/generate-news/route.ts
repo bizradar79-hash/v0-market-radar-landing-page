@@ -176,11 +176,13 @@ export async function POST(request: Request) {
           steps.db = { ok: true, saved: saved?.length }
           return NextResponse.json({ success: true, news: saved, count: saved?.length || 0, steps })
         }
-        // AI returned 0 items — fall through to Tavily
-        steps.aiPath = { ...steps.aiPath, fallback: 'ai returned 0 items' }
+        // Active prompt returned 0 items — don't fall back to Tavily
+        steps.aiPath = { ...steps.aiPath, result: '0 items, not falling back' }
+        return NextResponse.json({ success: true, news: [], count: 0, steps })
       } catch (aiErr: any) {
-        console.warn('[generate-news] AI path failed, falling back to Tavily:', aiErr?.message)
+        console.warn('[generate-news] AI path failed:', aiErr?.message)
         steps.aiPath = { ...steps.aiPath, fallback: aiErr?.message }
+        return NextResponse.json({ success: true, news: [], count: 0, steps })
       }
     }
 
