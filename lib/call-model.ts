@@ -53,9 +53,10 @@ export async function callModelTwoStage(prompt: string, _company?: any): Promise
 
   console.log(`[callModelTwoStage] Stage 1 ok: ${tenders.length} tenders. Starting Stage 2 URL lookup...`)
 
-  // ── Stage 2: xAI — find real URL for each tender ──────────────────────────
+  // ── Stage 2: xAI — find real URL for each tender (max 5 in parallel) ───────
+  const tendersToLookup = tenders.slice(0, 5)
   const urlResults = await Promise.all(
-    tenders.slice(0, 10).map(async (tender: any) => {
+    tendersToLookup.map(async (tender: any) => {
       const title = tender.title || ''
       const publisher = tender.publisher || tender.organization || tender.ministry || ''
       const urlPrompt = `מצא את הקישור הרשמי לדף המכרז: "${title}" של ${publisher || 'הגוף הממשלתי'}.
@@ -104,7 +105,7 @@ export async function callModelTwoStage(prompt: string, _company?: any): Promise
   console.log('[callModelTwoStage] Stage 2 ok. URLs found:', urlResults.filter(Boolean).length)
 
   // ── Merge: Gemini content + xAI URLs ─────────────────────────────────────
-  const merged = tenders.slice(0, 10).map((tender: any, i: number) => ({
+  const merged = tendersToLookup.map((tender: any, i: number) => ({
     ...tender,
     url: urlResults[i] || tender.url || '',
   }))
