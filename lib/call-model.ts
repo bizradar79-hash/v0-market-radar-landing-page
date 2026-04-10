@@ -3,7 +3,7 @@
 // Stage 2: For each tender, xAI searches for the real page URL via web_search
 // Returns JSON string: { tenders: [...] }
 export async function callModelTwoStage(prompt: string, _company?: any): Promise<string> {
-  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const GEMINI_MODEL = 'gemini-2.5-flash'
   const XAI_MODEL = 'grok-4-fast-non-reasoning'
 
   // ── Stage 1: Gemini ──────────────────────────────────────────────────────
