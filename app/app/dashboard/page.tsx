@@ -229,7 +229,16 @@ export default function AppDashboardPage() {
           : [companyData.geographic_scope || 'national'],
       } : null,
     })
-    if (companyData) setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
+    if (companyData) {
+      setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
+      console.log('[dashboard] company data keys:', Object.keys(companyData))
+      console.log('[dashboard] industry_trends:', JSON.stringify((companyData as any).industry_trends).substring(0, 200))
+      console.log('[dashboard] competitor_trends:', JSON.stringify((companyData as any).competitor_trends).substring(0, 200))
+      console.log('[dashboard] weekly_actions:', JSON.stringify((companyData as any).weekly_actions).substring(0, 200))
+      console.log('[dashboard] distribution_channels:', JSON.stringify((companyData as any).distribution_channels).substring(0, 200))
+      console.log('[dashboard] seo_ranking:', JSON.stringify((companyData as any).seo_ranking).substring(0, 200))
+    }
+    console.log('[dashboard] topTrends:', topTrends.length, 'competitorTrendItems:', competitorTrendItems.length, 'weeklyActions:', weeklyActions.length, 'topChannels:', topChannels.length)
     setLoading(false)
   }
 
@@ -492,15 +501,15 @@ export default function AppDashboardPage() {
             <GroupHeader color="bg-blue-500" label="מודיעין שוק" />
             <div className="grid gap-4 md:grid-cols-2">
               {/* מתחרים עיקריים */}
-              {data!.topCompetitors.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Target className="h-4 w-4 text-blue-600" />
-                      מתחרים עיקריים
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Target className="h-4 w-4 text-blue-600" />
+                    מתחרים עיקריים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.topCompetitors.length > 0 ? (
                     <div className="space-y-2">
                       {data!.topCompetitors.map((comp, idx) => (
                         <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
@@ -516,23 +525,25 @@ export default function AppDashboardPage() {
                         </div>
                       ))}
                     </div>
-                    <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                      כל המתחרים <ArrowLeft className="h-3.5 w-3.5" />
-                    </Link>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="py-4 text-center text-sm text-muted-foreground">לא נמצאו מתחרים עדיין</p>
+                  )}
+                  <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל המתחרים <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
 
               {/* טרנדים חמים */}
-              {data!.topTrends.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Activity className="h-4 w-4 text-blue-600" />
-                      טרנדים חמים
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Activity className="h-4 w-4 text-blue-600" />
+                    טרנדים חמים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.topTrends.length > 0 ? (
                     <div className="space-y-2">
                       {data!.topTrends.map((trend, idx) => (
                         <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
@@ -551,23 +562,28 @@ export default function AppDashboardPage() {
                         </div>
                       ))}
                     </div>
-                    <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                      כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
-                    </Link>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <div className="py-4 text-center text-sm text-muted-foreground">
+                      <p>אין טרנדים עדיין</p>
+                      <Link href="/app/trends" className="text-primary text-xs hover:underline">בצע סנכרון טרנדים →</Link>
+                    </div>
+                  )}
+                  <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
 
               {/* טרנדים אצל מתחרים */}
-              {data!.competitorTrendItems.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <TrendingUp className="h-4 w-4 text-blue-600" />
-                      טרנדים אצל מתחרים
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <TrendingUp className="h-4 w-4 text-blue-600" />
+                    טרנדים אצל מתחרים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.competitorTrendItems.length > 0 ? (
                     <div className="space-y-2">
                       {data!.competitorTrendItems.map((item, i) => (
                         <div key={i} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
@@ -578,23 +594,25 @@ export default function AppDashboardPage() {
                         </div>
                       ))}
                     </div>
-                    <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                      כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
-                    </Link>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="py-4 text-center text-sm text-muted-foreground">נתונים יתעדכנו בסנכרון הבא</p>
+                  )}
+                  <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
 
               {/* חדשות אחרונות */}
-              {data!.recentNews.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Newspaper className="h-4 w-4 text-blue-600" />
-                      חדשות אחרונות
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Newspaper className="h-4 w-4 text-blue-600" />
+                    חדשות אחרונות
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.recentNews.length > 0 ? (
                     <div className="space-y-2">
                       {data!.recentNews.map((item, i) => (
                         <div key={i} className="rounded-lg bg-muted/50 p-3">
@@ -610,23 +628,25 @@ export default function AppDashboardPage() {
                         </div>
                       ))}
                     </div>
-                    <Link href="/app/news" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                      כל החדשות <ArrowLeft className="h-3.5 w-3.5" />
-                    </Link>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="py-4 text-center text-sm text-muted-foreground">אין חדשות עדיין — בצע סנכרון</p>
+                  )}
+                  <Link href="/app/news" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל החדשות <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
 
               {/* SEO / GEO Summary */}
-              {data!.seoGeo && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Search className="h-4 w-4 text-blue-600" />
-                      דירוג SEO / GEO
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Search className="h-4 w-4 text-blue-600" />
+                    דירוג SEO / GEO
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.seoGeo ? (
                     <div className="space-y-2">
                       {data!.seoGeo.bestSeoPosition != null && (
                         <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
@@ -663,87 +683,97 @@ export default function AppDashboardPage() {
                         </div>
                       )}
                     </div>
-                    <Link href="/app/seo-geo" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                      צפה בדוח מלא <ArrowLeft className="h-3.5 w-3.5" />
-                    </Link>
-                  </CardContent>
-                </Card>
-              )}
+                  ) : (
+                    <p className="py-4 text-center text-sm text-muted-foreground">אין נתוני דירוג עדיין — בצע סנכרון SEO</p>
+                  )}
+                  <Link href="/app/seo-geo" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    צפה בדוח מלא <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
             </div>
           </section>
 
           {/* ═══════════════════════════════════════════════════════ */}
           {/* GROUP 3 — פיתוח עסקי                                   */}
           {/* ═══════════════════════════════════════════════════════ */}
-          {(data!.upcomingTenders.length > 0 || data!.upcomingConferences.length > 0) && (
-            <section>
-              <GroupHeader color="bg-green-500" label="פיתוח עסקי" />
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* מכרזים קרובים */}
-                {data!.upcomingTenders.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <FileText className="h-4 w-4 text-green-600" />
-                        מכרזים קרובים
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {data!.upcomingTenders.map((tender, idx) => {
-                          const days = getDaysUntil(tender.deadline)
-                          return (
-                            <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium line-clamp-1">{tender.title}</p>
-                                <p className="text-xs text-muted-foreground">{tender.organization}</p>
-                              </div>
-                              <Badge variant="outline" className={
-                                days <= 14 ? "border-red-200 text-red-600 shrink-0" : "border-green-200 text-green-600 shrink-0"
-                              }>
-                                {days > 0 ? `${days} ימים` : "היום"}
-                              </Badge>
+          <section>
+            <GroupHeader color="bg-green-500" label="פיתוח עסקי" />
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* מכרזים קרובים */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4 text-green-600" />
+                    מכרזים קרובים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.upcomingTenders.length > 0 ? (
+                    <div className="space-y-2">
+                      {data!.upcomingTenders.map((tender, idx) => {
+                        const days = getDaysUntil(tender.deadline)
+                        return (
+                          <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium line-clamp-1">{tender.title}</p>
+                              <p className="text-xs text-muted-foreground">{tender.organization}</p>
                             </div>
-                          )
-                        })}
-                      </div>
-                      <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                        כל המכרזים <ArrowLeft className="h-3.5 w-3.5" />
-                      </Link>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* כנסים קרובים */}
-                {data!.upcomingConferences.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <Calendar className="h-4 w-4 text-green-600" />
-                        כנסים קרובים
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {data!.upcomingConferences.map((conf, idx) => (
-                          <div key={idx} className="rounded-lg bg-muted/50 p-3">
-                            <p className="text-sm font-medium">{conf.name}</p>
-                            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                              {conf.date && <span>{conf.date}</span>}
-                              {conf.location && <span>· {conf.location}</span>}
-                            </div>
+                            <Badge variant="outline" className={
+                              days <= 14 ? "border-red-200 text-red-600 shrink-0" : "border-green-200 text-green-600 shrink-0"
+                            }>
+                              {days > 0 ? `${days} ימים` : "היום"}
+                            </Badge>
                           </div>
-                        ))}
-                      </div>
-                      <Link href="/app/conferences" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                        כל הכנסים <ArrowLeft className="h-3.5 w-3.5" />
-                      </Link>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </section>
-          )}
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="py-4 text-center text-sm text-muted-foreground">
+                      <p>אין מכרזים פעילים כרגע</p>
+                      <Link href="/app/tenders" className="text-primary text-xs hover:underline">עבור למכרזים →</Link>
+                    </div>
+                  )}
+                  <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל המכרזים <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+
+              {/* כנסים קרובים */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Calendar className="h-4 w-4 text-green-600" />
+                    כנסים קרובים
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.upcomingConferences.length > 0 ? (
+                    <div className="space-y-2">
+                      {data!.upcomingConferences.map((conf, idx) => (
+                        <div key={idx} className="rounded-lg bg-muted/50 p-3">
+                          <p className="text-sm font-medium">{conf.name}</p>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                            {conf.date && <span>{conf.date}</span>}
+                            {conf.location && <span>· {conf.location}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-4 text-center text-sm text-muted-foreground">
+                      <p>אין כנסים קרובים</p>
+                      <Link href="/app/conferences" className="text-primary text-xs hover:underline">עבור לכנסים →</Link>
+                    </div>
+                  )}
+                  <Link href="/app/conferences" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                    כל הכנסים <ArrowLeft className="h-3.5 w-3.5" />
+                  </Link>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
 
         </div>
       )}
