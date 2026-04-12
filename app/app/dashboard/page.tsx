@@ -104,8 +104,8 @@ export default function AppDashboardPage() {
       supabase.from("conferences").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("news").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("competitors").select("name, threat_score, services").eq("company_id", userId).order("threat_score", { ascending: false }).limit(3),
-      // Tenders: no date filter (past deadlines still relevant), sort ascending
-      supabase.from("tenders").select("id, title, organization, deadline").eq("company_id", userId).not("deadline", "is", null).order("deadline", { ascending: true }).limit(3),
+      // Tenders: show any stored tenders — no deadline filter (null deadlines still shown)
+      supabase.from("tenders").select("id, title, organization, deadline, link").eq("company_id", userId).order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").eq("company_id", userId).gte("date", today).order("date", { ascending: true }).limit(3),
       supabase.from("trends").select("name, score, direction, category").eq("company_id", userId).order("score", { ascending: false }).limit(5),
       supabase.from("news").select("title, source, published_at, url").eq("company_id", userId).order("published_at", { ascending: false }).limit(3),
@@ -192,45 +192,44 @@ export default function AppDashboardPage() {
     // ── Distribution channels ────────────────────────────────────────────────
     // Priority 1: distribution_channels TABLE (status=potential)
     // Priority 2: niche_opportunities JSONB
-    // Priority 3: distribution_channels JSONB column
-    // Priority 4: business_profile.distributionChannels
+    // ── Distribution channels — use niche_opportunities.opportunities as potential niches ──
     const bp = (companyData as any)?.business_profile as any
     const dcRaw = (companyData as any)?.distribution_channels
     const nicheRaw = (companyData as any)?.niche_opportunities as any
     const existingChannels: string[] = bp?.distributionChannels || bp?.distribution_channels || []
 
     let potentialChannels: string[] = []
-    let channelsLabel = 'ערוצי הפצה פוטנציאליים'
+    let channelsLabel = 'הזדמנויות נישה מובילות'
 
-    // Priority 1: distribution_channels table rows
-    if (Array.isArray(dcTableRows) && dcTableRows.length > 0) {
+    // Priority 1: niche_opportunities.opportunities sorted by opportunityScore
+    const nicheOpps: any[] = nicheRaw?.opportunities || []
+    if (nicheOpps.length > 0) {
+      potentialChannels = [...nicheOpps]
+        .sort((a, b) => (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0))
+        .slice(0, 3)
+        .map((o: any) => o.nicheTitle || o.title || o.name || String(o))
+    }
+
+    // Priority 2: distribution_channels table rows
+    if (potentialChannels.length === 0 && Array.isArray(dcTableRows) && dcTableRows.length > 0) {
       potentialChannels = dcTableRows.map((r: any) => r.name || r.channel_type || String(r))
+      channelsLabel = 'ערוצי הפצה פוטנציאליים'
     }
 
-    // Priority 2: niche_opportunities JSONB
-    if (potentialChannels.length === 0) {
-      const nicheChannels: any[] =
-        nicheRaw?.distribution_channels ||
-        nicheRaw?.channels ||
-        nicheRaw?.potentialChannels ||
-        []
-      if (Array.isArray(nicheChannels) && nicheChannels.length > 0) {
-        potentialChannels = nicheChannels.map((c: any) => typeof c === 'string' ? c : (c.name || c.channel || String(c)))
-      }
-    }
-
-    // Priority 3: distribution_channels JSONB column
+    // Priority 3: distribution_channels JSONB column (objects with status=potential)
     if (potentialChannels.length === 0 && Array.isArray(dcRaw)) {
       const potentialObjs = dcRaw.filter((c: any) =>
         typeof c === 'object' && (c.status === 'potential' || c.type === 'potential')
       )
       if (potentialObjs.length > 0) {
         potentialChannels = potentialObjs.map((c: any) => c.name || c.channel || String(c))
+        channelsLabel = 'ערוצי הפצה פוטנציאליים'
       } else {
         const allStrings = dcRaw.filter((c: any) => typeof c === 'string') as string[]
         const existingSet = new Set(existingChannels.map((s: string) => s.toLowerCase()))
         potentialChannels = allStrings.filter(c => !existingSet.has(c.toLowerCase()))
-        if (potentialChannels.length === 0) { potentialChannels = allStrings; channelsLabel = 'ערוצי הפצה קיימים' }
+        if (potentialChannels.length === 0) { potentialChannels = allStrings }
+        channelsLabel = 'ערוצי הפצה קיימים'
       }
     }
 
@@ -241,22 +240,6 @@ export default function AppDashboardPage() {
     }
 
     const topChannels = potentialChannels.slice(0, 3)
-
-    // ── Debug window object — read from browser console: window.__dashDebug ──
-    if (typeof window !== 'undefined') {
-      ;(window as any).__dashDebug = {
-        tenders: upcomingTendersRaw,
-        niche: (companyData as any)?.niche_opportunities,
-        competitorTrends: compWithTrends,
-        dc: potentialChannels,
-        dcTableRows,
-        industry_trends: (companyData as any)?.industry_trends,
-        competitor_trends: (companyData as any)?.competitor_trends,
-        seo_ranking: (companyData as any)?.seo_ranking,
-        geo_ranking: (companyData as any)?.geo_ranking,
-        weekly_actions: (companyData as any)?.weekly_actions,
-      }
-    }
 
     // ── Weekly actions — high priority first ─────────────────────────────────
     const weeklyActionsRaw = ((companyData as any)?.weekly_actions as { actions?: any[] } | null)?.actions || []
@@ -269,40 +252,38 @@ export default function AppDashboardPage() {
       .slice(0, 3)
       .map((a: any) => ({ id: a.id || '', title: a.title || '', category: a.category || '', priority: a.priority || '' }))
 
-    // ── Competitor trend items ────────────────────────────────────────────────
+    // ── Competitor trend items — read from company.competitor_trends JSONB ────
     const competitorTrendItems: Array<{ competitor_name: string; keyword: string }> = []
-
-    // Priority 1: competitors table with trends_analysis column
-    if (Array.isArray(compWithTrends) && compWithTrends.length > 0) {
-      for (const row of compWithTrends.slice(0, 3)) {
-        const ta = row.trends_analysis as any
-        // Handle: { keywords: [...] } or { trends: [{ keyword }] } or { top_keyword: '...' }
-        const topKw =
-          ta?.top_keyword ||
-          ta?.keywords?.[0] ||
-          ta?.trends?.[0]?.keyword ||
-          ta?.trends?.[0]?.name ||
-          (typeof ta === 'string' ? ta : '')
-        if (row.name && topKw) competitorTrendItems.push({ competitor_name: row.name, keyword: String(topKw) })
-      }
+    const compTrendsData = (companyData as any)?.competitor_trends as any
+    const compEntries: any[] =
+      compTrendsData?.competitor_data ||
+      compTrendsData?.competitors ||
+      (Array.isArray(compTrendsData) ? compTrendsData : [])
+    for (const entry of compEntries.slice(0, 3)) {
+      const name = entry.competitor_name || entry.name || ''
+      const topKw =
+        entry.trends?.[0]?.keyword ||
+        entry.trends?.[0]?.name ||
+        entry.keywords?.[0] ||
+        entry.keyword ||
+        ''
+      if (name && topKw) competitorTrendItems.push({ competitor_name: name, keyword: topKw })
     }
 
-    // Priority 2: company.competitor_trends JSONB fallback
-    if (competitorTrendItems.length === 0) {
-      const compTrendsData = (companyData as any)?.competitor_trends as any
-      const compEntries: any[] =
-        compTrendsData?.competitor_data ||
-        compTrendsData?.competitors ||
-        (Array.isArray(compTrendsData) ? compTrendsData : [])
-      for (const entry of compEntries.slice(0, 3)) {
-        const name = entry.competitor_name || entry.name || ''
-        const topKw =
-          entry.trends?.[0]?.keyword ||
-          entry.trends?.[0]?.name ||
-          entry.keywords?.[0] ||
-          entry.keyword ||
-          ''
-        if (name && topKw) competitorTrendItems.push({ competitor_name: name, keyword: topKw })
+    // ── Debug window object — window.__dashDebug in browser console ───────────
+    if (typeof window !== 'undefined') {
+      ;(window as any).__dashDebug = {
+        tenders: upcomingTendersRaw,
+        niche: nicheRaw,
+        nicheOpps: nicheOpps.slice(0, 5),
+        competitorTrends: compTrendsData,
+        compEntries: compEntries.slice(0, 3),
+        dc: potentialChannels,
+        dcTableRows,
+        industry_trends: (companyData as any)?.industry_trends,
+        seo_ranking: (companyData as any)?.seo_ranking,
+        geo_ranking: (companyData as any)?.geo_ranking,
+        weekly_actions: (companyData as any)?.weekly_actions,
       }
     }
 
