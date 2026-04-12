@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import {
   Target,
-  Star,
   FileText,
   BarChart3,
   Activity,
@@ -21,6 +20,11 @@ import {
   Newspaper,
   Search,
   Globe,
+  Share2,
+  CheckSquare,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react"
 
 interface CompanyInfo {
@@ -40,7 +44,7 @@ interface SeoGeoSummary {
 }
 
 interface DashboardData {
-  savedOppsCount: number
+  channelsCount: number
   tendersCount: number
   competitorsCount: number
   trendsCount: number
@@ -50,6 +54,10 @@ interface DashboardData {
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
   upcomingConferences: Array<{ name: string; date: string; location: string }>
   topTrends: Array<{ name: string; direction: string; category: string }>
+  recentNews: Array<{ title: string; source: string; published_at: string; url: string }>
+  topChannels: string[]
+  weeklyActions: Array<{ id: string; title: string; category: string; priority: string }>
+  competitorTrendItems: Array<{ competitor_name: string; keyword: string }>
   lastAnalyzed: string | null
   companyInfo: CompanyInfo | null
   seoGeo: SeoGeoSummary | null
@@ -68,7 +76,6 @@ export default function AppDashboardPage() {
   async function fetchDashboardData() {
     const today = new Date().toISOString().split('T')[0]
     const [
-      { count: savedOppsCount },
       { count: tendersCount },
       { count: competitorsCount },
       { count: trendsCount },
@@ -78,63 +85,83 @@ export default function AppDashboardPage() {
       { data: upcomingTenders },
       { data: upcomingConferences },
       { data: topTrends },
+      { data: recentNewsRows },
       { data: companyData },
     ] = await Promise.all([
-      supabase.from("saved_opportunities").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("conferences").select("*", { count: "exact", head: true }),
       supabase.from("news").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("name, threat_score, services").order("threat_score", { ascending: false }).limit(3),
-      supabase.from("tenders").select("title, organization, deadline").order("deadline", { ascending: true }).limit(3),
+      supabase.from("tenders").select("title, organization, deadline").gte("deadline", today).order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
       supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
-      supabase.from("companies").select("name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at").single(),
+      supabase.from("news").select("title, source, published_at, url").order("published_at", { ascending: false }).limit(3),
+      supabase.from("companies").select(
+        "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, business_profile"
+      ).single(),
     ])
 
-    // Extract best SEO / GEO positions from cached ranking data
+    // Extract SEO/GEO positions
     let seoGeo: SeoGeoSummary | null = null
     if (companyData) {
       const seoData = (companyData as any).seo_ranking as any
       const geoData = (companyData as any).geo_ranking as any
-
       let bestSeoPosition: number | null = null
       let seoQuery = ''
       if (seoData?.queryVariants?.length) {
         for (const v of seoData.queryVariants) {
           if (v.position != null && (bestSeoPosition === null || v.position < bestSeoPosition)) {
-            bestSeoPosition = v.position
-            seoQuery = v.query || ''
+            bestSeoPosition = v.position; seoQuery = v.query || ''
           }
         }
       } else if (seoData?.position != null) {
-        bestSeoPosition = seoData.position
-        seoQuery = seoData.query || ''
+        bestSeoPosition = seoData.position; seoQuery = seoData.query || ''
       }
-
       let bestGeoPosition: number | null = null
       let geoEngine = ''
       if (geoData?.engines?.length) {
         for (const e of geoData.engines) {
           const pos = e.position ?? e.rank
           if (pos != null && (bestGeoPosition === null || pos < bestGeoPosition)) {
-            bestGeoPosition = pos
-            geoEngine = e.engine || e.name || ''
+            bestGeoPosition = pos; geoEngine = e.engine || e.name || ''
           }
         }
       } else if (geoData?.position != null) {
-        bestGeoPosition = geoData.position
-        geoEngine = geoData.engine || ''
+        bestGeoPosition = geoData.position; geoEngine = geoData.engine || ''
       }
-
       if (bestSeoPosition !== null || bestGeoPosition !== null) {
         seoGeo = { bestSeoPosition, bestGeoPosition, seoQuery, geoEngine }
       }
     }
 
+    // Distribution channels — from business_profile.distributionChannels or distribution_channels column
+    const bp = (companyData as any)?.business_profile as any
+    const rawChannels: string[] = bp?.distributionChannels?.length
+      ? bp.distributionChannels
+      : Array.isArray((companyData as any)?.distribution_channels)
+        ? (companyData as any).distribution_channels
+        : []
+    const topChannels = rawChannels.slice(0, 3)
+
+    // Weekly actions — filter high priority
+    const weeklyActionsRaw = ((companyData as any)?.weekly_actions as { actions?: any[] } | null)?.actions || []
+    const weeklyActions = weeklyActionsRaw
+      .filter((a: any) => a.priority === 'גבוהה' || a.priority === 'high')
+      .slice(0, 3)
+      .map((a: any) => ({ id: a.id || '', title: a.title || '', category: a.category || '', priority: a.priority || '' }))
+
+    // Competitor trend items — top 3 competitors × their top keyword
+    const compTrendsData = (companyData as any)?.competitor_trends as { competitor_data?: any[] } | null
+    const competitorTrendItems: Array<{ competitor_name: string; keyword: string }> = []
+    for (const entry of (compTrendsData?.competitor_data || []).slice(0, 3)) {
+      const topKw = entry.trends?.[0]?.keyword || entry.keywords?.[0] || ''
+      if (topKw) competitorTrendItems.push({ competitor_name: entry.competitor_name || '', keyword: topKw })
+    }
+
     setData({
-      savedOppsCount: savedOppsCount || 0,
+      channelsCount: rawChannels.length,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
@@ -144,6 +171,10 @@ export default function AppDashboardPage() {
       upcomingTenders: upcomingTenders || [],
       upcomingConferences: upcomingConferences || [],
       topTrends: topTrends || [],
+      recentNews: recentNewsRows || [],
+      topChannels,
+      weeklyActions,
+      competitorTrendItems,
       lastAnalyzed: companyData?.last_analyzed || null,
       seoGeo,
       companyInfo: companyData ? {
@@ -166,7 +197,6 @@ export default function AppDashboardPage() {
     const date = new Date(dateStr)
     const now = new Date()
     const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
-
     if (diffMinutes < 1) return "עכשיו"
     if (diffMinutes < 60) return `לפני ${diffMinutes} דקות`
     const diffHours = Math.floor(diffMinutes / 60)
@@ -175,8 +205,36 @@ export default function AppDashboardPage() {
     return `לפני ${diffDays} ימים`
   }
 
+  function getDaysUntil(deadline: string): number {
+    const diff = new Date(deadline).getTime() - new Date().getTime()
+    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  }
+
+  function DirectionIcon({ direction }: { direction: string }) {
+    const up = direction === 'rising' || direction === 'עולה' || direction === 'up'
+    const down = direction === 'declining' || direction === 'יורד' || direction === 'down'
+    if (up) return <TrendingUp className="h-3.5 w-3.5 text-green-600" />
+    if (down) return <TrendingDown className="h-3.5 w-3.5 text-red-600" />
+    return <Minus className="h-3.5 w-3.5 text-yellow-600" />
+  }
+
+  function directionLabel(direction: string) {
+    if (direction === 'rising' || direction === 'up') return 'עולה'
+    if (direction === 'declining' || direction === 'down') return 'יורד'
+    if (direction === 'עולה' || direction === 'יורד' || direction === 'יציב') return direction
+    return 'יציב'
+  }
+
+  function directionClass(direction: string) {
+    const up = direction === 'rising' || direction === 'עולה' || direction === 'up'
+    const down = direction === 'declining' || direction === 'יורד' || direction === 'down'
+    if (up) return "border-green-200 text-green-600"
+    if (down) return "border-red-200 text-red-600"
+    return "border-yellow-200 text-yellow-600"
+  }
+
   const kpiCards = [
-    { key: "opps", label: "הזדמנויות", icon: Star, href: "/app/leads", value: data?.savedOppsCount || 0, color: "bg-emerald-100 text-emerald-700" },
+    { key: "channels", label: "ערוצי הפצה", icon: Share2, href: "/app/distribution-channels", value: data?.channelsCount || 0, color: "bg-teal-100 text-teal-700" },
     { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" },
     { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" },
     { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0, color: "bg-blue-100 text-blue-700" },
@@ -184,12 +242,20 @@ export default function AppDashboardPage() {
     { key: "news", label: "חדשות", icon: Newspaper, href: "/app/news", value: data?.newsCount || 0, color: "bg-slate-100 text-slate-700" },
   ]
 
-  function getDaysUntil(deadline: string): number {
-    const now = new Date()
-    const deadlineDate = new Date(deadline)
-    const diff = deadlineDate.getTime() - now.getTime()
-    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  function GroupHeader({ color, label }: { color: string; label: string }) {
+    return (
+      <div className="flex items-center gap-2 mb-4">
+        <div className={`w-1 h-6 rounded-full ${color}`} />
+        <h2 className="text-lg font-semibold">{label}</h2>
+      </div>
+    )
   }
+
+  const hasAnyData = data && (
+    data.tendersCount > 0 || data.competitorsCount > 0 ||
+    data.conferencesCount > 0 || data.trendsCount > 0 ||
+    data.newsCount > 0 || data.channelsCount > 0
+  )
 
   if (loading) {
     return (
@@ -239,8 +305,7 @@ export default function AppDashboardPage() {
                         'bg-gray-100 text-gray-700'
                       }`}>
                         {scope === 'international' ? '🌍 בינלאומי' :
-                         scope === 'national' ? '🇮🇱 ארצי' :
-                         `🏙️ מקומי`}
+                         scope === 'national' ? '🇮🇱 ארצי' : '🏙️ מקומי'}
                       </Badge>
                     </Link>
                   ))}
@@ -248,17 +313,14 @@ export default function AppDashboardPage() {
                 {data.companyInfo.website && (
                   <a
                     href={data.companyInfo.website.startsWith('http') ? data.companyInfo.website : `https://${data.companyInfo.website}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    target="_blank" rel="noopener noreferrer"
                     className="text-xs text-primary hover:underline truncate block"
                   >
                     {data.companyInfo.website.replace(/^https?:\/\//, '')}
                   </a>
                 )}
                 {data.companyInfo.businessOverview && (
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                    {data.companyInfo.businessOverview}
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{data.companyInfo.businessOverview}</p>
                 )}
               </div>
             </div>
@@ -289,224 +351,356 @@ export default function AppDashboardPage() {
         })}
       </div>
 
-      {/* Smart Bottom Widgets */}
-      {data && (
-        data.competitorsCount === 0 && data.tendersCount === 0 && data.conferencesCount === 0 && data.trendsCount === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
-                <BarChart3 className="h-8 w-8 text-primary" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-North Star Radar!</h3>
-              <p className="text-muted-foreground max-w-md mb-4">
-                המערכת שלך מוכנה לפעולה. הנתונים יתעדכנו אוטומטית בסנכרון הראשון.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {data.upcomingTenders.length > 0 && (
+      {/* Empty state */}
+      {!hasAnyData ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
+              <BarChart3 className="h-8 w-8 text-primary" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">ברוכים הבאים ל-North Star Radar!</h3>
+            <p className="text-muted-foreground max-w-md mb-4">
+              המערכת שלך מוכנה לפעולה. הנתונים יתעדכנו אוטומטית בסנכרון הראשון.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-8">
+
+          {/* ═══════════════════════════════════════════════════════ */}
+          {/* GROUP 1 — מנוע צמיחה                                  */}
+          {/* ═══════════════════════════════════════════════════════ */}
+          <section>
+            <GroupHeader color="bg-teal-500" label="מנוע צמיחה" />
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* ערוצי הפצה עיקריים */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <FileText className="h-5 w-5 text-primary" />
-                    מכרזים קרובים
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Share2 className="h-4 w-4 text-teal-600" />
+                    ערוצי הפצה עיקריים
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    {data.upcomingTenders.map((tender, idx) => {
-                      const days = getDaysUntil(tender.deadline)
-                      return (
+                  {data!.topChannels.length > 0 ? (
+                    <div className="space-y-2">
+                      {data!.topChannels.map((ch, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700 text-xs font-bold">
+                            {i + 1}
+                          </div>
+                          <span className="text-sm font-medium truncate">{ch}</span>
+                        </div>
+                      ))}
+                      <Link href="/app/distribution-channels" className="mt-3 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                        כל ערוצי ההפצה
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                      <p>לא הוגדרו ערוצי הפצה</p>
+                      <Link href="/app/profile" className="text-primary text-xs hover:underline">הגדר בפרופיל →</Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* מה לעשות השבוע */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <CheckSquare className="h-4 w-4 text-teal-600" />
+                    מה לעשות השבוע
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {data!.weeklyActions.length > 0 ? (
+                    <div className="space-y-2">
+                      {data!.weeklyActions.map((action, i) => (
+                        <div key={i} className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2">
+                          <div className="mt-0.5 flex h-4 w-4 shrink-0 rounded border-2 border-teal-400" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium line-clamp-2">{action.title}</p>
+                            {action.category && (
+                              <span className="text-xs text-muted-foreground">{action.category}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      <Link href="/app/opportunities" className="mt-3 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                        כל ההמלצות
+                        <ArrowLeft className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                      <p>אין פעולות בעדיפות גבוהה השבוע</p>
+                      <Link href="/app/opportunities" className="text-primary text-xs hover:underline">צפה בהזדמנויות →</Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          {/* ═══════════════════════════════════════════════════════ */}
+          {/* GROUP 2 — מודיעין שוק                                  */}
+          {/* ═══════════════════════════════════════════════════════ */}
+          <section>
+            <GroupHeader color="bg-blue-500" label="מודיעין שוק" />
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* מתחרים עיקריים */}
+              {data!.topCompetitors.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Target className="h-4 w-4 text-blue-600" />
+                      מתחרים עיקריים
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {data!.topCompetitors.map((comp, idx) => (
                         <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                          <div>
-                            <p className="text-sm font-medium">{tender.title}</p>
-                            <p className="text-xs text-muted-foreground">{tender.organization}</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{comp.name}</p>
+                            {comp.services && <p className="text-xs text-muted-foreground line-clamp-1">{comp.services}</p>}
                           </div>
                           <Badge variant="outline" className={
-                            days <= 14 ? "border-red-200 text-red-600" : "border-green-200 text-green-600"
+                            comp.threat_score >= 70 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"
                           }>
-                            {days > 0 ? `${days} ימים` : "היום"}
+                            {comp.threat_score}
                           </Badge>
                         </div>
-                      )
-                    })}
-                  </div>
-                  <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    צפה בכל המכרזים
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                      ))}
+                    </div>
+                    <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל המתחרים <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
-            {data.topCompetitors.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Target className="h-5 w-5 text-primary" />
-                    מתחרים עיקריים
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {data.topCompetitors.map((comp, idx) => (
-                      <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium">{comp.name}</p>
-                          {comp.services && <p className="text-xs text-muted-foreground line-clamp-1">{comp.services}</p>}
+              {/* טרנדים חמים */}
+              {data!.topTrends.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Activity className="h-4 w-4 text-blue-600" />
+                      טרנדים חמים
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {data!.topTrends.map((trend, idx) => (
+                        <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <DirectionIcon direction={trend.direction} />
+                            <p className="text-sm font-medium truncate">{trend.name}</p>
+                          </div>
+                          <Badge variant="outline" className={directionClass(trend.direction)}>
+                            {directionLabel(trend.direction)}
+                          </Badge>
                         </div>
-                        <Badge variant="outline" className={
-                          comp.threat_score >= 70 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"
-                        }>
-                          {comp.threat_score}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                  <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    צפה בכל המתחרים
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                      ))}
+                    </div>
+                    <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
-            {/* SEO / GEO Summary Widget */}
-            {data.seoGeo && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Search className="h-5 w-5 text-primary" />
-                    דירוג SEO / GEO
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {data.seoGeo.bestSeoPosition != null && (
-                      <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium flex items-center gap-1.5">
-                            <Search className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                            SEO — מיקום מוביל
-                          </p>
-                          {data.seoGeo.seoQuery && (
-                            <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">"{data.seoGeo.seoQuery}"</p>
-                          )}
+              {/* טרנדים אצל מתחרים */}
+              {data!.competitorTrendItems.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <TrendingUp className="h-4 w-4 text-blue-600" />
+                      טרנדים אצל מתחרים
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {data!.competitorTrendItems.map((item, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                          <p className="text-sm font-medium truncate">{item.competitor_name}</p>
+                          <Badge variant="outline" className="border-blue-200 text-blue-600 shrink-0 ml-2">
+                            {item.keyword}
+                          </Badge>
                         </div>
-                        <Badge variant="outline" className={
-                          data.seoGeo.bestSeoPosition <= 3 ? "border-green-200 text-green-600" :
-                          data.seoGeo.bestSeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
-                          "border-red-200 text-red-600"
-                        }>
-                          #{data.seoGeo.bestSeoPosition}
-                        </Badge>
-                      </div>
-                    )}
-                    {data.seoGeo.bestGeoPosition != null && (
-                      <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium flex items-center gap-1.5">
-                            <Globe className="h-3.5 w-3.5 text-teal-500 shrink-0" />
-                            GEO — מיקום מוביל
-                          </p>
-                          {data.seoGeo.geoEngine && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{data.seoGeo.geoEngine}</p>
-                          )}
-                        </div>
-                        <Badge variant="outline" className={
-                          data.seoGeo.bestGeoPosition <= 3 ? "border-green-200 text-green-600" :
-                          data.seoGeo.bestGeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
-                          "border-red-200 text-red-600"
-                        }>
-                          #{data.seoGeo.bestGeoPosition}
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-                  <Link href="/app/seo-geo" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    צפה בדוח מלא
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                      ))}
+                    </div>
+                    <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
-            {data.upcomingConferences.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Calendar className="h-5 w-5 text-primary" />
-                    כנסים קרובים
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {data.upcomingConferences.map((conf, idx) => (
-                      <div key={idx} className="rounded-lg bg-muted/50 p-3">
-                        <p className="text-sm font-medium">{conf.name}</p>
-                        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                          {conf.date && <span>{conf.date}</span>}
-                          {conf.location && <span>· {conf.location}</span>}
+              {/* חדשות אחרונות */}
+              {data!.recentNews.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Newspaper className="h-4 w-4 text-blue-600" />
+                      חדשות אחרונות
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {data!.recentNews.map((item, i) => (
+                        <div key={i} className="rounded-lg bg-muted/50 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium line-clamp-2 flex-1">{item.title}</p>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            {item.source && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0">{item.source}</Badge>
+                            )}
+                            <span className="text-xs text-muted-foreground">{formatTimeAgo(item.published_at)}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Link href="/app/conferences" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    צפה בכל הכנסים
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                      ))}
+                    </div>
+                    <Link href="/app/news" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל החדשות <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
-            {data.topTrends.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Activity className="h-5 w-5 text-primary" />
-                    טרנדים מובילים
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {data.topTrends.map((trend, idx) => (
-                      <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{trend.name}</p>
-                          {trend.category && <p className="text-xs text-muted-foreground">{trend.category}</p>}
+              {/* SEO / GEO Summary */}
+              {data!.seoGeo && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Search className="h-4 w-4 text-blue-600" />
+                      דירוג SEO / GEO
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {data!.seoGeo.bestSeoPosition != null && (
+                        <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium flex items-center gap-1.5">
+                              <Search className="h-3.5 w-3.5 text-blue-500 shrink-0" />SEO — מיקום מוביל
+                            </p>
+                            {data!.seoGeo.seoQuery && (
+                              <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">"{data!.seoGeo.seoQuery}"</p>
+                            )}
+                          </div>
+                          <Badge variant="outline" className={
+                            data!.seoGeo.bestSeoPosition <= 3 ? "border-green-200 text-green-600" :
+                            data!.seoGeo.bestSeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
+                            "border-red-200 text-red-600"
+                          }>#{data!.seoGeo.bestSeoPosition}</Badge>
                         </div>
-                        <Badge variant="outline" className={
-                          (trend.direction === 'עולה' || trend.direction === 'up') ? "border-green-200 text-green-600" :
-                          (trend.direction === 'יורד' || trend.direction === 'down') ? "border-red-200 text-red-600" :
-                          "border-yellow-200 text-yellow-600"
-                        }>
-                          {(trend.direction === 'עולה' || trend.direction === 'up') ? 'עולה' :
-                           (trend.direction === 'יורד' || trend.direction === 'down') ? 'יורד' : 'יציב'}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                  <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    צפה בכל הטרנדים
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                      )}
+                      {data!.seoGeo.bestGeoPosition != null && (
+                        <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium flex items-center gap-1.5">
+                              <Globe className="h-3.5 w-3.5 text-teal-500 shrink-0" />GEO — מיקום מוביל
+                            </p>
+                            {data!.seoGeo.geoEngine && (
+                              <p className="text-xs text-muted-foreground mt-0.5">{data!.seoGeo.geoEngine}</p>
+                            )}
+                          </div>
+                          <Badge variant="outline" className={
+                            data!.seoGeo.bestGeoPosition <= 3 ? "border-green-200 text-green-600" :
+                            data!.seoGeo.bestGeoPosition <= 7 ? "border-yellow-200 text-yellow-600" :
+                            "border-red-200 text-red-600"
+                          }>#{data!.seoGeo.bestGeoPosition}</Badge>
+                        </div>
+                      )}
+                    </div>
+                    <Link href="/app/seo-geo" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      צפה בדוח מלא <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </section>
 
-            {data.upcomingTenders.length === 0 && data.topCompetitors.length === 0 &&
-             data.upcomingConferences.length === 0 && data.topTrends.length === 0 && (
-              <Card className="md:col-span-2">
-                <CardContent className="flex items-center justify-center py-8 text-center">
-                  <p className="text-muted-foreground text-sm">הנתונים יתעדכנו אוטומטית בסנכרון השבועי.</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )
+          {/* ═══════════════════════════════════════════════════════ */}
+          {/* GROUP 3 — פיתוח עסקי                                   */}
+          {/* ═══════════════════════════════════════════════════════ */}
+          {(data!.upcomingTenders.length > 0 || data!.upcomingConferences.length > 0) && (
+            <section>
+              <GroupHeader color="bg-green-500" label="פיתוח עסקי" />
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* מכרזים קרובים */}
+                {data!.upcomingTenders.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <FileText className="h-4 w-4 text-green-600" />
+                        מכרזים קרובים
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {data!.upcomingTenders.map((tender, idx) => {
+                          const days = getDaysUntil(tender.deadline)
+                          return (
+                            <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium line-clamp-1">{tender.title}</p>
+                                <p className="text-xs text-muted-foreground">{tender.organization}</p>
+                              </div>
+                              <Badge variant="outline" className={
+                                days <= 14 ? "border-red-200 text-red-600 shrink-0" : "border-green-200 text-green-600 shrink-0"
+                              }>
+                                {days > 0 ? `${days} ימים` : "היום"}
+                              </Badge>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <Link href="/app/tenders" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                        כל המכרזים <ArrowLeft className="h-3.5 w-3.5" />
+                      </Link>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* כנסים קרובים */}
+                {data!.upcomingConferences.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Calendar className="h-4 w-4 text-green-600" />
+                        כנסים קרובים
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {data!.upcomingConferences.map((conf, idx) => (
+                          <div key={idx} className="rounded-lg bg-muted/50 p-3">
+                            <p className="text-sm font-medium">{conf.name}</p>
+                            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                              {conf.date && <span>{conf.date}</span>}
+                              {conf.location && <span>· {conf.location}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <Link href="/app/conferences" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                        כל הכנסים <ArrowLeft className="h-3.5 w-3.5" />
+                      </Link>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </section>
+          )}
+
+        </div>
       )}
-
     </div>
   )
 }
