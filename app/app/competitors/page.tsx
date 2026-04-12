@@ -93,6 +93,12 @@ interface ReviewsAnalysis {
   google_rating: number | null
   google_review_count: number | null
   google_maps_url: string | null
+  sentiment_score?: number | null
+  summary?: string | null
+  positives?: string[]
+  negatives?: string[]
+  opportunities?: string[]
+  recommended_response?: string | null
 }
 
 type ModalTab = 'details' | 'ai' | 'reviews'
@@ -805,38 +811,107 @@ export default function CompetitorsPage() {
                     {loadingReviews[selectedCompetitor.id] ? (
                       <div className="flex flex-col items-center justify-center py-12 space-y-3">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        <p className="text-sm text-muted-foreground">מחפש נתוני גוגל מאפס...</p>
+                        <p className="text-sm text-muted-foreground">מחפש ומנתח ביקורות...</p>
                       </div>
                     ) : reviews[selectedCompetitor.id] ? (
-                      <div className="space-y-4">
-                        {reviews[selectedCompetitor.id].google_rating != null ? (
-                          <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1 w-fit">
-                            <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-                            <span className="text-sm font-semibold">{reviews[selectedCompetitor.id].google_rating!.toFixed(1)}</span>
-                            {reviews[selectedCompetitor.id].google_review_count != null && (
-                              <span className="text-xs text-muted-foreground">({reviews[selectedCompetitor.id].google_review_count!.toLocaleString()} ביקורות)</span>
-                            )}
-                            <span className="text-xs text-muted-foreground">גוגל מאפס</span>
+                      <div className="space-y-5">
+                        {/* Rating + Maps link */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          {reviews[selectedCompetitor.id].google_rating != null ? (
+                            <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
+                              <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                              <span className="text-sm font-semibold">{reviews[selectedCompetitor.id].google_rating!.toFixed(1)}</span>
+                              {reviews[selectedCompetitor.id].google_review_count != null && (
+                                <span className="text-xs text-muted-foreground">({reviews[selectedCompetitor.id].google_review_count!.toLocaleString()} ביקורות)</span>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
+                          )}
+                          <a
+                            href={reviews[selectedCompetitor.id].google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedCompetitor.name + (selectedCompetitor.website ? ' ' + selectedCompetitor.website : ''))}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {reviews[selectedCompetitor.id].google_maps_url ? 'צפה בביקורות בגוגל' : 'חפש בגוגל'}
+                          </a>
+                        </div>
+
+                        {/* Sentiment bar */}
+                        {reviews[selectedCompetitor.id].sentiment_score != null && (
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>ציון סנטימנט</span>
+                              <span className="font-medium">{reviews[selectedCompetitor.id].sentiment_score}/100</span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${(reviews[selectedCompetitor.id].sentiment_score ?? 0) >= 70 ? 'bg-green-500' : (reviews[selectedCompetitor.id].sentiment_score ?? 0) >= 45 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                style={{ width: `${reviews[selectedCompetitor.id].sentiment_score}%` }}
+                              />
+                            </div>
                           </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
                         )}
-                        <a
-                          href={reviews[selectedCompetitor.id].google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedCompetitor.name + (selectedCompetitor.website ? ' ' + selectedCompetitor.website : ''))}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
-                        >
-                          <ExternalLink className="ml-2 h-4 w-4" />
-                          {reviews[selectedCompetitor.id].google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'חפש בגוגל מאפס'}
-                        </a>
+
+                        {/* Summary */}
+                        {reviews[selectedCompetitor.id].summary && (
+                          <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                            {reviews[selectedCompetitor.id].summary}
+                          </div>
+                        )}
+
+                        {/* 3 columns */}
+                        {(reviews[selectedCompetitor.id].positives?.length || reviews[selectedCompetitor.id].negatives?.length || reviews[selectedCompetitor.id].opportunities?.length) ? (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {reviews[selectedCompetitor.id].positives?.length ? (
+                              <div className="rounded-lg border border-green-200 bg-green-50/50 p-3 space-y-1.5">
+                                <p className="text-xs font-semibold text-green-700">✅ חוזקות</p>
+                                <ul className="space-y-1">
+                                  {reviews[selectedCompetitor.id].positives!.map((p, i) => (
+                                    <li key={i} className="text-xs text-green-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{p}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                            {reviews[selectedCompetitor.id].negatives?.length ? (
+                              <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-1.5">
+                                <p className="text-xs font-semibold text-red-700">❌ חולשות</p>
+                                <ul className="space-y-1">
+                                  {reviews[selectedCompetitor.id].negatives!.map((n, i) => (
+                                    <li key={i} className="text-xs text-red-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{n}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                            {reviews[selectedCompetitor.id].opportunities?.length ? (
+                              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+                                <p className="text-xs font-semibold text-blue-700">💡 הזדמנויות</p>
+                                <ul className="space-y-1">
+                                  {reviews[selectedCompetitor.id].opportunities!.map((o, i) => (
+                                    <li key={i} className="text-xs text-blue-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{o}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {/* Recommended response */}
+                        {reviews[selectedCompetitor.id].recommended_response && (
+                          <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-1">
+                            <p className="text-xs font-semibold text-purple-700">💬 תגובה מומלצת לביקורות שליליות</p>
+                            <p className="text-xs text-purple-800">{reviews[selectedCompetitor.id].recommended_response}</p>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-12 space-y-4">
                         <Star className="h-12 w-12 text-muted-foreground/50" />
-                        <p className="text-muted-foreground">לחץ לחיפוש דירוג גוגל מאפס של {selectedCompetitor.name}</p>
+                        <p className="text-muted-foreground">לחץ לחיפוש וניתוח ביקורות של {selectedCompetitor.name}</p>
                         <Button onClick={() => fetchReviews(selectedCompetitor)}>
-                          <Star className="ml-2 h-4 w-4" />חפש בגוגל מאפס
+                          <Star className="ml-2 h-4 w-4" />נתח ביקורות
                         </Button>
                       </div>
                     )}

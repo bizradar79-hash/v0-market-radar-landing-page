@@ -65,6 +65,12 @@ interface ReviewAnalysis {
   google_review_count?: number | null
   google_maps_url?: string | null
   fetchedAt?: string
+  sentiment_score?: number | null
+  summary?: string | null
+  positives?: string[]
+  negatives?: string[]
+  opportunities?: string[]
+  recommended_response?: string | null
 }
 
 function StarRating({ rating }: { rating: number }) {
@@ -851,31 +857,101 @@ export default function ProfilePage() {
           {loadingReviewAnalysis ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>מחפש נתוני גוגל מאפס...</span>
+              <span>מחפש ומנתח ביקורות...</span>
             </div>
           ) : reviewAnalysis ? (
-            <div className="space-y-4 py-1">
-              {reviewAnalysis.google_rating != null ? (
-                <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1 w-fit">
-                  <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-                  <span className="text-sm font-semibold">{reviewAnalysis.google_rating.toFixed(1)}</span>
-                  {reviewAnalysis.google_review_count != null && (
-                    <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
-                  )}
-                  <span className="text-xs text-muted-foreground">גוגל מאפס</span>
+            <div className="space-y-5 py-1">
+              {/* Rating + Maps link */}
+              <div className="flex flex-wrap items-center gap-3">
+                {reviewAnalysis.google_rating != null ? (
+                  <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
+                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-semibold">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                    {reviewAnalysis.google_review_count != null && (
+                      <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
+                )}
+                <a
+                  href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל' : 'חפש בגוגל'}
+                </a>
+              </div>
+
+              {/* Sentiment bar */}
+              {reviewAnalysis.sentiment_score != null && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>ציון סנטימנט</span>
+                    <span className="font-medium">{reviewAnalysis.sentiment_score}/100</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${reviewAnalysis.sentiment_score >= 70 ? 'bg-green-500' : reviewAnalysis.sentiment_score >= 45 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                      style={{ width: `${reviewAnalysis.sentiment_score}%` }}
+                    />
+                  </div>
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
               )}
-              <a
-                href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors w-fit"
-              >
-                <ExternalLink className="h-4 w-4" />
-                {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל מאפס' : 'חפש בגוגל מאפס'}
-              </a>
+
+              {/* Summary */}
+              {reviewAnalysis.summary && (
+                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                  {reviewAnalysis.summary}
+                </div>
+              )}
+
+              {/* 3 columns: positives / negatives / opportunities */}
+              {(reviewAnalysis.positives?.length || reviewAnalysis.negatives?.length || reviewAnalysis.opportunities?.length) ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {reviewAnalysis.positives?.length ? (
+                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-green-700">✅ חוזקות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.positives.map((p, i) => (
+                          <li key={i} className="text-xs text-green-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{p}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {reviewAnalysis.negatives?.length ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-red-700">❌ חולשות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.negatives.map((n, i) => (
+                          <li key={i} className="text-xs text-red-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{n}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {reviewAnalysis.opportunities?.length ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-blue-700">💡 הזדמנויות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.opportunities.map((o, i) => (
+                          <li key={i} className="text-xs text-blue-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{o}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Recommended response */}
+              {reviewAnalysis.recommended_response && (
+                <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-1">
+                  <p className="text-xs font-semibold text-purple-700">💬 תגובה מומלצת לביקורות שליליות</p>
+                  <p className="text-xs text-purple-800">{reviewAnalysis.recommended_response}</p>
+                </div>
+              )}
+
               {reviewAnalysis.fetchedAt && (
                 <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
               )}
