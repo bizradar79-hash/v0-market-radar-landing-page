@@ -61,6 +61,7 @@ interface DashboardData {
   lastAnalyzed: string | null
   companyInfo: CompanyInfo | null
   seoGeo: SeoGeoSummary | null
+  channelsLabel: string
 }
 
 export default function AppDashboardPage() {
@@ -76,63 +77,94 @@ export default function AppDashboardPage() {
   async function fetchDashboardData() {
     const today = new Date().toISOString().split('T')[0]
 
-    // Get user id first for explicit company_id filters (avoids RLS count issues)
+    // Get user id first — used for explicit company_id filters on all queries
     const { data: { user } } = await supabase.auth.getUser()
     const userId = user?.id
+
+    if (!userId) { setLoading(false); return }
 
     const [
       { count: tendersCount },
       { count: competitorsCount },
-      // Fix 1: explicit company_id filter so count is correct
       { count: trendsCount },
       { count: conferencesCount },
       { count: newsCount },
       { data: topCompetitors },
       { data: upcomingTenders },
       { data: upcomingConferences },
-      // Fix 3a: order by score desc, select name+score+direction
       { data: topTrendsRows },
       { data: recentNewsRows },
       { data: companyData },
     ] = await Promise.all([
-      supabase.from("tenders").select("*", { count: "exact", head: true }),
-      supabase.from("competitors").select("*", { count: "exact", head: true }),
-      userId
-        ? supabase.from("trends").select("*", { count: "exact", head: true }).eq("company_id", userId)
-        : supabase.from("trends").select("*", { count: "exact", head: true }),
-      supabase.from("conferences").select("*", { count: "exact", head: true }),
-      supabase.from("news").select("*", { count: "exact", head: true }),
-      supabase.from("competitors").select("name, threat_score, services").order("threat_score", { ascending: false }).limit(3),
-      // Fix 4: also select publisher column
-      supabase.from("tenders").select("title, organization, deadline").gte("deadline", today).order("deadline", { ascending: true }).limit(3),
-      supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
-      userId
-        ? supabase.from("trends").select("name, score, direction, category").eq("company_id", userId).order("score", { ascending: false }).limit(3)
-        : supabase.from("trends").select("name, score, direction, category").order("score", { ascending: false }).limit(3),
-      supabase.from("news").select("title, source, published_at, url").order("published_at", { ascending: false }).limit(3),
+      supabase.from("tenders").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("competitors").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("trends").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("conferences").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("news").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("competitors").select("name, threat_score, services").eq("company_id", userId).order("threat_score", { ascending: false }).limit(3),
+      supabase.from("tenders").select("title, organization, deadline").eq("company_id", userId).gte("deadline", today).order("deadline", { ascending: true }).limit(3),
+      supabase.from("conferences").select("name, date, location").eq("company_id", userId).gte("date", today).order("date", { ascending: true }).limit(3),
+      supabase.from("trends").select("name, score, direction, category").eq("company_id", userId).order("score", { ascending: false }).limit(5),
+      supabase.from("news").select("title, source, published_at, url").eq("company_id", userId).order("published_at", { ascending: false }).limit(3),
       supabase.from("companies").select(
-        "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, business_profile"
-      ).single(),
+        "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, niche_opportunities, business_profile"
+      ).eq("id", userId).single(),
     ])
 
-    // Extract SEO/GEO positions
+    // ── Debug logs — remove after confirming structure ──────────────────────
+    if (companyData) {
+      console.log('[dashboard] keys:', Object.keys(companyData))
+      console.log('[dashboard] dist:', JSON.stringify((companyData as any).distribution_channels)?.substring(0, 300))
+      console.log('[dashboard] niche:', JSON.stringify((companyData as any).niche_opportunities)?.substring(0, 300))
+      console.log('[dashboard] industry_trends:', JSON.stringify((companyData as any).industry_trends)?.substring(0, 300))
+      console.log('[dashboard] competitor_trends:', JSON.stringify((companyData as any).competitor_trends)?.substring(0, 300))
+      console.log('[dashboard] seo:', JSON.stringify((companyData as any).seo_ranking)?.substring(0, 300))
+      console.log('[dashboard] geo:', JSON.stringify((companyData as any).geo_ranking)?.substring(0, 300))
+      console.log('[dashboard] weekly_actions:', JSON.stringify((companyData as any).weekly_actions)?.substring(0, 200))
+    }
+    console.log('[dashboard] trends table rows:', topTrendsRows?.length, 'tenders table rows:', upcomingTenders?.length)
+
+    // ── SEO / GEO extraction — handles multiple possible structures ──────────
     let seoGeo: SeoGeoSummary | null = null
     if (companyData) {
       const seoData = (companyData as any).seo_ranking as any
       const geoData = (companyData as any).geo_ranking as any
+
       let bestSeoPosition: number | null = null
       let seoQuery = ''
+      // Structure A: { queryVariants: [{ query, position }] }
       if (seoData?.queryVariants?.length) {
         for (const v of seoData.queryVariants) {
           if (v.position != null && (bestSeoPosition === null || v.position < bestSeoPosition)) {
             bestSeoPosition = v.position; seoQuery = v.query || ''
           }
         }
-      } else if (seoData?.position != null) {
+      }
+      // Structure B: { queries: [{ query, position }] }
+      if (!bestSeoPosition && seoData?.queries?.length) {
+        for (const v of seoData.queries) {
+          if (v.position != null && (bestSeoPosition === null || v.position < bestSeoPosition)) {
+            bestSeoPosition = v.position; seoQuery = v.query || v.keyword || ''
+          }
+        }
+      }
+      // Structure C: { position, query }
+      if (!bestSeoPosition && seoData?.position != null) {
         bestSeoPosition = seoData.position; seoQuery = seoData.query || ''
       }
+      // Structure D: { rankings: [{ query, rank/position }] }
+      if (!bestSeoPosition && seoData?.rankings?.length) {
+        for (const v of seoData.rankings) {
+          const pos = v.position ?? v.rank
+          if (pos != null && (bestSeoPosition === null || pos < bestSeoPosition)) {
+            bestSeoPosition = pos; seoQuery = v.query || v.keyword || ''
+          }
+        }
+      }
+
       let bestGeoPosition: number | null = null
       let geoEngine = ''
+      // Structure A: { engines: [{ engine/name, position/rank }] }
       if (geoData?.engines?.length) {
         for (const e of geoData.engines) {
           const pos = e.position ?? e.rank
@@ -140,41 +172,69 @@ export default function AppDashboardPage() {
             bestGeoPosition = pos; geoEngine = e.engine || e.name || ''
           }
         }
-      } else if (geoData?.position != null) {
+      }
+      // Structure B: { results: [{ engine, position }] }
+      if (!bestGeoPosition && geoData?.results?.length) {
+        for (const e of geoData.results) {
+          const pos = e.position ?? e.rank
+          if (pos != null && (bestGeoPosition === null || pos < bestGeoPosition)) {
+            bestGeoPosition = pos; geoEngine = e.engine || e.name || ''
+          }
+        }
+      }
+      // Structure C: { position, engine }
+      if (!bestGeoPosition && geoData?.position != null) {
         bestGeoPosition = geoData.position; geoEngine = geoData.engine || ''
       }
+
       if (bestSeoPosition !== null || bestGeoPosition !== null) {
         seoGeo = { bestSeoPosition, bestGeoPosition, seoQuery, geoEngine }
       }
     }
 
-    // Fix 2: Distribution channels — show potential channels first
-    // Try distribution_channels column (may have objects with status), fall back to bp.distributionChannels
+    // ── Distribution channels ────────────────────────────────────────────────
+    // Priority: niche_opportunities potential channels → distribution_channels → business_profile
     const bp = (companyData as any)?.business_profile as any
     const dcRaw = (companyData as any)?.distribution_channels
-    const existingChannels: string[] = bp?.distributionChannels || []
+    const nicheRaw = (companyData as any)?.niche_opportunities as any
+    const existingChannels: string[] = bp?.distributionChannels || bp?.distribution_channels || []
 
     let potentialChannels: string[] = []
-    if (Array.isArray(dcRaw)) {
-      // If items are objects with status, filter for potential
+    let channelsLabel = 'ערוצי הפצה פוטנציאליים'
+
+    // Try niche_opportunities for potential channels first
+    const nicheChannels: string[] =
+      nicheRaw?.distribution_channels ||
+      nicheRaw?.channels ||
+      nicheRaw?.potentialChannels ||
+      []
+    if (Array.isArray(nicheChannels) && nicheChannels.length > 0) {
+      potentialChannels = nicheChannels.map((c: any) => typeof c === 'string' ? c : (c.name || c.channel || String(c)))
+    }
+
+    // Fallback: distribution_channels column
+    if (potentialChannels.length === 0 && Array.isArray(dcRaw)) {
       const potentialObjs = dcRaw.filter((c: any) =>
         typeof c === 'object' && (c.status === 'potential' || c.type === 'potential')
       )
       if (potentialObjs.length > 0) {
         potentialChannels = potentialObjs.map((c: any) => c.name || c.channel || String(c))
       } else {
-        // Items are plain strings — show ones NOT already in business_profile.distributionChannels
         const allStrings = dcRaw.filter((c: any) => typeof c === 'string') as string[]
         const existingSet = new Set(existingChannels.map((s: string) => s.toLowerCase()))
         potentialChannels = allStrings.filter(c => !existingSet.has(c.toLowerCase()))
-        // If no "new" channels, just show all from distribution_channels
-        if (potentialChannels.length === 0) potentialChannels = allStrings
+        if (potentialChannels.length === 0) { potentialChannels = allStrings; channelsLabel = 'ערוצי הפצה קיימים' }
       }
     }
-    // Final fallback: use business_profile channels
-    const topChannels = (potentialChannels.length > 0 ? potentialChannels : existingChannels).slice(0, 3)
+    // Final fallback: business_profile existing channels
+    if (potentialChannels.length === 0 && existingChannels.length > 0) {
+      potentialChannels = existingChannels
+      channelsLabel = 'ערוצי הפצה קיימים'
+    }
 
-    // Fix 5: Weekly actions — high priority first, fallback to first 3
+    const topChannels = potentialChannels.slice(0, 3)
+
+    // ── Weekly actions — high priority first ─────────────────────────────────
     const weeklyActionsRaw = ((companyData as any)?.weekly_actions as { actions?: any[] } | null)?.actions || []
     const isHighPriority = (a: any) =>
       a.priority === 'גבוהה' || a.priority === 'high' ||
@@ -185,24 +245,52 @@ export default function AppDashboardPage() {
       .slice(0, 3)
       .map((a: any) => ({ id: a.id || '', title: a.title || '', category: a.category || '', priority: a.priority || '' }))
 
-    // Competitor trend items — top 3 competitors × their top keyword
-    const compTrendsData = (companyData as any)?.competitor_trends as { competitor_data?: any[] } | null
+    // ── Competitor trend items ────────────────────────────────────────────────
+    const compTrendsData = (companyData as any)?.competitor_trends as any
     const competitorTrendItems: Array<{ competitor_name: string; keyword: string }> = []
-    for (const entry of (compTrendsData?.competitor_data || []).slice(0, 3)) {
-      const topKw = entry.trends?.[0]?.keyword || entry.keywords?.[0] || ''
-      if (topKw) competitorTrendItems.push({ competitor_name: entry.competitor_name || '', keyword: topKw })
+    // Handle: { competitor_data: [{ competitor_name, trends: [{ keyword }] }] }
+    // or:     { competitors: [{ name, keywords: [...] }] }
+    // or:     [{ competitor_name, keyword }]
+    const compEntries: any[] =
+      compTrendsData?.competitor_data ||
+      compTrendsData?.competitors ||
+      (Array.isArray(compTrendsData) ? compTrendsData : [])
+    for (const entry of compEntries.slice(0, 3)) {
+      const name = entry.competitor_name || entry.name || ''
+      const topKw =
+        entry.trends?.[0]?.keyword ||
+        entry.trends?.[0]?.name ||
+        entry.keywords?.[0] ||
+        entry.keyword ||
+        ''
+      if (name && topKw) competitorTrendItems.push({ competitor_name: name, keyword: topKw })
     }
 
-    // Normalise topTrends — map name→keyword, score→trend_score for display
-    const topTrends = (topTrendsRows || []).map((t: any) => ({
+    // ── Hot trends — trends table first, fallback to industry_trends JSONB ───
+    let topTrends = (topTrendsRows || []).map((t: any) => ({
       name: t.name || '',
       direction: t.direction || 'stable',
       category: t.category || '',
       score: t.score ?? 0,
     }))
 
+    if (topTrends.length === 0) {
+      // Fallback: read from industry_trends JSONB on companies row
+      const itRaw = (companyData as any)?.industry_trends as any
+      // Handle: { trends: [{ keyword/name, direction, score }] }
+      // or:     [{ keyword, direction, score }]
+      const itArr: any[] = itRaw?.trends || itRaw?.items || (Array.isArray(itRaw) ? itRaw : [])
+      topTrends = itArr.slice(0, 5).map((t: any) => ({
+        name: t.keyword || t.name || '',
+        direction: t.direction || t.trend || 'stable',
+        category: t.category || '',
+        score: t.score ?? t.trend_score ?? 0,
+      })).filter(t => t.name)
+      if (topTrends.length > 0) console.log('[dashboard] topTrends from industry_trends JSONB:', topTrends.length)
+    }
+
     setData({
-      channelsCount: (potentialChannels.length > 0 ? potentialChannels : existingChannels).length,
+      channelsCount: topChannels.length,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
@@ -218,6 +306,7 @@ export default function AppDashboardPage() {
       competitorTrendItems,
       lastAnalyzed: companyData?.last_analyzed || null,
       seoGeo,
+      channelsLabel,
       companyInfo: companyData ? {
         name: companyData.name || '',
         industry: companyData.industry || '',
@@ -229,16 +318,8 @@ export default function AppDashboardPage() {
           : [companyData.geographic_scope || 'national'],
       } : null,
     })
-    if (companyData) {
-      setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
-      console.log('[dashboard] company data keys:', Object.keys(companyData))
-      console.log('[dashboard] industry_trends:', JSON.stringify((companyData as any).industry_trends).substring(0, 200))
-      console.log('[dashboard] competitor_trends:', JSON.stringify((companyData as any).competitor_trends).substring(0, 200))
-      console.log('[dashboard] weekly_actions:', JSON.stringify((companyData as any).weekly_actions).substring(0, 200))
-      console.log('[dashboard] distribution_channels:', JSON.stringify((companyData as any).distribution_channels).substring(0, 200))
-      console.log('[dashboard] seo_ranking:', JSON.stringify((companyData as any).seo_ranking).substring(0, 200))
-    }
-    console.log('[dashboard] topTrends:', topTrends.length, 'competitorTrendItems:', competitorTrendItems.length, 'weeklyActions:', weeklyActions.length, 'topChannels:', topChannels.length)
+    if (companyData) setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
+    console.log('[dashboard] result — topTrends:', topTrends.length, 'competitorTrends:', competitorTrendItems.length, 'weeklyActions:', weeklyActions.length, 'topChannels:', topChannels.length, 'channelsLabel:', channelsLabel, 'seoGeo:', !!seoGeo)
     setLoading(false)
   }
 
@@ -423,12 +504,12 @@ export default function AppDashboardPage() {
           <section>
             <GroupHeader color="bg-teal-500" label="מנוע צמיחה" />
             <div className="grid gap-4 md:grid-cols-2">
-              {/* ערוצי הפצה עיקריים */}
+              {/* ערוצי הפצה */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Share2 className="h-4 w-4 text-teal-600" />
-                    ערוצי הפצה עיקריים
+                    {data!.channelsLabel}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
