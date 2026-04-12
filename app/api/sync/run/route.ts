@@ -123,10 +123,11 @@ export async function POST(request: Request) {
       addLog('competitors', 'skipped', `already have ${autoCount} auto competitors`)
     }
 
-    // 1b. Manual competitor ratings
+    // 1b. All competitor ratings (manual + auto, missing google_rating)
     {
-      const r = await callModule(origin, '/api/patch-manual-ratings', companyId!)
-      addLog('manual_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
+      const r = await callModule(origin, '/api/sync-competitor-ratings', companyId!)
+      addLog('competitor_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
+      await new Promise(res => setTimeout(res, 1000))
     }
 
     // 1c. Company Google Maps review data

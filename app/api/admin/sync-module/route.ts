@@ -22,7 +22,7 @@ const MODULE_ROUTES: Record<string, string[]> = {
   seo:         ['/api/generate-seo-ranking'],
   geo:         ['/api/generate-geo-ranking'],
   trends:      ['/api/industry-trends', '/api/competitor-trends'],
-  reviews:     ['/api/analyze-company-reviews'],
+  reviews:     ['/api/sync-competitor-ratings', '/api/analyze-company-reviews'],
   report:      ['/api/generate-weekly-report'],
 }
 

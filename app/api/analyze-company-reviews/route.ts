@@ -86,13 +86,39 @@ export async function POST(request: Request) {
       }
     }
 
-    const companyName = ctx.company?.name || ''
-    const website = ctx.company?.website || ''
-    const phone: string | undefined = ctx.company?.phone || undefined
+    // Load full company data for phone + city fallback
+    const { data: companyRow } = await ctx.supabase
+      .from('companies')
+      .select('name, website, phone, city, business_profile')
+      .eq('id', ctx.user.id)
+      .single()
+
+    const companyName = companyRow?.name || ctx.company?.name || ''
+    const website = companyRow?.website || ctx.company?.website || ''
+    const bp = companyRow?.business_profile as any
+    const phone: string | undefined =
+      companyRow?.phone || bp?.phone || ctx.company?.phone || undefined
+    const city: string | undefined = companyRow?.city || undefined
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
-    const placesData = await getPlaceDetails(companyName, website, phone)
+    // Strategy 1: name + website + phone
+    console.log(`[analyze-company-reviews] search 1: name="${companyName}" website="${website}" phone="${phone ?? 'none'}"`)
+    let placesData = await getPlaceDetails(companyName, website, phone)
+
+    // Strategy 2: name + city (if no result and city known)
+    if (!placesData && city) {
+      console.log(`[analyze-company-reviews] search 2: name+city="${companyName} ${city}" website="${website}"`)
+      placesData = await getPlaceDetails(`${companyName} ${city}`, website, phone)
+    }
+
+    // Strategy 3: name only (no phone — last resort)
+    if (!placesData) {
+      console.log(`[analyze-company-reviews] search 3: name="${companyName}" (no phone)`)
+      placesData = await getPlaceDetails(companyName, website, undefined)
+    }
+
+    console.log(`[analyze-company-reviews] result: place_id=${placesData?.place_id ?? 'none'} rating=${placesData?.google_rating ?? 'none'}`)
 
     const result: Record<string, any> = {
       google_rating: placesData?.google_rating ?? null,
