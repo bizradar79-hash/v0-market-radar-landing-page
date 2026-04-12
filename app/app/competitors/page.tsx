@@ -217,6 +217,7 @@ export default function CompetitorsPage() {
           competitorId: competitor.id,
           name: competitor.name,
           website: competitor.website || '',
+          source: competitor.source || '',
           phone: competitor.phone || undefined,
         }),
       })
@@ -301,12 +302,14 @@ export default function CompetitorsPage() {
       return
     }
     const scoreVal = parseInt(addThreatScore)
+    // Manual competitors are known threats — apply +15 boost; default base 60 if not specified
+    const manualBaseScore = !isNaN(scoreVal) ? Math.min(100, Math.max(0, scoreVal + 15)) : 60
     const { data, error } = await supabase.from("competitors").insert({
       name: addName.trim(),
       website: addWebsite.trim(),
       services: addServices.trim(),
       pricing: '',
-      threat_score: !isNaN(scoreVal) ? Math.min(100, Math.max(0, scoreVal)) : null,
+      threat_score: manualBaseScore,
       trend: 'stable',
       source: 'manual',
       company_id: user.id,
@@ -429,46 +432,39 @@ export default function CompetitorsPage() {
   const isManual = (c: Competitor) => c.source === 'manual'
 
   const CompetitorTable = ({ items }: { items: Competitor[] }) => (
-    <div className="overflow-x-auto">
+    <div>
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="text-right">שם</TableHead>
-            <TableHead className="text-right hidden md:table-cell">שירותים</TableHead>
-            <TableHead className="text-right hidden lg:table-cell">דירוג גוגל</TableHead>
-            <TableHead className="text-right hidden lg:table-cell">ביקורות</TableHead>
-            <TableHead className="text-right">ציון איום</TableHead>
-            <TableHead className="text-right">פעולות</TableHead>
+            <TableHead className="text-right w-24">דירוג גוגל</TableHead>
+            <TableHead className="text-right w-20 hidden sm:table-cell">ביקורות</TableHead>
+            <TableHead className="text-right w-24">ציון איום</TableHead>
+            <TableHead className="text-right w-16">פעולות</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map((competitor) => (
             <TableRow key={competitor.id}>
-              <TableCell>
-                <div className="flex items-center gap-2">
+              <TableCell className="min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
                   <button
                     onClick={() => handleEyeClick(competitor)}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
                     title="פרטים ודירוג גוגל"
                   >
-                    {fetchingRating[competitor.id]
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <Eye className="h-3 w-3" />
-                    }
+                    <Eye className="h-3 w-3" />
                   </button>
-                  <span className="font-medium">{competitor.name}</span>
+                  <span className="font-medium truncate">{competitor.name}</span>
                   <Badge
                     variant="outline"
-                    className={`text-xs px-1.5 py-0 ${isManual(competitor) ? 'border-gray-300 text-gray-500 bg-gray-50' : 'border-teal-300 text-teal-600 bg-teal-50'}`}
+                    className={`shrink-0 text-xs px-1.5 py-0 ${isManual(competitor) ? 'border-gray-300 text-gray-500 bg-gray-50' : 'border-teal-300 text-teal-600 bg-teal-50'}`}
                   >
-                    {isManual(competitor) ? 'ידני' : 'אוטומטי'}
+                    {isManual(competitor) ? 'ידני' : 'AI'}
                   </Badge>
                 </div>
               </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <span className="text-sm text-muted-foreground">{competitor.services || "לא ידוע"}</span>
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
+              <TableCell className="w-24">
                 {fetchingRating[competitor.id] ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                 ) : competitor.google_rating != null ? (
@@ -477,15 +473,17 @@ export default function CompetitorsPage() {
                   <span className="text-sm text-muted-foreground">—</span>
                 )}
               </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                {competitor.google_review_count != null ? (
+              <TableCell className="w-20 hidden sm:table-cell">
+                {fetchingRating[competitor.id] ? (
+                  <span className="text-sm text-muted-foreground">...</span>
+                ) : competitor.google_review_count != null ? (
                   <span className="text-sm text-muted-foreground">{competitor.google_review_count.toLocaleString()}</span>
                 ) : (
                   <span className="text-sm text-muted-foreground">—</span>
                 )}
               </TableCell>
-              <TableCell>
-                <div className="w-24 space-y-1">
+              <TableCell className="w-24">
+                <div className="space-y-1">
                   <span className={`text-sm font-semibold ${getThreatColor(competitor.threat_score)}`}>
                     {competitor.threat_score}
                   </span>

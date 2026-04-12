@@ -41,8 +41,10 @@ async function fetchRatingWithGemini(competitorName: string): Promise<{
   } catch { return null }
 }
 
-function applyThreatBonus(base: number, rating: number | null, reviewCount: number | null): number {
+function applyThreatBonus(base: number, rating: number | null, reviewCount: number | null, isManual: boolean): number {
   let score = base
+  // Manual competitors are known threats — boost base score
+  if (isManual) score += 15
   if (rating != null) {
     if (rating >= 4.5) score += 20
     else if (rating >= 4.0) score += 15
@@ -60,7 +62,8 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { competitorId, name, website: competitorWebsite, phone: competitorPhone } = await request.json()
+    const { competitorId, name, website: competitorWebsite, phone: competitorPhone, source } = await request.json()
+    const isManual = source === 'manual'
     if (!competitorId || !name) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
     // Try Google Places first (accurate), fall back to Gemini
@@ -87,7 +90,7 @@ export async function POST(request: Request) {
       const { data: comp } = await ctx.supabase
         .from('competitors').select('threat_score').eq('id', competitorId).eq('company_id', ctx.user.id).single()
       if (comp?.threat_score != null) {
-        updates.threat_score = applyThreatBonus(comp.threat_score, rating, reviewCount)
+        updates.threat_score = applyThreatBonus(comp.threat_score, rating, reviewCount, isManual)
       }
     }
 
