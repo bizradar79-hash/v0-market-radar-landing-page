@@ -22,9 +22,18 @@ export default function MarketAnalysisBlock() {
   const [analysis, setAnalysis] = useState<MarketAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [recentAnalyses, setRecentAnalyses] = useState<{ id: string; query: string }[]>([])
+  const [savedAnalysisTitles, setSavedAnalysisTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
 
-  useEffect(() => { loadRecentAnalyses() }, [])
+  useEffect(() => {
+    loadRecentAnalyses()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'market_analysis').then(({ data }) => {
+        if (data) setSavedAnalysisTitles(new Set(data.map((s: any) => s.title)))
+      })
+    })
+  }, [])
 
   async function loadRecentAnalyses() {
     try {
@@ -89,34 +98,35 @@ export default function MarketAnalysisBlock() {
               <Badge variant="outline" className="text-xs text-muted-foreground">{analysis.region}</Badge>
               <Badge variant="outline" className="text-xs text-muted-foreground">{analysis.category}</Badge>
             </div>
-            <div className="flex gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs h-7 px-2"
-                onClick={async () => {
-                  try {
-                    await fetch('/api/saved-items', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        item_type: 'market_analysis',
-                        item_id: analysis.id,
-                        title: `ניתוח שוק: ${analysis.query}`,
-                        description: analysis.executiveSummary?.slice(0, 160) || null,
-                        url: null,
-                        source_module: 'ניתוח שוק',
-                        metadata: { query: analysis.query, region: analysis.region, category: analysis.category },
-                      }),
-                    })
-                    const win = window as any
-                    if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-                  } catch {}
-                }}
-              >
-                <Bookmark className="h-3 w-3 ml-1" />
-                שמור
-              </Button>
+            <div className="flex gap-1 items-center">
+              {savedAnalysisTitles.has(`ניתוח שוק: ${analysis.query}`) ? (
+                <span className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-green-50 text-green-700 border-green-200 cursor-default">✓ נשמר</span>
+              ) : (
+                <button
+                  className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 hover:bg-muted"
+                  onClick={async () => {
+                    const title = `ניתוח שוק: ${analysis.query}`
+                    setSavedAnalysisTitles(prev => new Set([...prev, title]))
+                    try {
+                      await fetch('/api/saved-items', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          item_type: 'market_analysis',
+                          item_id: analysis.id,
+                          title,
+                          description: (analysis as any).executiveSummary?.slice(0, 160) || null,
+                          url: null,
+                          source_module: 'ניתוח שוק',
+                          metadata: { query: analysis.query, region: analysis.region, category: analysis.category },
+                        }),
+                      })
+                      const win = window as any
+                      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+                    } catch {}
+                  }}
+                >🔖 שמור</button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"

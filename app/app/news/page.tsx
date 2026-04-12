@@ -5,9 +5,8 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-import { ExternalLink, Clock, Loader2, Newspaper, Bookmark } from "lucide-react"
+import { ExternalLink, Clock, Loader2, Newspaper } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { Button } from "@/components/ui/button"
 
 interface NewsItem {
   id: string
@@ -54,14 +53,23 @@ function RegionBadge({ region }: { region: string }) {
 export default function NewsPage() {
   const [news, setNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
   const { toast } = useToast()
 
-  useEffect(() => { fetchNews() }, [])
+  useEffect(() => { fetchNews(); fetchSaved() }, [])
+
+  async function fetchSaved() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'news')
+    if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+  }
 
   async function saveNewsItem(item: NewsItem) {
+    setSavedTitles(prev => new Set([...prev, item.title]))
     try {
-      const res = await fetch('/api/saved-items', {
+      await fetch('/api/saved-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,11 +82,8 @@ export default function NewsPage() {
           metadata: { source: item.source, category: item.category, published_at: item.published_at },
         }),
       })
-      if (res.ok) {
-        toast({ title: 'החדשה נשמרה' })
-        const win = window as any
-        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-      }
+      const win = window as any
+      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
     } catch {}
   }
 
@@ -157,16 +162,15 @@ export default function NewsPage() {
               {/* Source + external link + save */}
               <div className="flex items-center justify-between mt-auto pt-1">
                 <span className="text-xs font-medium text-muted-foreground truncate">{item.source}</span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    title="שמור חדשה"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveNewsItem(item) }}
-                  >
-                    <Bookmark className="h-3 w-3" />
-                  </Button>
+                <div className="flex items-center gap-2">
+                  {savedTitles.has(item.title) ? (
+                    <span className="flex items-center gap-1 text-xs border rounded-md px-2 py-0.5 bg-green-50 text-green-700 border-green-200 cursor-default">✓ נשמר</span>
+                  ) : (
+                    <button
+                      className="flex items-center gap-1 text-xs border rounded-md px-2 py-0.5 hover:bg-muted"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveNewsItem(item) }}
+                    >🔖 שמור</button>
+                  )}
                   <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 group-hover:text-primary transition-colors" />
                 </div>
               </div>

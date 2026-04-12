@@ -16,7 +16,6 @@ import {
   Loader2,
   Sparkles,
   Tag,
-  Bookmark,
 } from "lucide-react"
 
 function getHostname(url: string): string | null {
@@ -40,12 +39,21 @@ export default function ConferencesPage() {
   const [conferences, setConferences] = useState<Conference[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     fetchConferences()
+    fetchSaved()
   }, [])
+
+  async function fetchSaved() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'conference')
+    if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+  }
 
   async function fetchConferences() {
     const { data, error } = await supabase
@@ -60,8 +68,9 @@ export default function ConferencesPage() {
   }
 
   async function saveConference(conference: Conference) {
+    setSavedTitles(prev => new Set([...prev, conference.name]))
     try {
-      const res = await fetch('/api/saved-items', {
+      await fetch('/api/saved-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,11 +83,8 @@ export default function ConferencesPage() {
           metadata: { date: conference.date, location: conference.location, category: conference.category },
         }),
       })
-      if (res.ok) {
-        toast({ title: 'הכנס נשמר', description: conference.name })
-        const win = window as any
-        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-      }
+      const win = window as any
+      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
     } catch {}
   }
 
@@ -246,9 +252,11 @@ export default function ConferencesPage() {
                     <ExternalLink className="ml-2 h-4 w-4" />
                     הירשם לכנס
                   </Button>
-                  <Button variant="outline" size="icon" onClick={() => saveConference(conference)} title="שמור כנס">
-                    <Bookmark className="h-4 w-4" />
-                  </Button>
+                  {savedTitles.has(conference.name) ? (
+                    <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-green-50 text-green-700 border-green-200 cursor-default">✓ נשמר</button>
+                  ) : (
+                    <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 hover:bg-muted" onClick={() => saveConference(conference)}>🔖 שמור</button>
+                  )}
                 </div>
               </CardContent>
             </Card>

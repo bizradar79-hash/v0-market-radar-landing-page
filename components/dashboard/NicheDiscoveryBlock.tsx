@@ -9,6 +9,7 @@ import NicheDetailsPanel from "./NicheDetailsPanel"
 import type { NicheOpportunity, NicheOpportunityData, NicheStatus } from "@/types/niche-opportunity"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
 import { revenueInputFromNiche } from "@/lib/revenue-adapters"
+import { createClient } from "@/lib/supabase/client"
 // Module-level cache: survives navigation remounts, cleared only on explicit refresh
 let _cache: NicheOpportunityData | null = null
 
@@ -46,6 +47,17 @@ export default function NicheDiscoveryBlock() {
   const [selectedNiche, setSelectedNiche] = useState<NicheOpportunity | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [statusOverrides, setStatusOverrides] = useState<Record<string, NicheStatus>>({})
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'niche').then(({ data }) => {
+        if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+      })
+    })
+  }, [])
 
   const fetchOpportunities = useCallback(async (force = false) => {
     if (force) {
@@ -208,6 +220,8 @@ export default function NicheDiscoveryBlock() {
                 status={getEffectiveStatus(niche)}
                 onAnalyze={() => { setSelectedNiche(niche); setPanelOpen(true) }}
                 onStatusChange={(s) => handleStatusChange(niche.id, s)}
+                isSaved={savedTitles.has(niche.nicheTitle)}
+                onSave={() => setSavedTitles(prev => new Set([...prev, niche.nicheTitle]))}
               />
             ))}
           </div>
@@ -230,9 +244,11 @@ interface CardProps {
   status: NicheStatus
   onAnalyze: () => void
   onStatusChange: (status: NicheStatus) => void
+  isSaved: boolean
+  onSave: () => void
 }
 
-function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: CardProps) {
+function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange, isSaved, onSave }: CardProps) {
   const isTracking = status === 'tracking'
   const demandArrow = niche.demandTrend === 'עולה' ? '↑' : niche.demandTrend === 'יורד' ? '↓' : '→'
   const metrics = calculateRevenueMetrics(revenueInputFromNiche(niche))
@@ -331,33 +347,33 @@ function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: Card
             <><Bookmark className="h-3 w-3 ml-1" />מעקב</>
           )}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 text-xs px-2"
-          title="שמור נישה"
-          onClick={async () => {
-            try {
-              await fetch('/api/saved-items', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  item_type: 'niche',
-                  item_id: niche.id,
-                  title: niche.nicheTitle,
-                  description: niche.shortInsightSummary?.slice(0, 160) || null,
-                  url: null,
-                  source_module: 'נישות',
-                  metadata: { category: niche.category, opportunityScore: niche.opportunityScore },
-                }),
-              })
-              const win = window as any
-              if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-            } catch {}
-          }}
-        >
-          שמור
-        </Button>
+        {isSaved ? (
+          <span className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-green-50 text-green-700 border-green-200 cursor-default h-7">✓ נשמר</span>
+        ) : (
+          <button
+            className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 hover:bg-muted h-7"
+            onClick={async () => {
+              onSave()
+              try {
+                await fetch('/api/saved-items', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    item_type: 'niche',
+                    item_id: niche.id,
+                    title: niche.nicheTitle,
+                    description: niche.shortInsightSummary?.slice(0, 160) || null,
+                    url: null,
+                    source_module: 'נישות',
+                    metadata: { category: niche.category, opportunityScore: niche.opportunityScore },
+                  }),
+                })
+                const win = window as any
+                if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+              } catch {}
+            }}
+          >🔖 שמור</button>
+        )}
       </div>
     </div>
   )

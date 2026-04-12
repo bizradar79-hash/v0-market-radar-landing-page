@@ -45,7 +45,6 @@ import {
   Building2,
   Trash2,
   ExternalLink,
-  Bookmark,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -88,6 +87,7 @@ export default function DistributionChannelsPage() {
   const [leadsLoading, setLeadsLoading] = useState(true)
   const [industryFilter, setIndustryFilter] = useState<string>("all")
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
 
   const supabase = createClient()
   const { toast } = useToast()
@@ -101,11 +101,22 @@ export default function DistributionChannelsPage() {
     setLeadsLoading(false)
   }, [supabase])
 
-  useEffect(() => { fetchLeads() }, [fetchLeads])
+  useEffect(() => {
+    fetchLeads()
+    fetchSaved()
+  }, [fetchLeads])
+
+  async function fetchSaved() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'channel')
+    if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+  }
 
   async function saveLead(lead: Lead) {
+    setSavedTitles(prev => new Set([...prev, lead.name]))
     try {
-      const res = await fetch('/api/saved-items', {
+      await fetch('/api/saved-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -118,11 +129,8 @@ export default function DistributionChannelsPage() {
           metadata: { industry: lead.industry, location: lead.location, score: lead.score },
         }),
       })
-      if (res.ok) {
-        toast({ title: 'הערוץ נשמר', description: lead.name })
-        const win = window as any
-        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-      }
+      const win = window as any
+      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
     } catch {}
   }
 
@@ -257,8 +265,8 @@ export default function DistributionChannelsPage() {
                                   </a>
                                 </DropdownMenuItem>
                               )}
-                              <DropdownMenuItem onClick={() => saveLead(lead)}>
-                                <Bookmark className="ml-2 h-4 w-4" />שמור ערוץ
+                              <DropdownMenuItem onClick={() => saveLead(lead)} disabled={savedTitles.has(lead.name)}>
+                                {savedTitles.has(lead.name) ? '✓ נשמר' : '🔖 שמור ערוץ'}
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => deleteLead(lead.id)} className="text-red-600">
                                 <Trash2 className="ml-2 h-4 w-4" />מחק

@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar, Bookmark } from "lucide-react"
+import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
@@ -49,6 +50,17 @@ export default function WeeklyActionsBlock() {
   const [refreshing, setRefreshing] = useState(false)
   const [selectedAction, setSelectedAction] = useState<WeeklyAction | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'action').then(({ data }) => {
+        if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+      })
+    })
+  }, [])
 
   const fetchActions = useCallback(async (force = false) => {
     if (force) {
@@ -180,7 +192,13 @@ export default function WeeklyActionsBlock() {
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {sortedActions.map(action => (
-              <ActionCard key={action.id} action={action} onClick={() => openAction(action)} />
+              <ActionCard
+                key={action.id}
+                action={action}
+                onClick={() => openAction(action)}
+                isSaved={savedTitles.has(action.title)}
+                onSave={() => setSavedTitles(prev => new Set([...prev, action.title]))}
+              />
             ))}
           </div>
         </CardContent>
@@ -195,11 +213,33 @@ export default function WeeklyActionsBlock() {
   )
 }
 
-function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => void }) {
+function ActionCard({ action, onClick, isSaved, onSave }: { action: WeeklyAction; onClick: () => void; isSaved: boolean; onSave: () => void }) {
   const icon = categoryIcon[action.category] || "✅"
   const prioClass = priorityColor[action.priority] || ""
   const isHigh = action.priority === 'גבוהה'
   const metrics = calculateRevenueMetrics(revenueInputFromWeeklyAction(action))
+
+  async function handleSave(e: React.MouseEvent) {
+    e.stopPropagation()
+    onSave()
+    try {
+      await fetch('/api/saved-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_type: 'action',
+          item_id: action.id,
+          title: action.title,
+          description: (action as any).summary?.slice(0, 160) || null,
+          url: null,
+          source_module: 'פעולות שבועיות',
+          metadata: { category: action.category, priority: action.priority },
+        }),
+      })
+      const win = window as any
+      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+    } catch {}
+  }
 
   return (
     <button
@@ -219,7 +259,7 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
       </div>
 
       <p className="text-sm font-semibold leading-tight mb-1.5 line-clamp-2">{action.title}</p>
-      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{action.summary}</p>
+      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{(action as any).summary}</p>
 
       <div className="flex items-center gap-2 mt-2">
         <Badge
@@ -231,35 +271,13 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
         <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
       </div>
 
-      <div className="mt-1 flex items-center justify-between gap-1 text-xs text-primary">
-        <button
-          className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors px-1"
-          onClick={async (e) => {
-            e.stopPropagation()
-            try {
-              await fetch('/api/saved-items', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  item_type: 'action',
-                  item_id: action.id,
-                  title: action.title,
-                  description: action.summary?.slice(0, 160) || null,
-                  url: null,
-                  source_module: 'פעולות שבועיות',
-                  metadata: { category: action.category, priority: action.priority },
-                }),
-              })
-              const win = window as any
-              if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-            } catch {}
-          }}
-          title="שמור פעולה"
-        >
-          <Bookmark className="h-3 w-3" />
-          שמור
-        </button>
-        <div className="flex items-center gap-1">
+      <div className="mt-1 flex items-center justify-between gap-1">
+        {isSaved ? (
+          <span className="flex items-center gap-1 text-xs border rounded-md px-2 py-0.5 bg-green-50 text-green-700 border-green-200 cursor-default" onClick={e => e.stopPropagation()}>✓ נשמר</span>
+        ) : (
+          <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-0.5 hover:bg-muted" onClick={handleSave}>🔖 שמור</button>
+        )}
+        <div className="flex items-center gap-1 text-xs text-primary">
           <span>לפרטים</span>
           <ChevronLeft className="h-3 w-3" />
         </div>

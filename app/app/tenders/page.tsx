@@ -25,7 +25,6 @@ import {
   Loader2,
   AlertTriangle,
   Trash2,
-  Bookmark,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -46,12 +45,21 @@ export default function TendersPage() {
   const [tenders, setTenders] = useState<Tender[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTender, setSelectedTender] = useState<Tender | null>(null)
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     fetchTenders()
+    fetchSaved()
   }, [])
+
+  async function fetchSaved() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('saved_items').select('title').eq('company_id', user.id).eq('item_type', 'tender')
+    if (data) setSavedTitles(new Set(data.map((s: any) => s.title)))
+  }
 
   async function fetchTenders() {
     const { data, error } = await supabase
@@ -65,10 +73,10 @@ export default function TendersPage() {
     setLoading(false)
   }
 
-
   async function saveTender(tender: Tender) {
+    setSavedTitles(prev => new Set([...prev, tender.title]))
     try {
-      const res = await fetch('/api/saved-items', {
+      await fetch('/api/saved-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -81,11 +89,8 @@ export default function TendersPage() {
           metadata: { deadline: tender.deadline, budget: tender.budget, relevance_score: tender.relevance_score },
         }),
       })
-      if (res.ok) {
-        toast({ title: 'המכרז נשמר', description: tender.title })
-        const win = window as any
-        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
-      }
+      const win = window as any
+      if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
     } catch {}
   }
 
@@ -261,9 +266,11 @@ export default function TendersPage() {
                       </Button>
                     </a>
                   )}
-                  <Button variant="outline" size="icon" onClick={(e) => { e.stopPropagation(); saveTender(tender) }} title="שמור מכרז">
-                    <Bookmark className="h-4 w-4" />
-                  </Button>
+                  {savedTitles.has(tender.title) ? (
+                    <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-green-50 text-green-700 border-green-200 cursor-default" onClick={(e) => e.stopPropagation()}>✓ נשמר</button>
+                  ) : (
+                    <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 hover:bg-muted" onClick={(e) => { e.stopPropagation(); saveTender(tender) }}>🔖 שמור</button>
+                  )}
                 </div>
               </CardContent>
             </Card>

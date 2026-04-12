@@ -45,6 +45,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing item_type or title' }, { status: 400 })
     }
 
+    // Prevent duplicates
+    const { data: existing } = await ctx.supabase
+      .from('saved_items')
+      .select('id')
+      .eq('company_id', ctx.user.id)
+      .eq('item_type', item_type)
+      .eq('title', title)
+      .maybeSingle()
+    if (existing) return NextResponse.json({ success: true, already_saved: true, id: existing.id })
+
     const { data, error } = await ctx.supabase
       .from('saved_items')
       .insert({
