@@ -53,7 +53,7 @@ interface DashboardData {
   topCompetitors: Array<{ name: string; threat_score: number; services: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
   upcomingConferences: Array<{ name: string; date: string; location: string }>
-  topTrends: Array<{ name: string; direction: string; category: string }>
+  topTrends: Array<{ name: string; direction: string; category: string; score: number }>
   recentNews: Array<{ title: string; source: string; published_at: string; url: string }>
   topChannels: string[]
   weeklyActions: Array<{ id: string; title: string; category: string; priority: string }>
@@ -75,28 +75,40 @@ export default function AppDashboardPage() {
 
   async function fetchDashboardData() {
     const today = new Date().toISOString().split('T')[0]
+
+    // Get user id first for explicit company_id filters (avoids RLS count issues)
+    const { data: { user } } = await supabase.auth.getUser()
+    const userId = user?.id
+
     const [
       { count: tendersCount },
       { count: competitorsCount },
+      // Fix 1: explicit company_id filter so count is correct
       { count: trendsCount },
       { count: conferencesCount },
       { count: newsCount },
       { data: topCompetitors },
       { data: upcomingTenders },
       { data: upcomingConferences },
-      { data: topTrends },
+      // Fix 3a: order by score desc, select name+score+direction
+      { data: topTrendsRows },
       { data: recentNewsRows },
       { data: companyData },
     ] = await Promise.all([
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
-      supabase.from("trends").select("*", { count: "exact", head: true }),
+      userId
+        ? supabase.from("trends").select("*", { count: "exact", head: true }).eq("company_id", userId)
+        : supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("conferences").select("*", { count: "exact", head: true }),
       supabase.from("news").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("name, threat_score, services").order("threat_score", { ascending: false }).limit(3),
+      // Fix 4: also select publisher column
       supabase.from("tenders").select("title, organization, deadline").gte("deadline", today).order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").gte("date", today).order("date", { ascending: true }).limit(3),
-      supabase.from("trends").select("name, direction, category").order("created_at", { ascending: false }).limit(3),
+      userId
+        ? supabase.from("trends").select("name, score, direction, category").eq("company_id", userId).order("score", { ascending: false }).limit(3)
+        : supabase.from("trends").select("name, score, direction, category").order("score", { ascending: false }).limit(3),
       supabase.from("news").select("title, source, published_at, url").order("published_at", { ascending: false }).limit(3),
       supabase.from("companies").select(
         "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, business_profile"
@@ -136,19 +148,40 @@ export default function AppDashboardPage() {
       }
     }
 
-    // Distribution channels — from business_profile.distributionChannels or distribution_channels column
+    // Fix 2: Distribution channels — show potential channels first
+    // Try distribution_channels column (may have objects with status), fall back to bp.distributionChannels
     const bp = (companyData as any)?.business_profile as any
-    const rawChannels: string[] = bp?.distributionChannels?.length
-      ? bp.distributionChannels
-      : Array.isArray((companyData as any)?.distribution_channels)
-        ? (companyData as any).distribution_channels
-        : []
-    const topChannels = rawChannels.slice(0, 3)
+    const dcRaw = (companyData as any)?.distribution_channels
+    const existingChannels: string[] = bp?.distributionChannels || []
 
-    // Weekly actions — filter high priority
+    let potentialChannels: string[] = []
+    if (Array.isArray(dcRaw)) {
+      // If items are objects with status, filter for potential
+      const potentialObjs = dcRaw.filter((c: any) =>
+        typeof c === 'object' && (c.status === 'potential' || c.type === 'potential')
+      )
+      if (potentialObjs.length > 0) {
+        potentialChannels = potentialObjs.map((c: any) => c.name || c.channel || String(c))
+      } else {
+        // Items are plain strings — show ones NOT already in business_profile.distributionChannels
+        const allStrings = dcRaw.filter((c: any) => typeof c === 'string') as string[]
+        const existingSet = new Set(existingChannels.map((s: string) => s.toLowerCase()))
+        potentialChannels = allStrings.filter(c => !existingSet.has(c.toLowerCase()))
+        // If no "new" channels, just show all from distribution_channels
+        if (potentialChannels.length === 0) potentialChannels = allStrings
+      }
+    }
+    // Final fallback: use business_profile channels
+    const topChannels = (potentialChannels.length > 0 ? potentialChannels : existingChannels).slice(0, 3)
+
+    // Fix 5: Weekly actions — high priority first, fallback to first 3
     const weeklyActionsRaw = ((companyData as any)?.weekly_actions as { actions?: any[] } | null)?.actions || []
-    const weeklyActions = weeklyActionsRaw
-      .filter((a: any) => a.priority === 'גבוהה' || a.priority === 'high')
+    const isHighPriority = (a: any) =>
+      a.priority === 'גבוהה' || a.priority === 'high' ||
+      a.urgency === 'high' || a.urgency === 'גבוהה' ||
+      String(a.title || '').startsWith('דחוף') || String(a.title || '').startsWith('חשוב')
+    const highPriority = weeklyActionsRaw.filter(isHighPriority)
+    const weeklyActions = (highPriority.length > 0 ? highPriority : weeklyActionsRaw)
       .slice(0, 3)
       .map((a: any) => ({ id: a.id || '', title: a.title || '', category: a.category || '', priority: a.priority || '' }))
 
@@ -160,8 +193,16 @@ export default function AppDashboardPage() {
       if (topKw) competitorTrendItems.push({ competitor_name: entry.competitor_name || '', keyword: topKw })
     }
 
+    // Normalise topTrends — map name→keyword, score→trend_score for display
+    const topTrends = (topTrendsRows || []).map((t: any) => ({
+      name: t.name || '',
+      direction: t.direction || 'stable',
+      category: t.category || '',
+      score: t.score ?? 0,
+    }))
+
     setData({
-      channelsCount: rawChannels.length,
+      channelsCount: (potentialChannels.length > 0 ? potentialChannels : existingChannels).length,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
       trendsCount: trendsCount || 0,
@@ -170,7 +211,7 @@ export default function AppDashboardPage() {
       topCompetitors: topCompetitors || [],
       upcomingTenders: upcomingTenders || [],
       upcomingConferences: upcomingConferences || [],
-      topTrends: topTrends || [],
+      topTrends,
       recentNews: recentNewsRows || [],
       topChannels,
       weeklyActions,
@@ -499,9 +540,14 @@ export default function AppDashboardPage() {
                             <DirectionIcon direction={trend.direction} />
                             <p className="text-sm font-medium truncate">{trend.name}</p>
                           </div>
-                          <Badge variant="outline" className={directionClass(trend.direction)}>
-                            {directionLabel(trend.direction)}
-                          </Badge>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {trend.score > 0 && (
+                              <span className="text-xs text-muted-foreground">{trend.score}</span>
+                            )}
+                            <Badge variant="outline" className={directionClass(trend.direction)}>
+                              {directionLabel(trend.direction)}
+                            </Badge>
+                          </div>
                         </div>
                       ))}
                     </div>
