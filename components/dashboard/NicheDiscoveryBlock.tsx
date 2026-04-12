@@ -331,6 +331,33 @@ function NicheOpportunityCard({ niche, status, onAnalyze, onStatusChange }: Card
             <><Bookmark className="h-3 w-3 ml-1" />מעקב</>
           )}
         </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs px-2"
+          title="שמור נישה"
+          onClick={async () => {
+            try {
+              await fetch('/api/saved-items', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  item_type: 'niche',
+                  item_id: niche.id,
+                  title: niche.nicheTitle,
+                  description: niche.shortInsightSummary?.slice(0, 160) || null,
+                  url: null,
+                  source_module: 'נישות',
+                  metadata: { category: niche.category, opportunityScore: niche.opportunityScore },
+                }),
+              })
+              const win = window as any
+              if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+            } catch {}
+          }}
+        >
+          שמור
+        </Button>
       </div>
     </div>
   )

@@ -16,6 +16,7 @@ import {
   Loader2,
   Sparkles,
   Tag,
+  Bookmark,
 } from "lucide-react"
 
 function getHostname(url: string): string | null {
@@ -56,6 +57,29 @@ export default function ConferencesPage() {
       setConferences(data)
     }
     setLoading(false)
+  }
+
+  async function saveConference(conference: Conference) {
+    try {
+      const res = await fetch('/api/saved-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_type: 'conference',
+          item_id: conference.id,
+          title: conference.name,
+          description: conference.location ? `${conference.date} | ${conference.location}` : conference.date,
+          url: conference.url || null,
+          source_module: 'כנסים',
+          metadata: { date: conference.date, location: conference.location, category: conference.category },
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'הכנס נשמר', description: conference.name })
+        const win = window as any
+        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+      }
+    } catch {}
   }
 
   async function generateWithAI() {
@@ -213,14 +237,19 @@ export default function ConferencesPage() {
                   )}
                 </div>
 
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => window.open(conference.url, '_blank')}
-                >
-                  <ExternalLink className="ml-2 h-4 w-4" />
-                  הירשם לכנס
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => window.open(conference.url, '_blank')}
+                  >
+                    <ExternalLink className="ml-2 h-4 w-4" />
+                    הירשם לכנס
+                  </Button>
+                  <Button variant="outline" size="icon" onClick={() => saveConference(conference)} title="שמור כנס">
+                    <Bookmark className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

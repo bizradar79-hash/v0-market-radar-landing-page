@@ -5,8 +5,9 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-import { ExternalLink, Clock, Loader2, Newspaper } from "lucide-react"
+import { ExternalLink, Clock, Loader2, Newspaper, Bookmark } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Button } from "@/components/ui/button"
 
 interface NewsItem {
   id: string
@@ -57,6 +58,29 @@ export default function NewsPage() {
   const { toast } = useToast()
 
   useEffect(() => { fetchNews() }, [])
+
+  async function saveNewsItem(item: NewsItem) {
+    try {
+      const res = await fetch('/api/saved-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_type: 'news',
+          item_id: item.id,
+          title: item.title,
+          description: item.summary?.slice(0, 160) || null,
+          url: item.url || null,
+          source_module: 'חדשות',
+          metadata: { source: item.source, category: item.category, published_at: item.published_at },
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'החדשה נשמרה' })
+        const win = window as any
+        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+      }
+    } catch {}
+  }
 
   async function fetchNews() {
     const { data, error } = await supabase
@@ -130,10 +154,21 @@ export default function NewsPage() {
                 </p>
               )}
 
-              {/* Source + external link */}
+              {/* Source + external link + save */}
               <div className="flex items-center justify-between mt-auto pt-1">
                 <span className="text-xs font-medium text-muted-foreground truncate">{item.source}</span>
-                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 group-hover:text-primary transition-colors" />
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    title="שמור חדשה"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveNewsItem(item) }}
+                  >
+                    <Bookmark className="h-3 w-3" />
+                  </Button>
+                  <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0 group-hover:text-primary transition-colors" />
+                </div>
               </div>
             </a>
           ))}

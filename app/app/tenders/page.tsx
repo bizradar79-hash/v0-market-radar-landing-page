@@ -14,8 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { 
-  FileText, 
+import {
+  FileText,
   Building2,
   Calendar,
   Clock,
@@ -25,6 +25,7 @@ import {
   Loader2,
   AlertTriangle,
   Trash2,
+  Bookmark,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -64,6 +65,29 @@ export default function TendersPage() {
     setLoading(false)
   }
 
+
+  async function saveTender(tender: Tender) {
+    try {
+      const res = await fetch('/api/saved-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_type: 'tender',
+          item_id: tender.id,
+          title: tender.title,
+          description: tender.organization ? `ארגון: ${tender.organization}` : tender.description?.slice(0, 120),
+          url: tender.link || null,
+          source_module: 'מכרזים',
+          metadata: { deadline: tender.deadline, budget: tender.budget, relevance_score: tender.relevance_score },
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'המכרז נשמר', description: tender.title })
+        const win = window as any
+        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+      }
+    } catch {}
+  }
 
   async function deleteTender(id: string) {
     const { error } = await supabase
@@ -227,15 +251,20 @@ export default function TendersPage() {
                   </div>
                 </div>
 
-                {/* Action Button */}
-                {tender.link && (
-                  <a href={tender.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                    <Button className="w-full">
-                      <ExternalLink className="ml-2 h-4 w-4" />
-                      הגש הצעה
-                    </Button>
-                  </a>
-                )}
+                {/* Action Buttons */}
+                <div className="flex gap-2">
+                  {tender.link && (
+                    <a href={tender.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="flex-1">
+                      <Button className="w-full">
+                        <ExternalLink className="ml-2 h-4 w-4" />
+                        הגש הצעה
+                      </Button>
+                    </a>
+                  )}
+                  <Button variant="outline" size="icon" onClick={(e) => { e.stopPropagation(); saveTender(tender) }} title="שמור מכרז">
+                    <Bookmark className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )

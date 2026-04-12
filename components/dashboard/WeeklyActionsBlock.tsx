@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar } from "lucide-react"
+import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar, Bookmark } from "lucide-react"
 import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
 import { calculateRevenueMetrics } from "@/lib/revenue-engine"
@@ -231,9 +231,38 @@ function ActionCard({ action, onClick }: { action: WeeklyAction; onClick: () => 
         <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
       </div>
 
-      <div className="mt-1 flex items-center justify-end gap-1 text-xs text-primary">
-        <span>לפרטים</span>
-        <ChevronLeft className="h-3 w-3" />
+      <div className="mt-1 flex items-center justify-between gap-1 text-xs text-primary">
+        <button
+          className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors px-1"
+          onClick={async (e) => {
+            e.stopPropagation()
+            try {
+              await fetch('/api/saved-items', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  item_type: 'action',
+                  item_id: action.id,
+                  title: action.title,
+                  description: action.summary?.slice(0, 160) || null,
+                  url: null,
+                  source_module: 'פעולות שבועיות',
+                  metadata: { category: action.category, priority: action.priority },
+                }),
+              })
+              const win = window as any
+              if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+            } catch {}
+          }}
+          title="שמור פעולה"
+        >
+          <Bookmark className="h-3 w-3" />
+          שמור
+        </button>
+        <div className="flex items-center gap-1">
+          <span>לפרטים</span>
+          <ChevronLeft className="h-3 w-3" />
+        </div>
       </div>
     </button>
   )

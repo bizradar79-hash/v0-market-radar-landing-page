@@ -22,6 +22,7 @@ import {
   BarChart2,
   Truck,
   SlidersHorizontal,
+  Bookmark,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -38,12 +39,12 @@ interface UserData {
 }
 
 interface NavCounts {
-  leads: number
   tenders: number
   competitors: number
   trends: number
   news: number
   conferences: number
+  saved: number
 }
 
 const getNavGroups = (counts: NavCounts) => [
@@ -53,6 +54,7 @@ const getNavGroups = (counts: NavCounts) => [
       { href: "/app/dashboard", label: "דשבורד", icon: LayoutDashboard },
       { href: "/app/profile", label: "פרופיל עסקי", icon: UserCircle },
       { href: "/app/distribution-channels", label: "ערוצי הפצה", icon: Truck },
+      { href: "/app/opportunities", label: "מרכז הזדמנויות", icon: Users },
     ],
   },
   {
@@ -61,7 +63,6 @@ const getNavGroups = (counts: NavCounts) => [
       { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
       { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
       { href: "/app/seo-geo", label: "דירוג SEO/GEO", icon: BarChart2 },
-      { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
     ],
   },
   {
@@ -69,12 +70,13 @@ const getNavGroups = (counts: NavCounts) => [
     items: [
       { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
       { href: "/app/conferences", label: "כנסים", icon: Calendar, badge: counts.conferences || undefined },
-      { href: "/app/opportunities", label: "מרכז הזדמנויות", icon: Users },
+      { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
     ],
   },
   {
     title: "⚙️ ניהול מערכת",
     items: [
+      { href: "/app/saved", label: "פריטים שמורים", icon: Bookmark, badge: counts.saved || undefined },
       { href: "/app/reports", label: "דוחות", icon: FileBarChart },
       { href: "/app/settings", label: "הגדרות", icon: Settings },
     ],
@@ -87,26 +89,24 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const [isAdmin, setIsAdmin] = useState(false)
   const [isImpersonating, setIsImpersonating] = useState(false)
   const [counts, setCounts] = useState<NavCounts>({
-    leads: 0,
     tenders: 0,
     competitors: 0,
     trends: 0,
     news: 0,
     conferences: 0,
+    saved: 0,
   })
 
   const fetchCounts = useCallback(async () => {
     const supabase = createClient()
 
     const [
-      { count: leadsCount },
       { count: tendersCount },
       { count: competitorsCount },
       { count: trendsCount },
       { count: newsCount },
       { count: conferencesCount },
     ] = await Promise.all([
-      supabase.from("leads").select("*", { count: "exact", head: true }),
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
@@ -114,13 +114,23 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
       supabase.from("conferences").select("*", { count: "exact", head: true }),
     ])
 
+    // Fetch saved items count
+    let savedCount = 0
+    try {
+      const res = await fetch('/api/saved-items')
+      if (res.ok) {
+        const data = await res.json()
+        savedCount = (data.items || []).length
+      }
+    } catch {}
+
     setCounts({
-      leads: leadsCount || 0,
       tenders: tendersCount || 0,
       competitors: competitorsCount || 0,
       trends: trendsCount || 0,
       news: newsCount || 0,
       conferences: conferencesCount || 0,
+      saved: savedCount,
     })
   }, [])
 
@@ -152,7 +162,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
           initials: initials.toUpperCase()
         })
 
-        // Check admin status (only if not impersonating — while impersonating, admin acts as normal user)
         if (!impersonating) {
           const { data: role } = await supabase
             .from('user_roles').select('is_admin').eq('user_id', authUser.id).single()
@@ -162,8 +171,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     }
 
     fetchUser()
-
-    // Only fetch counts when not in pure admin mode (while impersonating, counts are for the target user)
     fetchCounts()
     const interval = setInterval(fetchCounts, 30000)
     return () => clearInterval(interval)
@@ -180,9 +187,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     window.location.href = '/login'
   }
 
-  // Admin mode: show simplified nav when admin is NOT impersonating
   const showAdminNav = isAdmin && !isImpersonating
-
   const navGroups = getNavGroups(counts)
 
   return (
@@ -214,7 +219,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
         {/* Navigation */}
         <nav className="flex-1 p-3 overflow-y-auto">
           {showAdminNav ? (
-            /* ── Admin-only navigation ── */
             <div>
               <div className="px-3 pb-1 pt-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">
                 🛡 ניהול מערכת
@@ -249,7 +253,6 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
               </div>
             </div>
           ) : (
-            /* ── Normal user navigation ── */
             navGroups.map((group, groupIndex) => (
               <div key={group.title}>
                 <div className={cn(

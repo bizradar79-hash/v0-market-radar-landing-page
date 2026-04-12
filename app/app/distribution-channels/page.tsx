@@ -45,6 +45,7 @@ import {
   Building2,
   Trash2,
   ExternalLink,
+  Bookmark,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -101,6 +102,29 @@ export default function DistributionChannelsPage() {
   }, [supabase])
 
   useEffect(() => { fetchLeads() }, [fetchLeads])
+
+  async function saveLead(lead: Lead) {
+    try {
+      const res = await fetch('/api/saved-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_type: 'channel',
+          item_id: lead.id,
+          title: lead.name,
+          description: lead.reason?.slice(0, 160) || null,
+          url: lead.website || null,
+          source_module: 'ערוצי הפצה',
+          metadata: { industry: lead.industry, location: lead.location, score: lead.score },
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'הערוץ נשמר', description: lead.name })
+        const win = window as any
+        if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+      }
+    } catch {}
+  }
 
   async function deleteLead(id: string) {
     const { error } = await supabase.from("leads").delete().eq("id", id)
@@ -233,6 +257,9 @@ export default function DistributionChannelsPage() {
                                   </a>
                                 </DropdownMenuItem>
                               )}
+                              <DropdownMenuItem onClick={() => saveLead(lead)}>
+                                <Bookmark className="ml-2 h-4 w-4" />שמור ערוץ
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => deleteLead(lead.id)} className="text-red-600">
                                 <Trash2 className="ml-2 h-4 w-4" />מחק
                               </DropdownMenuItem>

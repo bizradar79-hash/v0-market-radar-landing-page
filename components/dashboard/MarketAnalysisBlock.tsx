@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search } from "lucide-react"
+import { Loader2, Search, Bookmark } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import MarketAnalysisPanelView from "./MarketAnalysisPanelView"
 import type { MarketAnalysis } from "@/types/market-analysis"
@@ -89,14 +89,43 @@ export default function MarketAnalysisBlock() {
               <Badge variant="outline" className="text-xs text-muted-foreground">{analysis.region}</Badge>
               <Badge variant="outline" className="text-xs text-muted-foreground">{analysis.category}</Badge>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs h-7 px-2 text-muted-foreground"
-              onClick={() => setAnalysis(null)}
-            >
-              ← ניתוח חדש
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 px-2"
+                onClick={async () => {
+                  try {
+                    await fetch('/api/saved-items', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        item_type: 'market_analysis',
+                        item_id: analysis.id,
+                        title: `ניתוח שוק: ${analysis.query}`,
+                        description: analysis.executiveSummary?.slice(0, 160) || null,
+                        url: null,
+                        source_module: 'ניתוח שוק',
+                        metadata: { query: analysis.query, region: analysis.region, category: analysis.category },
+                      }),
+                    })
+                    const win = window as any
+                    if (typeof win.refreshSidebarCounts === 'function') win.refreshSidebarCounts()
+                  } catch {}
+                }}
+              >
+                <Bookmark className="h-3 w-3 ml-1" />
+                שמור
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7 px-2 text-muted-foreground"
+                onClick={() => setAnalysis(null)}
+              >
+                ← ניתוח חדש
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
