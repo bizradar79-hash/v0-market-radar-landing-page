@@ -32,42 +32,12 @@ async function analyzeReviewsWithGemini(companyName: string, rating: number, rev
 
   // Build prompt — use real reviews if available, otherwise base analysis on rating alone
   const hasReviews = reviews.length > 0
+  const reviewLines = reviews.slice(0, 10).map((r, i) => `${i + 1}. ${r.text}`).join('\n')
   const prompt = hasReviews
-    ? `אתה יועץ עסקי. נתח את ביקורות הגוגל של "${companyName}" וספק תובנות מקצועיות.
+    ? `אתה יועץ עסקי. נתח את ביקורות הגוגל של "${companyName}" וספק תובנות מקצועיות.\n\nדירוג: ${rating}/5 (${reviewCount} ביקורות)\nביקורות:\n${reviewLines}\n\nהחזר JSON בלבד:\n{"sentiment_score":0,"summary":"תמצית 2-3 משפטים","positives":["חוזק 1","חוזק 2","חוזק 3"],"negatives":["חולשה 1","חולשה 2"],"opportunities":["הזדמנות לשיפור 1","הזדמנות 2"],"recommended_response":"תגובה מומלצת לביקורות שליליות"}\n\nCRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
+    : `אתה יועץ עסקי. נתח את המוניטין הגוגל של "${companyName}" על בסיס הדירוג הממוצע.\n\nדירוג: ${rating}/5 (${reviewCount} ביקורות בגוגל מאפס)\n\nהחזר JSON בלבד:\n{"sentiment_score":0,"summary":"תמצית 2-3 משפטים על המוניטין","positives":["חוזק 1","חוזק 2","חוזק 3"],"negatives":["חולשה 1","חולשה 2"],"opportunities":["הזדמנות לשיפור 1","הזדמנות 2"],"recommended_response":"המלצה לניהול מוניטין מקוון"}\n\nCRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
 
-דירוג: ${rating}/5 (${reviewCount} ביקורות)
-ביקורות:
-${reviews.slice(0, 10).map((r, i) => `${i + 1}. ${r.text}`).join('\n')}
-
-החזר JSON בלבד:
-{
-  "sentiment_score": 0,
-  "summary": "תמצית 2-3 משפטים",
-  "positives": ["חוזק 1", "חוזק 2", "חוזק 3"],
-  "negatives": ["חולשה 1", "חולשה 2"],
-  "opportunities": ["הזדמנות לשיפור 1", "הזדמנות 2"],
-  "recommended_response": "תגובה מומלצת לביקורות שליליות"
-}
-
-CRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
-    : `אתה יועץ עסקי. נתח את המוניטין הגוגל של "${companyName}" על בסיס הדירוג הממוצע.
-
-דירוג: ${rating}/5 (${reviewCount} ביקורות בגוגל מאפס)
-
-בהתבסס על הדירוג הזה, ספק ניתוח עסקי מקצועי.
-
-החזר JSON בלבד:
-{
-  "sentiment_score": 0,
-  "summary": "תמצית 2-3 משפטים על המוניטין",
-  "positives": ["חוזק 1", "חוזק 2", "חוזק 3"],
-  "negatives": ["חולשה 1", "חולשה 2"],
-  "opportunities": ["הזדמנות לשיפור 1", "הזדמנות 2"],
-  "recommended_response": "המלצה לניהול מוניטין מקוון"
-}
-
-CRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
-
+  try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
