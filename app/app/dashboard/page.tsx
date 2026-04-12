@@ -118,20 +118,8 @@ export default function AppDashboardPage() {
       supabase.from("competitors").select("name, trends_analysis").eq("company_id", userId).not("trends_analysis", "is", null).limit(5),
     ])
 
-    // ── Debug logs ──────────────────────────────────────────────────────────
-    if (companyData) {
-      console.log('[dashboard] keys:', Object.keys(companyData))
-      console.log('[dashboard] niche_opps:', JSON.stringify((companyData as any).niche_opportunities)?.substring(0, 400))
-      console.log('[dashboard] dist_channels_col:', JSON.stringify((companyData as any).distribution_channels)?.substring(0, 300))
-      console.log('[dashboard] industry_trends:', JSON.stringify((companyData as any).industry_trends)?.substring(0, 300))
-      console.log('[dashboard] competitor_trends:', JSON.stringify((companyData as any).competitor_trends)?.substring(0, 300))
-      console.log('[dashboard] seo:', JSON.stringify((companyData as any).seo_ranking)?.substring(0, 300))
-      console.log('[dashboard] geo:', JSON.stringify((companyData as any).geo_ranking)?.substring(0, 300))
-      console.log('[dashboard] weekly_actions:', JSON.stringify((companyData as any).weekly_actions)?.substring(0, 200))
-    }
-    console.log('[dashboard] tenders:', upcomingTendersRaw)
-    console.log('[dashboard] dc_table_rows:', dcTableRows, 'compWithTrends:', compWithTrends?.length)
-    console.log('[dashboard] trends table rows:', topTrendsRows?.length)
+    // ── Debug — readable from browser console via window.__dashDebug ──────────
+    console.log('[dashboard] data loaded — inspect window.__dashDebug')
 
     // ── SEO / GEO extraction — handles multiple possible structures ──────────
     let seoGeo: SeoGeoSummary | null = null
@@ -253,6 +241,22 @@ export default function AppDashboardPage() {
     }
 
     const topChannels = potentialChannels.slice(0, 3)
+
+    // ── Debug window object — read from browser console: window.__dashDebug ──
+    if (typeof window !== 'undefined') {
+      ;(window as any).__dashDebug = {
+        tenders: upcomingTendersRaw,
+        niche: (companyData as any)?.niche_opportunities,
+        competitorTrends: compWithTrends,
+        dc: potentialChannels,
+        dcTableRows,
+        industry_trends: (companyData as any)?.industry_trends,
+        competitor_trends: (companyData as any)?.competitor_trends,
+        seo_ranking: (companyData as any)?.seo_ranking,
+        geo_ranking: (companyData as any)?.geo_ranking,
+        weekly_actions: (companyData as any)?.weekly_actions,
+      }
+    }
 
     // ── Weekly actions — high priority first ─────────────────────────────────
     const weeklyActionsRaw = ((companyData as any)?.weekly_actions as { actions?: any[] } | null)?.actions || []
