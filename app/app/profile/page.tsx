@@ -451,6 +451,176 @@ export default function ProfilePage() {
       </Card>
 
       {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* SWOT                                                                 */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-primary" />ניתוח SWOT
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!swot ? (
+            <div className="flex flex-col items-center gap-3 py-8">
+              <p className="text-sm text-muted-foreground">הניתוח יתעדכן בסנכרון השבועי</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold text-green-800"><TrendingUp className="h-4 w-4" />חוזקות</h3>
+                <ul className="space-y-1.5">{swot.strengths.map((s, i) => <li key={i} className="flex items-start gap-2 text-sm text-green-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{s}</li>)}</ul>
+              </div>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold text-red-800"><TrendingDown className="h-4 w-4" />חולשות</h3>
+                <ul className="space-y-1.5">{swot.weaknesses.map((w, i) => <li key={i} className="flex items-start gap-2 text-sm text-red-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />{w}</li>)}</ul>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold text-blue-800"><Plus className="h-4 w-4" />הזדמנויות</h3>
+                <ul className="space-y-1.5">{swot.opportunities.map((o, i) => <li key={i} className="flex items-start gap-2 text-sm text-blue-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />{o}</li>)}</ul>
+              </div>
+              <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold text-yellow-800"><Minus className="h-4 w-4" />איומים</h3>
+                <ul className="space-y-1.5">{swot.threats.map((t, i) => <li key={i} className="flex items-start gap-2 text-sm text-yellow-800"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-500" />{t}</li>)}</ul>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* REVIEW ANALYSIS (includes Google Maps as first source)              */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />ניתוח ביקורות
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingReviewAnalysis ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>מחפש ומנתח ביקורות...</span>
+            </div>
+          ) : reviewAnalysis ? (
+            <div className="space-y-5 py-1">
+              {/* Rating + Maps link */}
+              <div className="flex flex-wrap items-center gap-3">
+                {reviewAnalysis.google_rating != null ? (
+                  <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
+                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-semibold">{reviewAnalysis.google_rating.toFixed(1)}</span>
+                    {reviewAnalysis.google_review_count != null && (
+                      <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
+                    )}
+                  </div>
+                ) : reviewAnalysis.not_found ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-sm text-amber-800">לא נמצא ברשומות Google Maps</p>
+                    <a
+                      href={reviewAnalysis.google_search_url || `https://www.google.com/search?q=${encodeURIComponent(companyName)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      חפש ידנית בגוגל
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
+                )}
+                {reviewAnalysis.google_maps_url && (
+                  <a
+                    href={reviewAnalysis.google_maps_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    צפה בביקורות בגוגל
+                  </a>
+                )}
+              </div>
+
+              {/* Sentiment bar */}
+              {reviewAnalysis.sentiment_score != null && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>ציון סנטימנט</span>
+                    <span className="font-medium">{reviewAnalysis.sentiment_score}/100</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${reviewAnalysis.sentiment_score >= 70 ? 'bg-green-500' : reviewAnalysis.sentiment_score >= 45 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                      style={{ width: `${reviewAnalysis.sentiment_score}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Summary */}
+              {reviewAnalysis.summary && (
+                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                  {reviewAnalysis.summary}
+                </div>
+              )}
+
+              {/* 3 columns: positives / negatives / opportunities */}
+              {(reviewAnalysis.positives?.length || reviewAnalysis.negatives?.length || reviewAnalysis.opportunities?.length) ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {reviewAnalysis.positives?.length ? (
+                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-green-700">✅ חוזקות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.positives.map((p, i) => (
+                          <li key={i} className="text-xs text-green-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{p}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {reviewAnalysis.negatives?.length ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-red-700">❌ חולשות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.negatives.map((n, i) => (
+                          <li key={i} className="text-xs text-red-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{n}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {reviewAnalysis.opportunities?.length ? (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-blue-700">💡 הזדמנויות</p>
+                      <ul className="space-y-1">
+                        {reviewAnalysis.opportunities.map((o, i) => (
+                          <li key={i} className="text-xs text-blue-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{o}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Recommended response */}
+              {reviewAnalysis.recommended_response && (
+                <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-1">
+                  <p className="text-xs font-semibold text-purple-700">💬 תגובה מומלצת לביקורות שליליות</p>
+                  <p className="text-xs text-purple-800">{reviewAnalysis.recommended_response}</p>
+                </div>
+              )}
+
+              {reviewAnalysis.fetchedAt && (
+                <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-4">לא נמצאו נתוני ביקורות</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
       {/* DEEP BUSINESS PROFILE SECTION                                       */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
 
@@ -807,177 +977,6 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* EXISTING SECTIONS                                                    */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-
-      {/* SWOT */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />ניתוח SWOT
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!swot ? (
-            <div className="flex flex-col items-center gap-3 py-8">
-              <p className="text-sm text-muted-foreground">הניתוח יתעדכן בסנכרון השבועי</p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-semibold text-green-800"><TrendingUp className="h-4 w-4" />חוזקות</h3>
-                <ul className="space-y-1.5">{swot.strengths.map((s, i) => <li key={i} className="flex items-start gap-2 text-sm text-green-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{s}</li>)}</ul>
-              </div>
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-semibold text-red-800"><TrendingDown className="h-4 w-4" />חולשות</h3>
-                <ul className="space-y-1.5">{swot.weaknesses.map((w, i) => <li key={i} className="flex items-start gap-2 text-sm text-red-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />{w}</li>)}</ul>
-              </div>
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-semibold text-blue-800"><Plus className="h-4 w-4" />הזדמנויות</h3>
-                <ul className="space-y-1.5">{swot.opportunities.map((o, i) => <li key={i} className="flex items-start gap-2 text-sm text-blue-700"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />{o}</li>)}</ul>
-              </div>
-              <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-semibold text-yellow-800"><Minus className="h-4 w-4" />איומים</h3>
-                <ul className="space-y-1.5">{swot.threats.map((t, i) => <li key={i} className="flex items-start gap-2 text-sm text-yellow-800"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-500" />{t}</li>)}</ul>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* REVIEW ANALYSIS (includes Google Maps as first source)              */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-primary" />ניתוח ביקורות
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingReviewAnalysis ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>מחפש ומנתח ביקורות...</span>
-            </div>
-          ) : reviewAnalysis ? (
-            <div className="space-y-5 py-1">
-              {/* Rating + Maps link */}
-              <div className="flex flex-wrap items-center gap-3">
-                {reviewAnalysis.google_rating != null ? (
-                  <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
-                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-                    <span className="text-sm font-semibold">{reviewAnalysis.google_rating.toFixed(1)}</span>
-                    {reviewAnalysis.google_review_count != null && (
-                      <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
-                    )}
-                  </div>
-                ) : reviewAnalysis.not_found ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                    <p className="text-sm text-amber-800">לא נמצא ברשומות Google Maps</p>
-                    <a
-                      href={reviewAnalysis.google_search_url || `https://www.google.com/search?q=${encodeURIComponent(companyName)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      חפש ידנית בגוגל
-                    </a>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
-                )}
-                {reviewAnalysis.google_maps_url && (
-                  <a
-                    href={reviewAnalysis.google_maps_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    צפה בביקורות בגוגל
-                  </a>
-                )}
-              </div>
-
-              {/* Sentiment bar */}
-              {reviewAnalysis.sentiment_score != null && (
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>ציון סנטימנט</span>
-                    <span className="font-medium">{reviewAnalysis.sentiment_score}/100</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${reviewAnalysis.sentiment_score >= 70 ? 'bg-green-500' : reviewAnalysis.sentiment_score >= 45 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                      style={{ width: `${reviewAnalysis.sentiment_score}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Summary */}
-              {reviewAnalysis.summary && (
-                <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
-                  {reviewAnalysis.summary}
-                </div>
-              )}
-
-              {/* 3 columns: positives / negatives / opportunities */}
-              {(reviewAnalysis.positives?.length || reviewAnalysis.negatives?.length || reviewAnalysis.opportunities?.length) ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {reviewAnalysis.positives?.length ? (
-                    <div className="rounded-lg border border-green-200 bg-green-50/50 p-3 space-y-1.5">
-                      <p className="text-xs font-semibold text-green-700">✅ חוזקות</p>
-                      <ul className="space-y-1">
-                        {reviewAnalysis.positives.map((p, i) => (
-                          <li key={i} className="text-xs text-green-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{p}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {reviewAnalysis.negatives?.length ? (
-                    <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-1.5">
-                      <p className="text-xs font-semibold text-red-700">❌ חולשות</p>
-                      <ul className="space-y-1">
-                        {reviewAnalysis.negatives.map((n, i) => (
-                          <li key={i} className="text-xs text-red-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{n}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {reviewAnalysis.opportunities?.length ? (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
-                      <p className="text-xs font-semibold text-blue-700">💡 הזדמנויות</p>
-                      <ul className="space-y-1">
-                        {reviewAnalysis.opportunities.map((o, i) => (
-                          <li key={i} className="text-xs text-blue-800 flex items-start gap-1.5"><span className="mt-0.5 shrink-0">•</span>{o}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {/* Recommended response */}
-              {reviewAnalysis.recommended_response && (
-                <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-1">
-                  <p className="text-xs font-semibold text-purple-700">💬 תגובה מומלצת לביקורות שליליות</p>
-                  <p className="text-xs text-purple-800">{reviewAnalysis.recommended_response}</p>
-                </div>
-              )}
-
-              {reviewAnalysis.fetchedAt && (
-                <p className="text-xs text-muted-foreground">עודכן: {new Date(reviewAnalysis.fetchedAt).toLocaleDateString('he-IL')}</p>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">לא נמצאו נתוני ביקורות</p>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }
