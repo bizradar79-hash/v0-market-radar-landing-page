@@ -64,6 +64,8 @@ interface ReviewAnalysis {
   google_rating?: number | null
   google_review_count?: number | null
   google_maps_url?: string | null
+  not_found?: boolean
+  google_search_url?: string | null
   fetchedAt?: string
   sentiment_score?: number | null
   summary?: string | null
@@ -871,18 +873,33 @@ export default function ProfilePage() {
                       <span className="text-xs text-muted-foreground">({reviewAnalysis.google_review_count.toLocaleString()} ביקורות)</span>
                     )}
                   </div>
+                ) : reviewAnalysis.not_found ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-sm text-amber-800">לא נמצא ברשומות Google Maps</p>
+                    <a
+                      href={reviewAnalysis.google_search_url || `https://www.google.com/search?q=${encodeURIComponent(companyName)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      חפש ידנית בגוגל
+                    </a>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">לא נמצא דף Google Maps</p>
                 )}
-                <a
-                  href={reviewAnalysis.google_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${companyName} ${companyWebsite}`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  {reviewAnalysis.google_maps_url ? 'צפה בביקורות בגוגל' : 'חפש בגוגל'}
-                </a>
+                {reviewAnalysis.google_maps_url && (
+                  <a
+                    href={reviewAnalysis.google_maps_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    צפה בביקורות בגוגל
+                  </a>
+                )}
               </div>
 
               {/* Sentiment bar */}

@@ -183,8 +183,10 @@ export default function CompetitorsPage() {
         setCompetitors(sorted)
       }
       // Auto-fetch ratings for ALL competitors with missing google_rating (background, fire-and-forget)
-      const needsRating = sorted.filter(c => c.google_rating == null && c.website)
-      needsRating.forEach(c => fetchGoogleRating(c))
+      // No website filter — fetch-competitor-rating falls back to Gemini when no website available
+      const needsRating = sorted.filter(c => c.google_rating == null)
+      // Stagger calls to avoid hammering the API (1 per second)
+      needsRating.forEach((c, i) => setTimeout(() => fetchGoogleRating(c), i * 1000))
       // Auto-fetch services description for competitors with empty/null services
       const needsServices = sorted.filter(c => !c.services || c.services === 'לא ידוע')
       needsServices.forEach(c => fetchMissingServices(c))

@@ -102,28 +102,38 @@ export async function POST(request: Request) {
 
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
-    // Strategy 1: name + website + phone
-    console.log(`[analyze-company-reviews] search 1: name="${companyName}" website="${website}" phone="${phone ?? 'none'}"`)
-    let placesData = await getPlaceDetails(companyName, website, phone)
+    // Build name variations to try (handles lawyers, professionals, reversed name order)
+    const nameParts = companyName.replace(/^(משרד |עורך דין |רואה חשבון |מהנדס )/u, '').trim()
+    const searchVariants = [
+      companyName,                                // e.g. "עורך דין דרור הראל"
+      nameParts,                                  // e.g. "דרור הראל"
+      city ? `${companyName} ${city}` : null,     // + city
+      city ? `${nameParts} ${city}` : null,       // short name + city
+      `${nameParts} עורך דין`,                   // short name + profession
+      `משרד עורך דין ${nameParts}`,              // office prefix
+    ].filter(Boolean) as string[]
 
-    // Strategy 2: name + city (if no result and city known)
-    if (!placesData && city) {
-      console.log(`[analyze-company-reviews] search 2: name+city="${companyName} ${city}" website="${website}"`)
-      placesData = await getPlaceDetails(`${companyName} ${city}`, website, phone)
+    let placesData = null
+    for (const variant of searchVariants) {
+      console.log(`[analyze-company-reviews] trying: name="${variant}" website="${website}"`)
+      placesData = await getPlaceDetails(variant, website, phone)
+      if (placesData) {
+        console.log(`[analyze-company-reviews] HIT with variant="${variant}" rating=${placesData.google_rating}`)
+        break
+      }
     }
 
-    // Strategy 3: name only (no phone — last resort)
-    if (!placesData) {
-      console.log(`[analyze-company-reviews] search 3: name="${companyName}" (no phone)`)
-      placesData = await getPlaceDetails(companyName, website, undefined)
-    }
+    console.log(`[analyze-company-reviews] final: place_id=${placesData?.place_id ?? 'none'} rating=${placesData?.google_rating ?? 'none'}`)
 
-    console.log(`[analyze-company-reviews] result: place_id=${placesData?.place_id ?? 'none'} rating=${placesData?.google_rating ?? 'none'}`)
+    // Build Google search fallback URL
+    const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(companyName + (website ? ' ' + website : ''))}`
 
     const result: Record<string, any> = {
       google_rating: placesData?.google_rating ?? null,
       google_review_count: placesData?.google_review_count ?? null,
       google_maps_url: placesData?.google_maps_url ?? null,
+      not_found: !placesData,
+      google_search_url: googleSearchUrl,
       fetchedAt: new Date().toISOString(),
     }
 
