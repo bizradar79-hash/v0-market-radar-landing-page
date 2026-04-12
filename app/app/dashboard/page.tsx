@@ -270,7 +270,7 @@ export default function AppDashboardPage() {
         niche: nicheRaw,
         nicheOpps: nicheOpps.slice(0, 5),
         competitorTrends: compTrendsData,
-        compEntries: compEntries.slice(0, 3),
+        compWithTrends: (compWithTrends || []).slice(0, 3),
         dc: potentialChannels,
         dcTableRows,
         industry_trends: (companyData as any)?.industry_trends,
