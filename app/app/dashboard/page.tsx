@@ -57,7 +57,7 @@ interface DashboardData {
   recentNews: Array<{ title: string; source: string; published_at: string; url: string }>
   topChannels: string[]
   weeklyActions: Array<{ id: string; title: string; category: string; priority: string }>
-  competitorTrendItems: Array<{ competitor_name: string; keyword: string }>
+  competitorTrendItems: Array<{ competitor: string; trend: string; activity: string }>
   lastAnalyzed: string | null
   companyInfo: CompanyInfo | null
   seoGeo: SeoGeoSummary | null
@@ -253,22 +253,15 @@ export default function AppDashboardPage() {
       .map((a: any) => ({ id: a.id || '', title: a.title || '', category: a.category || '', priority: a.priority || '' }))
 
     // ── Competitor trend items — read from company.competitor_trends JSONB ────
-    const competitorTrendItems: Array<{ competitor_name: string; keyword: string }> = []
     const compTrendsData = (companyData as any)?.competitor_trends as any
-    const compEntries: any[] =
-      compTrendsData?.competitor_data ||
-      compTrendsData?.competitors ||
-      (Array.isArray(compTrendsData) ? compTrendsData : [])
-    for (const entry of compEntries.slice(0, 3)) {
-      const name = entry.competitor_name || entry.name || ''
-      const topKw =
-        entry.trends?.[0]?.keyword ||
-        entry.trends?.[0]?.name ||
-        entry.keywords?.[0] ||
-        entry.keyword ||
-        ''
-      if (name && topKw) competitorTrendItems.push({ competitor_name: name, keyword: topKw })
-    }
+    const competitorTrendItems = ((compTrendsData?.competitor_data || []) as any[])
+      .slice(0, 3)
+      .map((c: any) => ({
+        competitor: c.competitor_name || c.name || '',
+        trend: c.trending_topics?.[0] || c.trends?.[0]?.keyword || c.keywords?.[0] || c.keyword || '',
+        activity: (c.new_activity || c.activity || '').substring(0, 60),
+      }))
+      .filter((c: any) => c.competitor && c.trend)
 
     // ── Debug window object — window.__dashDebug in browser console ───────────
     if (typeof window !== 'undefined') {
@@ -695,11 +688,16 @@ export default function AppDashboardPage() {
                   {data!.competitorTrendItems.length > 0 ? (
                     <div className="space-y-2">
                       {data!.competitorTrendItems.map((item, i) => (
-                        <div key={i} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                          <p className="text-sm font-medium truncate">{item.competitor_name}</p>
-                          <Badge variant="outline" className="border-blue-200 text-blue-600 shrink-0 ml-2">
-                            {item.keyword}
-                          </Badge>
+                        <div key={i} className="rounded-lg bg-muted/50 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold truncate">{item.competitor}</p>
+                            <Badge variant="outline" className="border-blue-200 text-blue-600 shrink-0 text-xs">
+                              {item.trend}
+                            </Badge>
+                          </div>
+                          {item.activity && (
+                            <p className="mt-1 text-xs text-muted-foreground line-clamp-1">{item.activity}</p>
+                          )}
                         </div>
                       ))}
                     </div>
