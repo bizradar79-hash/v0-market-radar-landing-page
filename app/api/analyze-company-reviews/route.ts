@@ -28,13 +28,16 @@ async function fetchPlaceReviews(placeId: string): Promise<Array<{ text: string;
 
 async function analyzeReviewsWithGemini(companyName: string, rating: number, reviewCount: number, reviews: Array<{ text: string; rating: number }>): Promise<any | null> {
   const geminiKey = process.env.GEMINI_API_KEY
-  if (!geminiKey || reviews.length === 0) return null
-  try {
-    const prompt = `אתה יועץ עסקי. נתח את ביקורות הגוגל של "${companyName}" וספק תובנות מקצועיות.
+  if (!geminiKey) return null
+
+  // Build prompt — use real reviews if available, otherwise base analysis on rating alone
+  const hasReviews = reviews.length > 0
+  const prompt = hasReviews
+    ? `אתה יועץ עסקי. נתח את ביקורות הגוגל של "${companyName}" וספק תובנות מקצועיות.
 
 דירוג: ${rating}/5 (${reviewCount} ביקורות)
 ביקורות:
-${reviews.map((r, i) => `${i + 1}. ${r.text}`).join('\n')}
+${reviews.slice(0, 10).map((r, i) => `${i + 1}. ${r.text}`).join('\n')}
 
 החזר JSON בלבד:
 {
@@ -44,6 +47,23 @@ ${reviews.map((r, i) => `${i + 1}. ${r.text}`).join('\n')}
   "negatives": ["חולשה 1", "חולשה 2"],
   "opportunities": ["הזדמנות לשיפור 1", "הזדמנות 2"],
   "recommended_response": "תגובה מומלצת לביקורות שליליות"
+}
+
+CRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
+    : `אתה יועץ עסקי. נתח את המוניטין הגוגל של "${companyName}" על בסיס הדירוג הממוצע.
+
+דירוג: ${rating}/5 (${reviewCount} ביקורות בגוגל מאפס)
+
+בהתבסס על הדירוג הזה, ספק ניתוח עסקי מקצועי.
+
+החזר JSON בלבד:
+{
+  "sentiment_score": 0,
+  "summary": "תמצית 2-3 משפטים על המוניטין",
+  "positives": ["חוזק 1", "חוזק 2", "חוזק 3"],
+  "negatives": ["חולשה 1", "חולשה 2"],
+  "opportunities": ["הזדמנות לשיפור 1", "הזדמנות 2"],
+  "recommended_response": "המלצה לניהול מוניטין מקוון"
 }
 
 CRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
@@ -137,25 +157,27 @@ export async function POST(request: Request) {
       fetchedAt: new Date().toISOString(),
     }
 
-    // Fetch and analyze reviews if we have a real place_id
+    // Fetch reviews + run AI analysis whenever we have a rating (with or without review texts)
     if (placesData?.place_id && placesData.google_rating != null) {
       const reviews = await fetchPlaceReviews(placesData.place_id)
       if (reviews.length > 0) {
         result.review_texts = reviews.map(r => ({ text: r.text, rating: r.rating, author: r.author }))
-        const analysis = await analyzeReviewsWithGemini(
-          companyName,
-          placesData.google_rating,
-          placesData.google_review_count ?? 0,
-          reviews
-        )
-        if (analysis) {
-          result.sentiment_score = analysis.sentiment_score ?? null
-          result.summary = analysis.summary ?? null
-          result.positives = analysis.positives ?? []
-          result.negatives = analysis.negatives ?? []
-          result.opportunities = analysis.opportunities ?? []
-          result.recommended_response = analysis.recommended_response ?? null
-        }
+      }
+      console.log(`[analyze-company-reviews] reviews fetched: ${reviews.length}, running AI analysis`)
+      // Run Gemini analysis — works with real reviews OR from rating alone as fallback
+      const analysis = await analyzeReviewsWithGemini(
+        companyName,
+        placesData.google_rating,
+        placesData.google_review_count ?? 0,
+        reviews
+      )
+      if (analysis) {
+        result.sentiment_score = analysis.sentiment_score ?? null
+        result.summary = analysis.summary ?? null
+        result.positives = analysis.positives ?? []
+        result.negatives = analysis.negatives ?? []
+        result.opportunities = analysis.opportunities ?? []
+        result.recommended_response = analysis.recommended_response ?? null
       }
     }
 
