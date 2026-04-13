@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { callModelTwoStage } from '@/lib/call-model'
+import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
         .replace(/\{\{target_audience\}\}/g, targetAudience)
         .replace(/\{\{competitors\}\}/g, competitorNames)
 
-      const finalPrompt = companyContext + resolvedPrompt
+      const finalPrompt = resolveDateVars(companyContext + resolvedPrompt)
 
       try {
         // Two-stage pipeline: Gemini finds content → xAI finds URLs

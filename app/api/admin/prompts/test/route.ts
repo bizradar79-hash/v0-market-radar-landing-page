@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { callModel, callModelTwoStage } from '@/lib/call-model'
+import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const finalPrompt = companyContext + resolvedPrompt
+    const finalPrompt = resolveDateVars(companyContext + resolvedPrompt)
     console.log('FINAL PROMPT:', finalPrompt.substring(0, 400))
 
     const start = Date.now()

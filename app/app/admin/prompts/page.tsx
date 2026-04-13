@@ -577,6 +577,23 @@ export default function PromptsPage() {
                       <span className="text-blue-600">{"{{"+"competitors"+"}}"}</span>
                       <span className="text-muted-foreground">שמות המתחרים</span>
                     </div>
+                    <div className="border-t border-border mt-2 pt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+                      <span className="col-span-2 text-muted-foreground font-sans text-xs mb-0.5">📅 משתני תאריך</span>
+                      <span className="text-blue-600">{"{{"+"today"+"}}"}</span>
+                      <span className="text-muted-foreground">תאריך היום (למשל: 13/04/2026)</span>
+                      <span className="text-blue-600">{"{{"+"today-7"+"}}"}</span>
+                      <span className="text-muted-foreground">לפני 7 ימים</span>
+                      <span className="text-blue-600">{"{{"+"today-30"+"}}"}</span>
+                      <span className="text-muted-foreground">לפני 30 ימים</span>
+                      <span className="text-blue-600">{"{{"+"today+7"+"}}"}</span>
+                      <span className="text-muted-foreground">בעוד 7 ימים</span>
+                      <span className="text-blue-600">{"{{"+"today+30"+"}}"}</span>
+                      <span className="text-muted-foreground">בעוד 30 ימים</span>
+                      <span className="text-blue-600">{"{{"+"month"+"}}"}</span>
+                      <span className="text-muted-foreground">חודש נוכחי בעברית (למשל: אפריל 2026)</span>
+                      <span className="text-blue-600">{"{{"+"year"+"}}"}</span>
+                      <span className="text-muted-foreground">שנה נוכחית (למשל: 2026)</span>
+                    </div>
                     <p className="text-muted-foreground mt-2 text-xs not-italic">
                       * המשתנים מוחלפים אוטומטית בנתוני החברה הנבחרת בזמן הרצת הבדיקה
                     </p>
