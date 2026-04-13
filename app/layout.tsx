@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Heebo } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { CookieBanner } from '@/components/cookie-banner'
+import { AccessibilityWidget } from '@/components/accessibility-widget'
 import './globals.css'
 
 const heebo = Heebo({ 
@@ -42,6 +43,7 @@ export default function RootLayout({
       <body className={`${heebo.variable} font-sans antialiased`}>
         {children}
         <CookieBanner />
+        <AccessibilityWidget />
         <Analytics />
       </body>
     </html>

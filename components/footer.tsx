@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { Radar } from "lucide-react"
 
 const footerLinks = {
@@ -31,10 +32,10 @@ const footerLinks = {
   legal: {
     title: "משפטי",
     links: [
-      { label: "תנאי שימוש", href: "#" },
-      { label: "מדיניות פרטיות", href: "#" },
+      { label: "תנאי שימוש", href: "/terms" },
+      { label: "מדיניות פרטיות", href: "/privacy" },
       { label: "אבטחה", href: "#" },
-      { label: "נגישות", href: "#" },
+      { label: "הצהרת נגישות", href: "/accessibility" },
     ],
   },
 }
@@ -93,12 +94,12 @@ export default function Footer() {
               <ul className="space-y-3">
                 {section.links.map((link, linkIndex) => (
                   <li key={linkIndex}>
-                    <a
+                    <Link
                       href={link.href}
                       className="text-sm text-gray-400 transition-colors hover:text-white"
                     >
                       {link.label}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -111,9 +112,15 @@ export default function Footer() {
           <p className="text-sm text-gray-400">
             2026 Market Radar Israel. כל הזכויות שמורות.
           </p>
-          <p className="text-sm text-gray-400">
-            נבנה באהבה בתל אביב
-          </p>
+          <div className="flex items-center gap-4">
+            <Link href="/accessibility" className="text-sm text-gray-400 transition-colors hover:text-white">
+              הצהרת נגישות
+            </Link>
+            <span className="text-gray-600">|</span>
+            <p className="text-sm text-gray-400">
+              נבנה באהבה בתל אביב
+            </p>
+          </div>
         </div>
       </div>
     </footer>
