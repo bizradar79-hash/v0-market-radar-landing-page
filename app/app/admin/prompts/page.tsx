@@ -202,6 +202,7 @@ export default function PromptsPage() {
   const [sbCompanyId, setSbCompanyId] = useState('')
   const [sandboxVersionId, setSandboxVersionId] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<any | null>(null)
+  const [twoStage, setTwoStage] = useState(true)
 
   const { toast } = useToast()
 
@@ -355,6 +356,7 @@ export default function PromptsPage() {
           company_id: sbCompanyId || null,
           module: activeModule,
           version_id: versionId,
+          two_stage: twoStage,
         }),
       })
       const data = await res.json()
@@ -544,13 +546,19 @@ export default function PromptsPage() {
                   dir="rtl"
                 />
                 {activeModule === 'tenders' && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-700">
-                    <span className="text-base">🔄</span>
-                    <span>
-                      <strong>חיפוש דו-שלבי: Gemini + xAI</strong> —
-                      שלב 1: Gemini מוצא תוכן מכרזים (ללא URLs).
-                      שלב 2: xAI מחפש את הקישור הרשמי לכל מכרז.
-                      הספק/מודל הנבחר למעלה אינו בשימוש במכרזים.
+                  <div className="mt-2 flex items-center gap-2 p-3 bg-muted rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="two-stage"
+                      checked={twoStage}
+                      onChange={e => setTwoStage(e.target.checked)}
+                      className="w-4 h-4 cursor-pointer"
+                    />
+                    <label htmlFor="two-stage" className="text-sm font-medium cursor-pointer">
+                      🔄 חיפוש דו-שלבי (Gemini מוצא מכרזים + xAI מוצא קישורים)
+                    </label>
+                    <span className="text-xs text-muted-foreground mr-auto">
+                      {twoStage ? 'איטי יותר אבל קישורים אמינים יותר' : 'מהיר, מודל אחד בלבד'}
                     </span>
                   </div>
                 )}

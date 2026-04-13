@@ -18,7 +18,7 @@ function adminSupabase() {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { prompt: rawPrompt, model_provider, model_name, company_id, module, version_id } = body
+    const { prompt: rawPrompt, model_provider, model_name, company_id, module, version_id, two_stage } = body
 
     if (!rawPrompt || !model_provider || !model_name) {
       return Response.json({ error: 'prompt, model_provider, model_name required' }, { status: 400 })
@@ -81,12 +81,12 @@ export async function POST(req: Request) {
     console.log('FINAL PROMPT:', finalPrompt.substring(0, 400))
 
     const start = Date.now()
-    // Tenders use two-stage pipeline (Gemini content + xAI URLs)
-    const rawText = module === 'tenders'
+    const useTwoStage = module === 'tenders' && two_stage !== false
+    const rawText = useTwoStage
       ? await callModelTwoStage(finalPrompt)
       : await callModel(model_provider, model_name, finalPrompt)
     const latency_ms = Date.now() - start
-    const pipeline = module === 'tenders' ? 'gemini+xai (two-stage)' : `${model_provider}/${model_name}`
+    const pipeline = useTwoStage ? 'gemini+xai (two-stage)' : `${model_provider}/${model_name}`
     console.log(`[prompts/test] done, pipeline=${pipeline}, latency_ms:`, latency_ms, 'raw_text[:200]:', rawText.substring(0, 200))
 
     // Parse JSON — strip markdown fences first, then try regex extraction
