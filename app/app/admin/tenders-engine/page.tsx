@@ -203,6 +203,9 @@ export default function TendersEnginePage() {
   // Detail panel
   const [selectedTender, setSelectedTender] = useState<TenderPoolItem | null>(null)
 
+  // Scan logs
+  const [scanLogs, setScanLogs] = useState<string[] | null>(null)
+
   // Source modal
   const [sourceModalOpen, setSourceModalOpen] = useState(false)
   const [editingSource, setEditingSource] = useState<TenderSource | null>(null)
@@ -238,6 +241,13 @@ export default function TendersEnginePage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scan failed')
+      // Collect all logs from all scanned sources
+      const allLogs: string[] = []
+      for (const r of data.results || []) {
+        if (r.logs) allLogs.push(...r.logs)
+      }
+      if (allLogs.length > 0) setScanLogs(allLogs)
+
       toast({
         title: 'סריקה הושלמה',
         description: data.results?.map((r: any) => `${r.source}: ${r.found ?? 0} נמצאו`).join(', '),
@@ -693,6 +703,21 @@ export default function TendersEnginePage() {
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Scan logs panel */}
+      {scanLogs && scanLogs.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">לוגי סריקה אחרונה</h3>
+            <Button size="sm" variant="ghost" onClick={() => setScanLogs(null)}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <pre className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3 max-h-80 overflow-y-auto whitespace-pre-wrap" dir="ltr">
+            {scanLogs.join('\n')}
+          </pre>
         </div>
       )}
 

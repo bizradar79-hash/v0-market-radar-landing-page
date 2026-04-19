@@ -69,6 +69,13 @@ async function runScraper(source: TenderSource): Promise<TenderPoolItem[]> {
 }
 
 async function scanSource(source: TenderSource, serviceClient: any) {
+  // Capture console.log output during scan
+  const logs: string[] = []
+  const origLog = console.log
+  const origWarn = console.warn
+  console.log = (...args: any[]) => { logs.push(args.map(String).join(' ')); origLog(...args) }
+  console.warn = (...args: any[]) => { logs.push('[WARN] ' + args.map(String).join(' ')); origWarn(...args) }
+
   // Mark as running
   await serviceClient
     .from('tender_sources')
@@ -80,6 +87,7 @@ async function scanSource(source: TenderSource, serviceClient: any) {
 
     // Upsert tenders into tender_pool
     let upsertCount = 0
+    const upsertErrors: string[] = []
     for (const item of items) {
       const { error } = await serviceClient
         .from('tender_pool')
@@ -102,7 +110,15 @@ async function scanSource(source: TenderSource, serviceClient: any) {
         }, {
           onConflict: 'source_id,external_id',
         })
-      if (!error) upsertCount++
+      if (error) {
+        upsertErrors.push(`${item.external_id}: ${error.message}`)
+      } else {
+        upsertCount++
+      }
+    }
+
+    if (upsertErrors.length > 0) {
+      logs.push(`[scan] Upsert errors: ${upsertErrors.slice(0, 5).join('; ')}`)
     }
 
     // Close expired tenders
@@ -131,8 +147,9 @@ async function scanSource(source: TenderSource, serviceClient: any) {
       })
       .eq('id', source.id)
 
-    return { source: source.name, found: items.length, upserted: upsertCount, total: count }
+    return { source: source.name, found: items.length, upserted: upsertCount, total: count, logs }
   } catch (err: any) {
+    logs.push(`[scan] FATAL: ${err?.message}`)
     await serviceClient
       .from('tender_sources')
       .update({
@@ -142,7 +159,10 @@ async function scanSource(source: TenderSource, serviceClient: any) {
       })
       .eq('id', source.id)
 
-    return { source: source.name, error: err?.message }
+    return { source: source.name, error: err?.message, logs }
+  } finally {
+    console.log = origLog
+    console.warn = origWarn
   }
 }
 

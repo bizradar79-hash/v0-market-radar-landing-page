@@ -1,180 +1,249 @@
 import type { TenderPoolItem } from './types'
 
 const LIST_URL = 'https://www.mashcal.co.il/published-tenders/'
-const JOB_KEYWORDS = ['דרוש/ה', 'דרושה', 'דרוש', 'משרה', 'כוח אדם', 'גיוס']
+const JOB_KEYWORDS = ['דרוש/ה', 'דרוש ', 'דרושים', 'דרושה', 'משרה', 'עו"ס', 'כוח אדם', 'גיוס']
+const PROCUREMENT_KEYWORDS = ['שירותים', 'רכש', 'אספקה', 'עבודות', 'הפעלה', 'ייעוץ', 'ביצוע', 'השכרה', 'מתן', 'שיקום', 'אחזקה']
+
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml',
+  'Accept-Language': 'he-IL,he;q=0.9,en-US;q=0.8',
+}
 
 function parseDate(text: string): string | undefined {
   const match = text.match(/(\d{1,2})[./](\d{1,2})[./](\d{2,4})/)
-  if (match) {
-    let [, d, m, y] = match
-    if (y.length === 2) y = '20' + y
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-  }
-  return undefined
+  if (!match) return undefined
+  let [, d, m, y] = match
+  if (y.length === 2) y = '20' + y
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
 }
 
 function isJobPosting(text: string): boolean {
   return JOB_KEYWORDS.some(kw => text.includes(kw))
 }
 
-export async function scrapeMashcalPdfs(): Promise<TenderPoolItem[]> {
-  const tenders: TenderPoolItem[] = []
+function isProcurement(text: string): boolean {
+  return PROCUREMENT_KEYWORDS.some(kw => text.includes(kw))
+}
 
-  // Step 1: Fetch the tenders listing page
+export async function scrapeMashcalPdfs(): Promise<TenderPoolItem[]> {
+  const logs: string[] = []
+  const log = (msg: string) => { console.log(msg); logs.push(msg) }
+
+  const tenders: TenderPoolItem[] = []
+  const today = new Date().toISOString().split('T')[0]
+
+  // ── Step 1: Fetch list page and extract PDF URLs ───────────────────────
   let html: string
   try {
     const res = await fetch(LIST_URL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
-      },
+      headers: HEADERS,
       signal: AbortSignal.timeout(15000),
     })
-    if (!res.ok) {
-      console.warn(`[mashcal-pdf] List page returned ${res.status}`)
-      return []
-    }
+    log(`[mashcal] list page status: ${res.status}`)
+    if (!res.ok) return tenders
     html = await res.text()
-    console.log(`[mashcal-pdf] List page HTML length: ${html.length}`)
+    log(`[mashcal] list page size: ${html.length}`)
   } catch (err: any) {
-    console.warn('[mashcal-pdf] Failed to fetch list page:', err?.message)
-    return []
+    log(`[mashcal] list page FAILED: ${err?.message}`)
+    return tenders
   }
 
-  // Step 2: Extract PDF links — try multiple patterns
-  const pdfUrls: string[] = []
-  // Pattern 1: meshek-NN-2026.pdf
-  const pdfRegex1 = /href="([^"]*meshek-\d+-2026\.pdf[^"]*)"/gi
-  // Pattern 2: any PDF link on the page
-  const pdfRegex2 = /href="([^"]*\.pdf[^"]*)"/gi
-  // Pattern 3: links with "מכרזים" in anchor text
-  const pdfRegex3 = /href="([^"]+)"[^>]*>[^<]*(?:מכרז|meshek)[^<]*/gi
+  // Match PDFs: href="https://www.mashcal.co.il/media/.../meshek-NN-YYYY.pdf"
+  const pdfRegex = /href="(https?:\/\/www\.mashcal\.co\.il\/media\/[^"]+\/meshek-(\d+)-(\d+)\.pdf)"/gi
+  const matches = [...html.matchAll(pdfRegex)]
+  log(`[mashcal] PDF regex matches: ${matches.length}`)
 
-  const seenUrls = new Set<string>()
-  for (const regex of [pdfRegex1, pdfRegex2, pdfRegex3]) {
-    let match
-    while ((match = regex.exec(html)) !== null) {
-      let pdfUrl = match[1]
-      if (!pdfUrl.endsWith('.pdf')) continue
-      if (!pdfUrl.startsWith('http')) {
-        pdfUrl = new URL(pdfUrl, LIST_URL).href
-      }
-      if (seenUrls.has(pdfUrl)) continue
-      seenUrls.add(pdfUrl)
-      pdfUrls.push(pdfUrl)
+  if (matches.length === 0) {
+    // Fallback: try any PDF link
+    const fallbackRegex = /href="([^"]*meshek[^"]*\.pdf)"/gi
+    const fallbackMatches = [...html.matchAll(fallbackRegex)]
+    log(`[mashcal] Fallback PDF matches: ${fallbackMatches.length}`)
+
+    // Also log a snippet of the HTML around "meshek" or "pdf" for debugging
+    const meshekIdx = html.indexOf('meshek')
+    if (meshekIdx > -1) {
+      log(`[mashcal] HTML near "meshek": ${html.substring(Math.max(0, meshekIdx - 100), meshekIdx + 200)}`)
+    }
+    const pdfIdx = html.indexOf('.pdf')
+    if (pdfIdx > -1) {
+      log(`[mashcal] HTML near ".pdf": ${html.substring(Math.max(0, pdfIdx - 100), pdfIdx + 100)}`)
+    }
+
+    for (const m of fallbackMatches) {
+      let url = m[1]
+      if (!url.startsWith('http')) url = new URL(url, LIST_URL).href
+      const numMatch = url.match(/meshek-(\d+)-(\d+)/)
+      matches.push([m[0], url, numMatch?.[1] || '0', numMatch?.[2] || '2026'] as unknown as RegExpExecArray)
     }
   }
 
-  console.log(`[mashcal-pdf] Found PDFs: ${pdfUrls.length}. Processing: ${pdfUrls.slice(0, 3).map(u => u.split('/').pop()).join(', ')}`)
+  // Sort by year desc then pub number desc, take top 3
+  const pdfs = matches
+    .map(m => ({ url: m[1], pubNum: parseInt(m[2]), year: parseInt(m[3]) }))
+    .sort((a, b) => b.year - a.year || b.pubNum - a.pubNum)
+    .slice(0, 3)
 
-  // Step 3: Process the 3 most recent PDFs — always process, use upsert
-  for (const pdfUrl of pdfUrls.slice(0, 3)) {
-    const pdfFilename = pdfUrl.split('/').pop() || pdfUrl
-    const pdfId = pdfFilename.replace(/\.pdf$/i, '')
+  log(`[mashcal] Processing ${pdfs.length} PDFs: ${pdfs.map(p => `meshek-${p.pubNum}-${p.year}`).join(', ')}`)
 
+  if (pdfs.length === 0) {
+    log('[mashcal] No PDFs found, aborting')
+    return tenders
+  }
+
+  // ── Step 2: Download and parse each PDF ────────────────────────────────
+  for (const pdf of pdfs) {
     try {
-      console.log(`[mashcal-pdf] Downloading: ${pdfFilename}`)
-      const pdfRes = await fetch(pdfUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      log(`[mashcal] Downloading meshek-${pdf.pubNum}-${pdf.year}...`)
+      const pdfRes = await fetch(pdf.url, {
+        headers: { ...HEADERS, 'Accept': 'application/pdf' },
         signal: AbortSignal.timeout(30000),
       })
-      if (!pdfRes.ok) {
-        console.warn(`[mashcal-pdf] PDF download failed: ${pdfRes.status} for ${pdfFilename}`)
-        continue
-      }
+      log(`[mashcal] PDF ${pdf.pubNum} status: ${pdfRes.status}`)
+      if (!pdfRes.ok) continue
 
       const buffer = Buffer.from(await pdfRes.arrayBuffer())
-      console.log(`[mashcal-pdf] PDF buffer size: ${buffer.length}`)
+      log(`[mashcal] PDF ${pdf.pubNum} buffer: ${buffer.length} bytes`)
 
       const pdfParse = (await import('pdf-parse')).default
       const parsed = await pdfParse(buffer)
       const text = parsed.text
-      console.log(`[mashcal-pdf] PDF text length: ${text.length}, sample: ${text.substring(0, 200)}`)
+      log(`[mashcal] PDF ${pdf.pubNum} text: ${text.length} chars`)
+      log(`[mashcal] PDF ${pdf.pubNum} sample: ${text.substring(0, 500).replace(/\n/g, '\\n')}`)
 
+      // ── Step 3: Parse tender rows ────────────────────────────────────
       const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean)
-      console.log(`[mashcal-pdf] Total lines: ${lines.length}`)
+      log(`[mashcal] PDF ${pdf.pubNum} lines: ${lines.length}`)
 
-      const today = new Date().toISOString().split('T')[0]
       let foundInPdf = 0
+      let skippedJob = 0
+      let skippedNoProcurement = 0
+      let skippedPastDeadline = 0
 
-      // Parse each line looking for tender data
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]
 
+        // Skip very short lines (page numbers, headers)
+        if (line.length < 8) continue
+
         // Skip job postings
-        if (isJobPosting(line)) continue
+        if (isJobPosting(line)) { skippedJob++; continue }
 
-        // Skip very short or very long lines (headers, footers)
-        if (line.length < 10 || line.length > 500) continue
+        // Find dates in line
+        const dateMatches = [...line.matchAll(/(\d{1,2}[./]\d{1,2}[./]\d{2,4})/g)]
+        if (dateMatches.length === 0) continue
 
-        // Look for lines with dates (potential tender rows)
-        const allDates = [...line.matchAll(/(\d{1,2}[./]\d{1,2}[./]\d{2,4})/g)]
-        if (allDates.length === 0) continue
-
-        // Get the last date as deadline (Hebrew RTL: deadline is usually rightmost/last)
-        const deadlineStr = parseDate(allDates[allDates.length - 1][1])
+        // The last date is usually the deadline
+        const deadlineStr = parseDate(dateMatches[dateMatches.length - 1][1])
         if (!deadlineStr) continue
 
         // Skip past deadlines
-        if (deadlineStr < today) continue
+        if (deadlineStr < today) { skippedPastDeadline++; continue }
 
-        // Get publish date if there are multiple dates
-        const publishDateStr = allDates.length > 1 ? parseDate(allDates[0][1]) : undefined
+        // Check procurement keywords in this line + adjacent lines
+        const contextBlock = [
+          lines[i - 1] || '',
+          line,
+          lines[i + 1] || '',
+        ].join(' ')
 
-        // Try to extract tender ID: XX/XXXX pattern or standalone number
-        const idMatch = line.match(/(\d{1,4}\/\d{4})/) || line.match(/(\d{4,8})/)
-        const tenderId = idMatch?.[1] || `${pdfId}-L${i}`
+        if (!isProcurement(contextBlock)) { skippedNoProcurement++; continue }
 
-        // Extract title: remove dates, numbers, and take the meaningful text
-        let title = line
-          .replace(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/g, '')  // remove dates
-          .replace(/\d{1,4}\/\d{4}/g, '')  // remove ID patterns
-          .replace(/₪[\d,.]+/g, '')  // remove prices
-          .replace(/\s{2,}/g, ' ')
-          .trim()
+        // Extract tender number: XX/YYYY or XX/YY or XX-YYYY
+        const tenderNumMatch = line.match(/(\d{1,4}[/\-]\d{2,4})/)
+        const tenderNum = tenderNumMatch?.[1] || `L${i}`
 
-        // If title is too short, try combining with adjacent lines
-        if (title.length < 5) {
-          const prevLine = lines[i - 1] || ''
-          const nextLine = lines[i + 1] || ''
-          title = [prevLine, title, nextLine]
-            .filter(l => l.length > 3 && l.length < 200 && !l.match(/^\d+$/))
-            .join(' - ')
-            .trim()
-        }
-
-        if (!title || title.length < 3) title = `מכרז ${tenderId}`
-
-        // Publisher: look in previous lines for an authority name
+        // Extract authority/publisher from beginning of line or previous lines
         let publisher: string | undefined
-        for (let j = Math.max(0, i - 3); j < i; j++) {
-          const prev = lines[j]
-          // Authority names are usually short lines without dates
-          if (prev.length > 5 && prev.length < 80 && !prev.match(/\d{1,2}[./]\d{1,2}/) && !isJobPosting(prev)) {
-            publisher = prev
-            break
+        // In RTL PDF text, the authority name often appears before the tender number
+        if (tenderNumMatch) {
+          const beforeNum = line.substring(0, tenderNumMatch.index).trim()
+          if (beforeNum.length > 3 && beforeNum.length < 80) {
+            publisher = beforeNum
+          }
+        }
+        // Fallback: look at previous lines for authority names
+        if (!publisher) {
+          for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+            const prev = lines[j]
+            if (prev.length > 3 && prev.length < 80 &&
+                !prev.match(/\d{1,2}[./]\d{1,2}/) &&
+                !prev.match(/^\d+$/) &&
+                !isJobPosting(prev)) {
+              publisher = prev
+              break
+            }
           }
         }
 
+        // Extract title: the main descriptive text
+        let title = line
+          .replace(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/g, '')   // remove dates
+          .replace(/\d{1,4}[/\-]\d{2,4}/g, '')              // remove tender numbers
+          .replace(/₪[\d,. ]+/g, '')                         // remove prices
+          .replace(/\d{2,3}-\d{7}/g, '')                     // remove phone numbers
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+
+        // If title too short, combine with next line
+        if (title.length < 5 && i + 1 < lines.length) {
+          const nextLine = lines[i + 1]
+          if (nextLine.length > 5 && nextLine.length < 200 && !nextLine.match(/^\d+$/)) {
+            title = `${title} ${nextLine}`.trim()
+          }
+        }
+
+        if (!title || title.length < 3) title = `מכרז ${tenderNum}`
+
+        // Remove publisher from title if it appears there
+        if (publisher && title.startsWith(publisher)) {
+          title = title.substring(publisher.length).trim()
+        }
+
+        // Extract budget if present
+        const budgetMatch = line.match(/₪([\d,. ]+)/) || line.match(/([\d,]+)\s*₪/)
+        const budget = budgetMatch ? `₪${budgetMatch[1].trim()}` : undefined
+
+        // Publish date (first date if multiple)
+        const publishDateStr = dateMatches.length > 1 ? parseDate(dateMatches[0][1]) : undefined
+
+        const externalId = `mashcal-${pdf.pubNum}-${tenderNum}`
+
         tenders.push({
-          external_id: `mashcal-${tenderId}`,
+          external_id: externalId,
           title,
           publisher,
-          deadline: deadlineStr,
-          publish_date: publishDateStr,
-          url: `${pdfUrl}#tender-${tenderId}`,
           category: 'רשויות מקומיות',
-          raw_data: { pdf_url: pdfUrl, pdf_file: pdfFilename, line_index: i, raw_line: line },
+          publish_date: publishDateStr,
+          deadline: deadlineStr,
+          url: pdf.url,
+          budget,
+          raw_data: {
+            pdf_url: pdf.url,
+            pub_number: pdf.pubNum,
+            year: pdf.year,
+            line_index: i,
+            full_line: line,
+          },
         })
         foundInPdf++
       }
 
-      console.log(`[mashcal-pdf] Extracted ${foundInPdf} tenders from ${pdfFilename}`)
+      log(`[mashcal] PDF ${pdf.pubNum}: found=${foundInPdf} skippedJob=${skippedJob} skippedNoProcurement=${skippedNoProcurement} skippedPast=${skippedPastDeadline}`)
     } catch (err: any) {
-      console.warn(`[mashcal-pdf] Error processing ${pdfFilename}:`, err?.message)
+      log(`[mashcal] PDF ${pdf.pubNum} ERROR: ${err?.message}`)
     }
   }
 
-  console.log(`[mashcal-pdf] Total extracted: ${tenders.length} tenders`)
+  log(`[mashcal] TOTAL: ${tenders.length} tenders from ${pdfs.length} PDFs`)
+
+  // Attach logs to raw_data of first tender for debugging visibility
+  if (tenders.length > 0) {
+    tenders[0].raw_data = { ...tenders[0].raw_data, _logs: logs }
+  }
+
   return tenders
 }
+
+// Export for log capture
+export { }
