@@ -21,18 +21,15 @@ function createServiceClient() {
   )
 }
 
-async function runScraper(source: TenderSource, serviceClient: any): Promise<TenderPoolItem[]> {
+function runScraper(source: TenderSource): Promise<TenderPoolItem[]> {
   const scraperName = source.config?.scraper || source.source_type
   switch (scraperName) {
     case 'mr_gov':
       return scrapeMrGov()
-    case 'mashcal_pdf': {
-      const { data: existing } = await serviceClient
-        .from('tender_pool').select('external_id').eq('source_id', source.id)
-      return scrapeMashcalPdfs(new Set((existing || []).map((e: any) => e.external_id)))
-    }
+    case 'mashcal_pdf':
+      return scrapeMashcalPdfs()
     case 'ai_search':
-      return scrapePublicCompanies()
+      return scrapePublicCompanies(source)
     default:
       throw new Error(`Unknown scraper: ${scraperName}`)
   }
@@ -64,7 +61,7 @@ export async function GET(request: Request) {
       .eq('id', source.id)
 
     try {
-      const items = await runScraper(source as TenderSource, serviceClient)
+      const items = await runScraper(source as TenderSource)
 
       let upsertCount = 0
       for (const item of items) {

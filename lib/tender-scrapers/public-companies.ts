@@ -1,6 +1,6 @@
-import type { TenderPoolItem } from './types'
+import type { TenderPoolItem, TenderSource } from './types'
 
-const QUERIES = [
+const DEFAULT_QUERIES = [
   'מכרזי קופות חולים פעילים ישראל 2026',
   'מכרזי בנקים ישראל 2026',
 ]
@@ -14,17 +14,21 @@ function extractXaiText(data: any): string {
     .join('') || ''
 }
 
-export async function scrapePublicCompanies(): Promise<TenderPoolItem[]> {
+export async function scrapePublicCompanies(source?: TenderSource): Promise<TenderPoolItem[]> {
   const apiKey = process.env.XAI_API_KEY
   if (!apiKey) {
     console.warn('[public-companies] XAI_API_KEY not set, skipping')
     return []
   }
 
+  // Use dynamic queries from source config, or fall back to defaults
+  const queries: string[] = source?.config?.queries || DEFAULT_QUERIES
+  console.log(`[public-companies] Running ${queries.length} queries`)
+
   const today = new Date().toISOString().split('T')[0]
   const tenders: TenderPoolItem[] = []
 
-  for (const query of QUERIES) {
+  for (const query of queries) {
     try {
       const prompt = `חפש מכרזים פעילים: ${query}
 
@@ -73,6 +77,8 @@ export async function scrapePublicCompanies(): Promise<TenderPoolItem[]> {
         }
       }
 
+      console.log(`[public-companies] Query "${query}": got ${items.length} items`)
+
       // Filter: deadline must be future
       for (const item of items) {
         if (item.deadline && item.deadline < today) continue
@@ -86,7 +92,7 @@ export async function scrapePublicCompanies(): Promise<TenderPoolItem[]> {
           publisher: item.publisher,
           deadline: item.deadline,
           url: item.url,
-          category: 'חברות ציבוריות',
+          category: 'מכרזים ציבוריים',
           description: item.description,
           budget: item.budget,
           raw_data: { query, source: 'xai_web_search' },

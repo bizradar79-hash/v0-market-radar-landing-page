@@ -54,22 +54,15 @@ async function verifyAdmin(): Promise<boolean> {
   }
 }
 
-async function runScraper(source: TenderSource, serviceClient: any): Promise<TenderPoolItem[]> {
+async function runScraper(source: TenderSource): Promise<TenderPoolItem[]> {
   const scraperName = source.config?.scraper || source.source_type
   switch (scraperName) {
     case 'mr_gov':
       return scrapeMrGov()
-    case 'mashcal_pdf': {
-      // Get existing external_ids for this source
-      const { data: existing } = await serviceClient
-        .from('tender_pool')
-        .select('external_id')
-        .eq('source_id', source.id)
-      const existingIds = new Set((existing || []).map((e: any) => e.external_id))
-      return scrapeMashcalPdfs(existingIds)
-    }
+    case 'mashcal_pdf':
+      return scrapeMashcalPdfs()
     case 'ai_search':
-      return scrapePublicCompanies()
+      return scrapePublicCompanies(source)
     default:
       throw new Error(`Unknown scraper: ${scraperName}`)
   }
@@ -83,7 +76,7 @@ async function scanSource(source: TenderSource, serviceClient: any) {
     .eq('id', source.id)
 
   try {
-    const items = await runScraper(source, serviceClient)
+    const items = await runScraper(source)
 
     // Upsert tenders into tender_pool
     let upsertCount = 0

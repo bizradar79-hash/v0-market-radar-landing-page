@@ -6,6 +6,9 @@ import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -13,6 +16,7 @@ import { useToast } from "@/hooks/use-toast"
 import {
   Loader2, RefreshCw, ExternalLink, Eye, Trash2, X,
   Search, FileText, Globe, Bot, CheckCircle2, XCircle, Clock,
+  Plus, Pencil,
 } from "lucide-react"
 
 interface TenderSource {
@@ -56,6 +60,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'שירותים ציבוריים': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   'רשויות מקומיות': 'bg-green-500/20 text-green-400 border-green-500/30',
   'חברות ציבוריות': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  'מכרזים ציבוריים': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
 }
 
 function daysUntil(dateStr: string): number {
@@ -80,6 +85,106 @@ function formatRelativeTime(dateStr: string | null): string {
   return `לפני ${days} ימים`
 }
 
+// ── Source Modal ──────────────────────────────────────────────────────────────
+function SourceModal({ source, onClose, onSave }: {
+  source: TenderSource | null  // null = new
+  onClose: () => void
+  onSave: (data: any) => Promise<void>
+}) {
+  const [name, setName] = useState(source?.name || '')
+  const [sourceType, setSourceType] = useState(source?.source_type || 'scraper')
+  const [configJson, setConfigJson] = useState(
+    source?.config ? JSON.stringify(source.config, null, 2) : '{\n  "scraper": "ai_search",\n  "queries": []\n}'
+  )
+  const [enabled, setEnabled] = useState(source?.enabled !== false)
+  const [saving, setSaving] = useState(false)
+  const [configError, setConfigError] = useState('')
+
+  const handleSave = async () => {
+    let config: any
+    try {
+      config = JSON.parse(configJson)
+      setConfigError('')
+    } catch {
+      setConfigError('JSON לא תקין')
+      return
+    }
+    setSaving(true)
+    try {
+      await onSave({
+        ...(source ? { id: source.id } : {}),
+        name,
+        source_type: sourceType,
+        config,
+        enabled,
+      })
+      onClose()
+    } catch {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">{source ? 'עריכת מקור' : 'הוספת מקור חדש'}</h2>
+          <Button size="icon" variant="ghost" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <Label>שם</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder='מכרזי אוניברסיטאות' />
+          </div>
+
+          <div>
+            <Label>סוג מקור</Label>
+            <Select value={sourceType} onValueChange={setSourceType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="scraper">Scraper (סורק אתרים)</SelectItem>
+                <SelectItem value="pdf">PDF (ניתוח מסמכים)</SelectItem>
+                <SelectItem value="api">API (חיפוש AI)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label>הגדרות (JSON)</Label>
+            <Textarea
+              value={configJson}
+              onChange={e => setConfigJson(e.target.value)}
+              className="font-mono text-xs h-32"
+              dir="ltr"
+            />
+            {configError && <p className="text-xs text-red-400 mt-1">{configError}</p>}
+            <p className="text-xs text-muted-foreground mt-1">
+              {sourceType === 'scraper' && 'דוגמה: {"scraper": "mr_gov", "base_url": "..."}'}
+              {sourceType === 'pdf' && 'דוגמה: {"scraper": "mashcal_pdf", "list_url": "..."}'}
+              {sourceType === 'api' && 'דוגמה: {"scraper": "ai_search", "queries": ["מכרזי בנקים 2026"]}'}
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>פעיל</Label>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} disabled={saving || !name} className="flex-1">
+            {saving && <Loader2 className="h-4 w-4 ml-2 animate-spin" />}
+            {source ? 'שמור שינויים' : 'הוסף מקור'}
+          </Button>
+          <Button variant="outline" onClick={onClose}>ביטול</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function TendersEnginePage() {
   const { toast } = useToast()
   const [sources, setSources] = useState<TenderSource[]>([])
@@ -97,6 +202,10 @@ export default function TendersEnginePage() {
 
   // Detail panel
   const [selectedTender, setSelectedTender] = useState<TenderPoolItem | null>(null)
+
+  // Source modal
+  const [sourceModalOpen, setSourceModalOpen] = useState(false)
+  const [editingSource, setEditingSource] = useState<TenderSource | null>(null)
 
   // Sort
   const [sortField, setSortField] = useState<'deadline' | 'publish_date' | 'title' | 'publisher'>('deadline')
@@ -129,7 +238,10 @@ export default function TendersEnginePage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Scan failed')
-      toast({ title: 'סריקה הושלמה', description: JSON.stringify(data.results?.map((r: any) => `${r.source}: ${r.found || 0} נמצאו`).join(', ')) })
+      toast({
+        title: 'סריקה הושלמה',
+        description: data.results?.map((r: any) => `${r.source}: ${r.found ?? 0} נמצאו`).join(', '),
+      })
       await fetchData()
     } catch (err: any) {
       toast({ title: 'שגיאה בסריקה', description: err?.message, variant: 'destructive' })
@@ -138,7 +250,7 @@ export default function TendersEnginePage() {
     }
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteTender = async (id: string) => {
     try {
       const res = await fetch('/api/admin/tenders-engine/scan', {
         method: 'DELETE',
@@ -149,6 +261,31 @@ export default function TendersEnginePage() {
       setTenders(prev => prev.filter(t => t.id !== id))
       setSelectedTender(null)
       toast({ title: 'נמחק בהצלחה' })
+    } catch (err: any) {
+      toast({ title: 'שגיאה', description: err?.message, variant: 'destructive' })
+    }
+  }
+
+  const handleSaveSource = async (data: any) => {
+    const isEdit = !!data.id
+    const res = await fetch('/api/admin/tenders-engine/sources', {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    const result = await res.json()
+    if (!res.ok) throw new Error(result.error || 'Save failed')
+    toast({ title: isEdit ? 'מקור עודכן' : 'מקור נוסף בהצלחה' })
+    await fetchData()
+  }
+
+  const handleDeleteSource = async (id: string) => {
+    if (!confirm('למחוק מקור זה וכל המכרזים שלו?')) return
+    try {
+      const res = await fetch(`/api/admin/tenders-engine/sources?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Delete failed')
+      toast({ title: 'מקור נמחק' })
+      await fetchData()
     } catch (err: any) {
       toast({ title: 'שגיאה', description: err?.message, variant: 'destructive' })
     }
@@ -230,44 +367,64 @@ export default function TendersEnginePage() {
       </div>
 
       {/* Source status cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {sources.map(source => {
-          const Icon = SOURCE_ICONS[source.source_type] || Globe
-          const isScanning = scanningSource === source.id
-          return (
-            <div key={source.id} className="rounded-xl border border-border bg-card p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Icon className="h-5 w-5 text-primary" />
-                  <span className="font-semibold text-sm">{source.name}</span>
-                </div>
-                {source.last_scan_status === 'success' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-                {source.last_scan_status === 'error' && <XCircle className="h-4 w-4 text-red-500" />}
-                {source.last_scan_status === 'running' && <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />}
-                {!source.last_scan_status && <Clock className="h-4 w-4 text-muted-foreground" />}
-              </div>
-              <div className="text-xs text-muted-foreground space-y-1">
-                <div>סריקה אחרונה: {formatRelativeTime(source.last_scanned_at)}</div>
-                <div>סה״כ מכרזים: {source.total_tenders_found}</div>
-                {source.last_error && (
-                  <div className="text-red-400 truncate" title={source.last_error}>
-                    שגיאה: {source.last_error}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground">מקורות סריקה</h2>
+          <Button size="sm" variant="outline" onClick={() => { setEditingSource(null); setSourceModalOpen(true) }}>
+            <Plus className="h-3.5 w-3.5 ml-1" />
+            הוסף מקור
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {sources.map(source => {
+            const Icon = SOURCE_ICONS[source.source_type] || Globe
+            const isScanning = scanningSource === source.id
+            return (
+              <div key={source.id} className={`rounded-xl border bg-card p-4 space-y-3 ${source.enabled ? 'border-border' : 'border-border/50 opacity-60'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-5 w-5 text-primary" />
+                    <span className="font-semibold text-sm">{source.name}</span>
+                    {!source.enabled && <Badge variant="secondary" className="text-xs">מושבת</Badge>}
                   </div>
-                )}
+                  <div className="flex items-center gap-1">
+                    <Button size="icon" variant="ghost" className="h-6 w-6"
+                      onClick={() => { setEditingSource(source); setSourceModalOpen(true) }}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:text-red-300"
+                      onClick={() => handleDeleteSource(source.id)}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                    {source.last_scan_status === 'success' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                    {source.last_scan_status === 'error' && <XCircle className="h-4 w-4 text-red-500" />}
+                    {source.last_scan_status === 'running' && <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />}
+                    {!source.last_scan_status && <Clock className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>סריקה אחרונה: {formatRelativeTime(source.last_scanned_at)}</div>
+                  <div>סה״כ מכרזים: {source.total_tenders_found}</div>
+                  {source.last_error && (
+                    <div className="text-red-400 truncate" title={source.last_error}>
+                      שגיאה: {source.last_error}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => handleScan(source.id)}
+                  disabled={isScanning || scanningSource !== null}
+                >
+                  {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
+                  סרוק עכשיו
+                </Button>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="w-full"
-                onClick={() => handleScan(source.id)}
-                disabled={isScanning || scanningSource !== null}
-              >
-                {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
-                סרוק עכשיו
-              </Button>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -309,7 +466,7 @@ export default function TendersEnginePage() {
             <SelectItem value="all">הכל</SelectItem>
             <SelectItem value="שירותים ציבוריים">שירותים ציבוריים</SelectItem>
             <SelectItem value="רשויות מקומיות">רשויות מקומיות</SelectItem>
-            <SelectItem value="חברות ציבוריות">חברות ציבוריות</SelectItem>
+            <SelectItem value="מכרזים ציבוריים">מכרזים ציבוריים</SelectItem>
           </SelectContent>
         </Select>
         <Select value={deadlineFilter} onValueChange={setDeadlineFilter}>
@@ -421,7 +578,7 @@ export default function TendersEnginePage() {
                           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setSelectedTender(tender)}>
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => handleDelete(tender.id)}>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => handleDeleteTender(tender.id)}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -511,11 +668,10 @@ export default function TendersEnginePage() {
                 <p>{new Date(selectedTender.scraped_at).toLocaleString('he-IL')}</p>
               </div>
 
-              {/* Raw data for debugging */}
               {selectedTender.raw_data && (
                 <div>
                   <label className="text-xs text-muted-foreground">נתוני גלם (debug)</label>
-                  <pre className="mt-1 p-3 rounded-lg bg-muted/50 text-xs overflow-x-auto max-h-60 whitespace-pre-wrap">
+                  <pre className="mt-1 p-3 rounded-lg bg-muted/50 text-xs overflow-x-auto max-h-60 whitespace-pre-wrap" dir="ltr">
                     {JSON.stringify(selectedTender.raw_data, null, 2)}
                   </pre>
                 </div>
@@ -531,13 +687,22 @@ export default function TendersEnginePage() {
                   </a>
                 </Button>
               )}
-              <Button variant="destructive" onClick={() => handleDelete(selectedTender.id)}>
+              <Button variant="destructive" onClick={() => handleDeleteTender(selectedTender.id)}>
                 <Trash2 className="h-4 w-4 ml-2" />
                 מחק
               </Button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Source modal */}
+      {sourceModalOpen && (
+        <SourceModal
+          source={editingSource}
+          onClose={() => { setSourceModalOpen(false); setEditingSource(null) }}
+          onSave={handleSaveSource}
+        />
       )}
     </div>
   )
