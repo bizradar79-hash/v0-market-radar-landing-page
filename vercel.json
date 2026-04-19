@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/admin/tenders-engine/cron",
+      "schedule": "0 6 */2 * *"
+    }
+  ]
+}

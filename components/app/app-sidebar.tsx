@@ -23,6 +23,7 @@ import {
   Truck,
   SlidersHorizontal,
   Bookmark,
+  Crosshair,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -249,6 +250,19 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                 >
                   <SlidersHorizontal className="h-5 w-5" />
                   <span>ניהול פרומפטים</span>
+                </Link>
+                <Link
+                  href="/app/admin/tenders-engine"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/tenders-engine"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <Crosshair className="h-5 w-5" />
+                  <span>מנוע מכרזים</span>
                 </Link>
               </div>
             </div>
