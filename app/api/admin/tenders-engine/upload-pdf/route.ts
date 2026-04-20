@@ -8,16 +8,16 @@ import { cookies } from 'next/headers'
 import { parseMashcalPdfBuffer } from '@/lib/tender-scrapers/mashcal-pdf'
 
 async function createServiceClient() {
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      cookies: {
-        getAll() { return [] },
-        setAll() {},
-      },
-    }
-  )
+  // MUST use service role key — tender_pool has admin-only RLS
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
+  console.log('[upload-pdf] Service client: URL=', url?.substring(0, 30), 'KEY starts with=', key?.substring(0, 10))
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() { return [] },
+      setAll() {},
+    },
+  })
 }
 
 async function verifyAdmin(): Promise<boolean> {
@@ -54,29 +54,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log('[upload-pdf] === v2 (xAI forced) ===')
+    console.log('[upload-pdf] === v3 (verbose DB ops) ===')
 
-    const url = new URL(request.url)
-    const clearAll = url.searchParams.get('clear') === '1'
+    const requestUrl = new URL(request.url)
+    const clearAll = requestUrl.searchParams.get('clear') === '1'
 
     const formData = await request.formData()
-    console.log('[upload-pdf] formData parsed')
-
     const file = formData.get('file') as File | null
     const sourceId = formData.get('source_id') as string | null
     const pubNumberStr = formData.get('pub_number') as string | null
 
-    console.log('[upload-pdf] file:', file?.name, file?.size)
-
-    // If clear=1, delete ALL tenders for this source before processing
-    if (clearAll && sourceId) {
-      const sc = await createServiceClient()
-      const { count } = await sc
-        .from('tender_pool')
-        .delete({ count: 'exact' })
-        .eq('source_id', sourceId)
-      console.log('[upload-pdf] CLEAR ALL: deleted', count || 0, 'tenders for source', sourceId)
-    }
+    console.log('[upload-pdf] file:', file?.name, 'size:', file?.size, 'sourceId:', sourceId)
 
     if (!file || !sourceId) {
       return NextResponse.json({ error: 'file and source_id required' }, { status: 400 })
@@ -86,7 +74,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only PDF files accepted' }, { status: 400 })
     }
 
-    // Try to extract pub number and year from filename: meshek-NN-YYYY.pdf
+    // Extract pub number and year from filename: meshek-NN-YYYY.pdf
     let pubNum = pubNumberStr ? parseInt(pubNumberStr) : 0
     let year = new Date().getFullYear()
     const filenameMatch = file.name.match(/meshek-(\d+)-(\d+)/)
@@ -94,12 +82,14 @@ export async function POST(request: Request) {
       pubNum = pubNum || parseInt(filenameMatch[1])
       year = parseInt(filenameMatch[2])
     }
-    if (!pubNum) pubNum = Date.now() % 10000 // fallback unique number
+    if (!pubNum) pubNum = Date.now() % 10000
+    console.log('[upload-pdf] pubNum:', pubNum, 'year:', year)
 
     const buffer = Buffer.from(await file.arrayBuffer())
     console.log('[upload-pdf] buffer size:', buffer.length)
 
-    console.log('[upload-pdf] calling parseMashcalPdfBuffer (xAI v2)')
+    // ── STEP 1: Parse PDF via xAI ──────────────────────────────────────────
+    console.log('[upload-pdf] Step 1: calling parseMashcalPdfBuffer (xAI)')
     let tenders: any[]
     let logs: string[]
     try {
@@ -114,71 +104,160 @@ export async function POST(request: Request) {
         stack: parseErr.stack?.split('\n').slice(0, 5),
       }, { status: 500 })
     }
-    console.log('[upload-pdf] parsed', tenders.length, 'tenders')
+    console.log('[upload-pdf] Parsed:', tenders.length, 'tenders')
 
+    if (tenders.length === 0) {
+      return NextResponse.json({
+        success: true,
+        parsed: 0,
+        saved: 0,
+        logs,
+        message: 'xAI returned 0 tenders from this PDF',
+      })
+    }
+
+    // Log first tender to verify structure
+    console.log('[upload-pdf] First tender keys:', Object.keys(tenders[0]))
+    console.log('[upload-pdf] First tender:', JSON.stringify(tenders[0]).substring(0, 500))
+
+    // ── STEP 2: Get service client ─────────────────────────────────────────
     const serviceClient = await createServiceClient()
 
-    // Delete old tenders from same publication (removes scrambled garbage from previous attempts)
-    const { count: deletedCount } = await serviceClient
-      .from('tender_pool')
-      .delete({ count: 'exact' })
-      .eq('source_id', sourceId)
-      .like('external_id', `${pubNum}-${year}-%`)
-    console.log('[upload-pdf] Deleted', deletedCount || 0, 'old tenders from same publication')
+    // ── STEP 3: Delete old tenders ─────────────────────────────────────────
+    console.log('[upload-pdf] Step 3: Deleting old tenders')
+    console.log('[upload-pdf] Delete filter: source_id=', sourceId, 'clear=', clearAll)
 
-    // Insert fresh parsed tenders
-    console.log('[upload-pdf] upserting to tender_pool')
+    if (clearAll) {
+      // Delete ALL tenders for this source
+      const deleteResult = await serviceClient
+        .from('tender_pool')
+        .delete({ count: 'exact' })
+        .eq('source_id', sourceId)
+      console.log('[upload-pdf] CLEAR ALL result:', JSON.stringify({
+        error: deleteResult.error,
+        count: deleteResult.count,
+        status: deleteResult.status,
+      }))
+    } else {
+      // Delete only from same publication
+      const pattern = `${pubNum}-${year}-%`
+      console.log('[upload-pdf] Delete LIKE pattern:', pattern)
+      const deleteResult = await serviceClient
+        .from('tender_pool')
+        .delete({ count: 'exact' })
+        .eq('source_id', sourceId)
+        .like('external_id', pattern)
+      console.log('[upload-pdf] Delete result:', JSON.stringify({
+        error: deleteResult.error,
+        count: deleteResult.count,
+        status: deleteResult.status,
+      }))
+    }
+
+    // ── STEP 4: Insert tenders one by one with logging ─────────────────────
+    console.log('[upload-pdf] Step 4: Inserting', tenders.length, 'tenders')
     let upsertCount = 0
     const errors: string[] = []
 
-    for (const item of tenders) {
-      const { error } = await serviceClient
+    for (let i = 0; i < tenders.length; i++) {
+      const item = tenders[i]
+      const row = {
+        source_id: sourceId,
+        external_id: item.external_id,
+        title: item.title,
+        description: item.description || null,
+        publisher: item.publisher || null,
+        category: item.category || null,
+        publish_date: item.publish_date || null,
+        deadline: item.deadline || null,
+        url: item.url || null,
+        budget: item.budget || null,
+        location: item.location || null,
+        contact_info: item.contact_info || null,
+        status: 'open',
+        raw_data: item.raw_data || null,
+        scraped_at: new Date().toISOString(),
+      }
+
+      // Log first row fully
+      if (i === 0) {
+        console.log('[upload-pdf] First row payload:', JSON.stringify(row))
+      }
+
+      const { error, status, statusText } = await serviceClient
         .from('tender_pool')
-        .upsert({
-          source_id: sourceId,
-          external_id: item.external_id,
-          title: item.title,
-          description: item.description || null,
-          publisher: item.publisher || null,
-          category: item.category || null,
-          publish_date: item.publish_date || null,
-          deadline: item.deadline || null,
-          url: item.url || null,
-          budget: item.budget || null,
-          location: item.location || null,
-          contact_info: item.contact_info || null,
-          status: 'open',
-          raw_data: item.raw_data || null,
-          scraped_at: new Date().toISOString(),
-        }, { onConflict: 'source_id,external_id' })
+        .upsert(row, { onConflict: 'source_id,external_id' })
+
       if (error) {
-        errors.push(`${item.external_id}: ${error.message}`)
+        const errMsg = `${item.external_id}: ${error.message} (code: ${error.code}, details: ${error.details})`
+        errors.push(errMsg)
+        // Log first 3 errors in detail
+        if (errors.length <= 3) {
+          console.error('[upload-pdf] UPSERT ERROR:', errMsg)
+          console.error('[upload-pdf] Row that failed:', JSON.stringify(row).substring(0, 300))
+        }
       } else {
         upsertCount++
       }
-    }
-    console.log('[upload-pdf] Upserted', upsertCount, 'new tenders')
 
-    // Update source stats
-    const { count } = await serviceClient
+      // Log progress every 5 items
+      if ((i + 1) % 5 === 0 || i === tenders.length - 1) {
+        console.log(`[upload-pdf] Progress: ${i + 1}/${tenders.length} (success: ${upsertCount}, errors: ${errors.length})`)
+      }
+    }
+
+    // ── STEP 5: Verify DB state ────────────────────────────────────────────
+    console.log('[upload-pdf] Step 5: Verifying DB state')
+    const { count: finalCount, error: countError } = await serviceClient
       .from('tender_pool')
       .select('*', { count: 'exact', head: true })
       .eq('source_id', sourceId)
 
-    await serviceClient
-      .from('tender_sources')
-      .update({
-        last_scan_status: 'success',
-        last_scanned_at: new Date().toISOString(),
-        last_error: null,
-        total_tenders_found: count || 0,
-      })
-      .eq('id', sourceId)
+    console.log('[upload-pdf] Actual rows in DB for this source:', finalCount, 'error:', countError?.message || 'none')
+
+    // ── STEP 6: Update source stats ────────────────────────────────────────
+    if (upsertCount > 0) {
+      await serviceClient
+        .from('tender_sources')
+        .update({
+          last_scan_status: 'success',
+          last_scanned_at: new Date().toISOString(),
+          last_error: null,
+          total_tenders_found: finalCount || 0,
+        })
+        .eq('id', sourceId)
+    } else if (errors.length > 0) {
+      // ALL inserts failed
+      await serviceClient
+        .from('tender_sources')
+        .update({
+          last_scan_status: 'error',
+          last_scanned_at: new Date().toISOString(),
+          last_error: `Insert failed: ${errors[0]}`,
+        })
+        .eq('id', sourceId)
+
+      console.error('[upload-pdf] ALL INSERTS FAILED. First 5 errors:', errors.slice(0, 5))
+      return NextResponse.json({
+        success: false,
+        error: 'All inserts failed',
+        parsed: tenders.length,
+        saved: 0,
+        errors: errors.slice(0, 5),
+        logs,
+        dbCount: finalCount,
+      }, { status: 500 })
+    }
+
+    console.log('[upload-pdf] === DONE ===')
+    console.log('[upload-pdf] Parsed:', tenders.length, 'Inserted:', upsertCount, 'Errors:', errors.length, 'DB count:', finalCount)
 
     return NextResponse.json({
       success: true,
       parsed: tenders.length,
       saved: upsertCount,
+      deleted: clearAll ? 'all' : `pattern ${pubNum}-${year}-%`,
+      dbCount: finalCount,
       errors: errors.length > 0 ? errors.slice(0, 5) : undefined,
       logs,
     })
