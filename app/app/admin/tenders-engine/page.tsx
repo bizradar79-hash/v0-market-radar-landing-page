@@ -464,31 +464,52 @@ export default function TendersEnginePage() {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => handleScan(source.id)}
-                    disabled={isScanning || scanningSource !== null}
-                  >
-                    {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
-                    סרוק עכשיו
-                  </Button>
-                  {source.source_type === 'pdf' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
-                      disabled={uploading}
-                    >
-                      {uploading && uploadSourceId === source.id
-                        ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
-                        : <Upload className="h-3 w-3 ml-1" />
-                      }
-                      העלה PDF
-                    </Button>
+                <div className="flex flex-col gap-2">
+                  {source.source_type === 'pdf' && /משכ/.test(source.name) ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="w-full"
+                        onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
+                        disabled={uploading}
+                      >
+                        {uploading && uploadSourceId === source.id
+                          ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                          : <Upload className="h-3 w-3 ml-1" />
+                        }
+                        העלה PDF
+                      </Button>
+                      <p className="text-xs text-muted-foreground text-center">סריקה אוטומטית חסומה. העלה PDF ידני מ-mashcal.co.il</p>
+                    </>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => handleScan(source.id)}
+                        disabled={isScanning || scanningSource !== null}
+                      >
+                        {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
+                        סרוק עכשיו
+                      </Button>
+                      {source.source_type === 'pdf' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
+                          disabled={uploading}
+                        >
+                          {uploading && uploadSourceId === source.id
+                            ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                            : <Upload className="h-3 w-3 ml-1" />
+                          }
+                          העלה PDF
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
