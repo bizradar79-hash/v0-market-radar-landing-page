@@ -2,6 +2,8 @@
 // Auto-scan disabled: mashcal.co.il blocks all Vercel IPs and public proxies.
 // Use the admin "העלה PDF" button to upload PDFs manually.
 
+// Use subpath import to avoid pdf-parse@1.1.1 test-file ENOENT bug
+import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import type { TenderPoolItem } from './types'
 
 const JOB_KEYWORDS = ['דרוש/ה', 'דרוש ', 'דרושים', 'דרושה', 'משרה', 'עו"ס', 'כוח אדם', 'גיוס']
@@ -35,7 +37,6 @@ export async function parseMashcalPdfBuffer(
   const tenders: TenderPoolItem[] = []
   const today = new Date().toISOString().split('T')[0]
 
-  const pdfParse = (await import('pdf-parse')).default
   const parsed = await pdfParse(buffer)
   const text = parsed.text
   log(`[mashcal] PDF ${pubNum} text: ${text.length} chars`)
