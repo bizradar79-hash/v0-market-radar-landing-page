@@ -54,10 +54,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log('[upload-pdf] === v3 (verbose DB ops) ===')
-
-    const requestUrl = new URL(request.url)
-    const clearAll = requestUrl.searchParams.get('clear') === '1'
+    console.log('[upload-pdf] === v4 (accumulation mode, no delete) ===')
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
@@ -122,37 +119,8 @@ export async function POST(request: Request) {
 
     // ── STEP 2: Get service client ─────────────────────────────────────────
     const serviceClient = await createServiceClient()
-
-    // ── STEP 3: Delete old tenders ─────────────────────────────────────────
-    console.log('[upload-pdf] Step 3: Deleting old tenders')
-    console.log('[upload-pdf] Delete filter: source_id=', sourceId, 'clear=', clearAll)
-
-    if (clearAll) {
-      // Delete ALL tenders for this source
-      const deleteResult = await serviceClient
-        .from('tender_pool')
-        .delete({ count: 'exact' })
-        .eq('source_id', sourceId)
-      console.log('[upload-pdf] CLEAR ALL result:', JSON.stringify({
-        error: deleteResult.error,
-        count: deleteResult.count,
-        status: deleteResult.status,
-      }))
-    } else {
-      // Delete only from same publication
-      const pattern = `${pubNum}-${year}-%`
-      console.log('[upload-pdf] Delete LIKE pattern:', pattern)
-      const deleteResult = await serviceClient
-        .from('tender_pool')
-        .delete({ count: 'exact' })
-        .eq('source_id', sourceId)
-        .like('external_id', pattern)
-      console.log('[upload-pdf] Delete result:', JSON.stringify({
-        error: deleteResult.error,
-        count: deleteResult.count,
-        status: deleteResult.status,
-      }))
-    }
+    // No delete — accumulation mode: upsert updates existing, inserts new
+    console.log('[upload-pdf] Accumulation mode — no delete, using upsert')
 
     // ── STEP 4: Batch insert with per-row fallback ──────────────────────────
     console.log('[upload-pdf] Step 4: Inserting', tenders.length, 'tenders in batches of 5')

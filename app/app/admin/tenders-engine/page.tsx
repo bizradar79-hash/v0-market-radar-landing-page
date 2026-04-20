@@ -314,7 +314,7 @@ export default function TendersEnginePage() {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('source_id', uploadSourceId)
-      const res = await fetch('/api/admin/tenders-engine/upload-pdf?clear=1', {
+      const res = await fetch('/api/admin/tenders-engine/upload-pdf', {
         method: 'POST',
         body: formData,
       })
@@ -332,6 +332,25 @@ export default function TendersEnginePage() {
       setUploading(false)
       setUploadSourceId(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const [archiving, setArchiving] = useState(false)
+  const handleArchiveExpired = async () => {
+    setArchiving(true)
+    try {
+      const res = await fetch('/api/admin/tenders-engine/archive-expired', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Archive failed')
+      toast({
+        title: 'ארכוב הושלם',
+        description: `${data.archivedCount} מכרזים שפגו הועברו לסגורים`,
+      })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה בארכוב', description: err?.message, variant: 'destructive' })
+    } finally {
+      setArchiving(false)
     }
   }
 
@@ -410,13 +429,23 @@ export default function TendersEnginePage() {
             סה״כ {stats.open} מכרזים פעילים | {stats.closed} סגורים | {stats.newThisWeek} חדשים השבוע
           </p>
         </div>
-        <Button
-          onClick={() => handleScan()}
-          disabled={scanningSource !== null}
-        >
-          {scanningSource === 'all' ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <RefreshCw className="h-4 w-4 ml-2" />}
-          סרוק הכל
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleArchiveExpired}
+            disabled={archiving}
+          >
+            {archiving ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <Clock className="h-4 w-4 ml-2" />}
+            ארכב מכרזים שפגו
+          </Button>
+          <Button
+            onClick={() => handleScan()}
+            disabled={scanningSource !== null}
+          >
+            {scanningSource === 'all' ? <Loader2 className="h-4 w-4 ml-2 animate-spin" /> : <RefreshCw className="h-4 w-4 ml-2" />}
+            סרוק הכל
+          </Button>
+        </div>
       </div>
 
       {/* Source status cards */}

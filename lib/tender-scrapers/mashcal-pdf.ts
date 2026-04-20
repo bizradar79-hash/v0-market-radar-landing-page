@@ -1,12 +1,12 @@
 // mashcal-pdf.ts — Manual PDF upload only
 // Auto-scan disabled: mashcal.co.il blocks all Vercel IPs and public proxies.
 // Parsing: pdf-parse extracts raw text, xAI structures it into tenders.
-// VERSION: 2026-04-20-v3 (date validation, batch insert)
+// VERSION: 2026-04-20-v4 (improved prompt, accumulation mode, null publish_date)
 
 import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import type { TenderPoolItem } from './types'
 
-const JOB_KEYWORDS = ['דרוש', 'דרושים', 'משרה', 'איוש', 'מנהל/ת', 'רכז/ת', 'עובד/ת סוציאלי', 'גננ/ת', 'כח אדם']
+const JOB_KEYWORDS = ['דרוש', 'דרושים', 'משרה', 'איוש', 'מנהל/ת', 'רכז/ת', 'עובד/ת סוציאלי', 'גננ/ת', 'כח אדם', 'דוברות', 'יועץ משפטי']
 
 interface ParsedTender {
   city: string
@@ -71,7 +71,7 @@ export async function parseMashcalPdfBuffer(
   const logs: string[] = []
   const log = (msg: string) => { console.log(msg); logs.push(msg) }
 
-  log('[mashcal] === parseMashcalPdfBuffer v3 (xAI + date validation) ===')
+  log('[mashcal] === parseMashcalPdfBuffer v4 (improved prompt) ===')
   log(`[mashcal] pubNum=${pubNum} year=${year} bufferSize=${buffer.length}`)
 
   // Step 1: Extract raw text
@@ -94,41 +94,42 @@ export async function parseMashcalPdfBuffer(
     input: [
       { role: 'system', content: 'You parse Hebrew municipal tender PDFs. Output strict JSON only, no markdown.' },
       {
-        role: 'user', content: `Parse this PDF text from Israel's mashcal.co.il tender bulletin (publication ${pubNum}/${year}). Text is Hebrew RTL and may appear jumbled.
+        role: 'user', content: `Parse this PDF text from Israel's mashcal.co.il tender bulletin (publication ${pubNum}/${year}). Source is Hebrew RTL — text may appear jumbled or split across lines.
 
-Each tender row contains these fields:
-- city (שם הרשות המקומית)
+CRITICAL HEBREW ACCURACY RULES:
+- Copy Hebrew words EXACTLY as they appear. Do NOT drop the first letter.
+- Common errors to AVOID:
+  * Wrong: 'ספקת' → Right: 'אספקת' (the letter א prefix is essential)
+  * Wrong: 'חובות' → Right: 'רחובות' (if context is streets/city)
+  * Wrong: 'זמנה' → Right: 'הזמנה' (ה prefix is essential)
+  * Wrong: 'פעלה' → Right: 'הפעלה' (ה prefix is essential)
+- If you see a word that starts with a common prefix letter (א, ה, ו, ל, ב, מ, ש, כ), VERIFY you included it — Hebrew word segmentation often drops them.
+- When in doubt, include the whole original Hebrew word.
+
+COMPLETENESS RULES:
+- Process EVERY row in the text, even rows that appear split or jumbled.
+- Rows may span multiple lines — combine continuation text into one tender.
+- Count expected tenders from the source; make sure you output all of them.
+- If a row has partial data (missing deadline, missing city), still include it with null for the missing field.
+
+FIELDS (per tender):
+- city (שם הרשות המקומית) — exact Hebrew, include prefix letters
 - tender_number (מס' המכרז, like '19/26' or '1/2026')
-- title (שם המכרז, full description)
-- deadline (מועד להגשה, DD/MM/YYYY format in source)
+- title (שם המכרז) — full Hebrew description, do not shorten
+- deadline (מועד להגשה)
 
-FILTER OUT rows about jobs/employment: דרוש, דרושים, משרה, מכרז כח אדם, איוש משרה, מנהל/ת, רכז/ת, עובד/ת סוציאלי, גננ/ת — any personnel tender.
+FILTER OUT jobs/personnel (דרוש, דרושים, משרה, איוש, מנהל/ת, רכז/ת, גננ/ת, עובד/ת סוציאלי, דוברות, יועץ משפטי — if role-for-person).
+KEEP procurement/services (שירותים, רכש, אספקה, עבודות, הפעלה, ייעוץ, ביצוע, השכרה, מתן, שיקום, אחזקה, פיתוח, תחזוקה, תכנון, הקמה, ספקה — these are tenders for services/goods).
 
-KEEP procurement/services: שירותים, רכש, אספקה, עבודות, הפעלה, ייעוץ, ביצוע, השכרה, מתן, שיקום, אחזקה, פיתוח, תחזוקה, תכנון, הקמה.
+DATE FORMAT RULES:
+- Output deadline as YYYY-MM-DD with month 01-12 and day 01-31
+- Source uses DD/MM/YYYY Israeli format: '4/5/2026' → '2026-05-04'
+- If year written as '26', interpret as 2026
+- If unclear, output null — NEVER guess
+- NEVER output month > 12 or day > 31
 
-CRITICAL DATE RULES:
-- Deadline must be YYYY-MM-DD format with month 01-12 and day 01-31
-- The source PDF uses DD/MM/YYYY Israeli format (day first, then month)
-- Example: '4/5/2026' in source means May 4, 2026 → output "2026-05-04"
-- Example: '13/5/2026' means May 13, 2026 → output "2026-05-13"
-- If deadline is unclear, ambiguous, or missing, output null (not a guess)
-- Never output a month > 12 or day > 31
-- Year in source might be written as '26' — interpret as 2026
-
-Output ONLY this JSON:
-{
-  "tenders": [
-    {
-      "city": "בית דגן",
-      "tender_number": "19/26",
-      "title": "מתן שירותי ניהול תקציבי פיתוח ותקצוב פרויקטים",
-      "deadline": "2026-05-04"
-    }
-  ]
-}
-
-Keep title concise — the essential service/procurement subject.
-If deadline unclear, output null.
+Output JSON only, no markdown:
+{"tenders": [{"city":"...","tender_number":"...","title":"...","deadline":"YYYY-MM-DD"}]}
 
 Raw PDF text:
 ---
@@ -138,7 +139,7 @@ ${rawText.substring(0, 30000)}
     ],
   }
 
-  log(`[mashcal] Calling xAI (grok-4-fast-non-reasoning)...`)
+  log('[mashcal] Calling xAI (grok-4-fast-non-reasoning)...')
 
   const res = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -209,11 +210,11 @@ ${rawText.substring(0, 30000)}
     title: `${t.title} (מכרז ${t.tender_number})`,
     publisher: t.city,
     category: 'רשויות מקומיות',
-    publish_date: `${year}-${String(Math.min(Math.ceil(pubNum / 2), 12)).padStart(2, '0')}-01`,
+    publish_date: null,  // mashcal PDFs don't have real publish dates
     deadline: normalizeDeadline(t.deadline),
     url: 'https://www.mashcal.co.il/published-tenders',
     raw_data: {
-      _version: 'xai-v3',
+      _version: 'xai-v4',
       source: 'מכרזי משכ"ל',
       pub_number: pubNum,
       year,
