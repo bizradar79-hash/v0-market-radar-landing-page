@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast"
 import {
   Loader2, RefreshCw, ExternalLink, Eye, Trash2, X,
   Search, FileText, Globe, Bot, CheckCircle2, XCircle, Clock,
-  Plus, Pencil,
+  Plus, Pencil, Upload,
 } from "lucide-react"
 
 interface TenderSource {
@@ -206,6 +206,11 @@ export default function TendersEnginePage() {
   // Scan logs
   const [scanLogs, setScanLogs] = useState<string[] | null>(null)
 
+  // PDF upload
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadSourceId, setUploadSourceId] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+
   // Source modal
   const [sourceModalOpen, setSourceModalOpen] = useState(false)
   const [editingSource, setEditingSource] = useState<TenderSource | null>(null)
@@ -301,6 +306,35 @@ export default function TendersEnginePage() {
     }
   }
 
+  const handleUploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !uploadSourceId) return
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('source_id', uploadSourceId)
+      const res = await fetch('/api/admin/tenders-engine/upload-pdf', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      if (data.logs?.length) setScanLogs(data.logs)
+      toast({
+        title: 'PDF עובד בהצלחה',
+        description: `${data.parsed} מכרזים נמצאו, ${data.saved} נשמרו`,
+      })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה בהעלאת PDF', description: err?.message, variant: 'destructive' })
+    } finally {
+      setUploading(false)
+      setUploadSourceId(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   // Filter and sort tenders
   const today = new Date().toISOString().split('T')[0]
   let filtered = tenders.filter(t => {
@@ -360,6 +394,15 @@ export default function TendersEnginePage() {
 
   return (
     <div className="space-y-6 relative" dir="rtl">
+      {/* Hidden file input for PDF upload */}
+      <input
+        type="file"
+        accept="application/pdf"
+        ref={fileInputRef}
+        className="hidden"
+        onChange={handleUploadPdf}
+      />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">מנוע מכרזים</h1>
@@ -421,16 +464,33 @@ export default function TendersEnginePage() {
                     </div>
                   )}
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => handleScan(source.id)}
-                  disabled={isScanning || scanningSource !== null}
-                >
-                  {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
-                  סרוק עכשיו
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => handleScan(source.id)}
+                    disabled={isScanning || scanningSource !== null}
+                  >
+                    {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
+                    סרוק עכשיו
+                  </Button>
+                  {source.source_type === 'pdf' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
+                      disabled={uploading}
+                    >
+                      {uploading && uploadSourceId === source.id
+                        ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                        : <Upload className="h-3 w-3 ml-1" />
+                      }
+                      העלה PDF
+                    </Button>
+                  )}
+                </div>
               </div>
             )
           })}

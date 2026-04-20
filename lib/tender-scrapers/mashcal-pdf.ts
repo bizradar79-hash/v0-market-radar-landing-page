@@ -33,143 +33,27 @@ function isProcurement(text: string): boolean {
   return PROCUREMENT_KEYWORDS.some(kw => text.includes(kw))
 }
 
-// ── xAI fallback: ask Grok to find the PDF URLs ────────────────────────────
-async function getMashcalPdfUrlsViaXai(log: (msg: string) => void): Promise<{ url: string; pubNum: number; year: number }[]> {
-  const apiKey = process.env.XAI_API_KEY
-  if (!apiKey) {
-    log('[mashcal] XAI_API_KEY not set, cannot use xAI fallback')
-    return []
-  }
-
-  log('[mashcal] Using xAI web_search fallback to find PDF URLs...')
-
-  const prompt = `בקר בדף https://www.mashcal.co.il/published-tenders/ וחפש קישורים ל-PDF של meshek (משק) מ-2026.
-המבנה של כל קישור: https://www.mashcal.co.il/media/XXXX/meshek-NN-2026.pdf
-מצא את 3 הקישורים האחרונים (עם המספר הגבוה ביותר של NN).
-החזר JSON בלבד: {"pdfs": ["url1", "url2", "url3"]}`
-
-  try {
-    const res = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: prompt,
-        tools: [{ type: 'web_search' }],
-      }),
-      signal: AbortSignal.timeout(60000),
-    })
-
-    if (!res.ok) {
-      log(`[mashcal] xAI fallback HTTP error: ${res.status}`)
-      return []
-    }
-
-    const data = await res.json()
-    const text = data.output
-      ?.filter((b: any) => b.type === 'message')
-      .flatMap((b: any) => b.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('') || ''
-
-    log(`[mashcal] xAI response length: ${text.length}`)
-    log(`[mashcal] xAI response: ${text.substring(0, 500)}`)
-
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      log('[mashcal] xAI: no JSON found in response')
-      return []
-    }
-
-    const parsed = JSON.parse(jsonMatch[0])
-    const urls: string[] = parsed.pdfs || []
-    log(`[mashcal] xAI returned ${urls.length} PDF URLs`)
-
-    return urls
-      .filter(u => u.includes('meshek') && u.endsWith('.pdf'))
-      .map(u => {
-        const numMatch = u.match(/meshek-(\d+)-(\d+)/)
-        return {
-          url: u,
-          pubNum: parseInt(numMatch?.[1] || '0'),
-          year: parseInt(numMatch?.[2] || '2026'),
-        }
-      })
-      .sort((a, b) => b.year - a.year || b.pubNum - a.pubNum)
-      .slice(0, 3)
-  } catch (err: any) {
-    log(`[mashcal] xAI fallback error: ${err?.message}`)
-    return []
-  }
-}
-
-// ── Process PDF files and extract tenders ───────────────────────────────────
-async function processPdfs(
-  pdfs: { url: string; pubNum: number; year: number }[],
-  log: (msg: string) => void
-): Promise<TenderPoolItem[]> {
+// ── Shared: parse a Mashcal PDF buffer into tender items ────────────────────
+// Exported so upload-pdf route can reuse it
+export async function parseMashcalPdfBuffer(
+  buffer: Buffer,
+  pubNum: number,
+  year: number,
+  pdfUrl?: string,
+): Promise<{ tenders: TenderPoolItem[]; logs: string[] }> {
+  const logs: string[] = []
+  const log = (msg: string) => logs.push(msg)
   const tenders: TenderPoolItem[] = []
   const today = new Date().toISOString().split('T')[0]
 
-  for (const pdf of pdfs) {
-    try {
-      log(`[mashcal] Downloading meshek-${pdf.pubNum}-${pdf.year}...`)
-      const pdfRes = await fetch(pdf.url, {
-        headers: {
-          ...BROWSER_HEADERS,
-          'Accept': 'application/pdf,*/*;q=0.8',
-          'Sec-Fetch-Dest': 'document',
-        },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(30000),
-      })
-      log(`[mashcal] PDF ${pdf.pubNum} status: ${pdfRes.status} ${pdfRes.statusText}`)
-      if (!pdfRes.ok) {
-        log(`[mashcal] PDF ${pdf.pubNum} download failed, trying without headers...`)
-        // Retry with minimal headers
-        const retryRes = await fetch(pdf.url, { signal: AbortSignal.timeout(30000) })
-        if (!retryRes.ok) {
-          log(`[mashcal] PDF ${pdf.pubNum} retry also failed: ${retryRes.status}`)
-          continue
-        }
-        const buffer = Buffer.from(await retryRes.arrayBuffer())
-        log(`[mashcal] PDF ${pdf.pubNum} retry buffer: ${buffer.length} bytes`)
-        await parsePdfBuffer(buffer, pdf, tenders, today, log)
-        continue
-      }
-
-      const buffer = Buffer.from(await pdfRes.arrayBuffer())
-      log(`[mashcal] PDF ${pdf.pubNum} buffer: ${buffer.length} bytes`)
-
-      await parsePdfBuffer(buffer, pdf, tenders, today, log)
-    } catch (err: any) {
-      log(`[mashcal] PDF ${pdf.pubNum} ERROR: ${err?.message}${err?.cause?.message ? ` cause: ${err.cause.message}` : ''}`)
-    }
-  }
-
-  return tenders
-}
-
-// ── Parse a PDF buffer into tender items ────────────────────────────────────
-async function parsePdfBuffer(
-  buffer: Buffer,
-  pdf: { url: string; pubNum: number; year: number },
-  tenders: TenderPoolItem[],
-  today: string,
-  log: (msg: string) => void
-) {
   const pdfParse = (await import('pdf-parse')).default
   const parsed = await pdfParse(buffer)
   const text = parsed.text
-  log(`[mashcal] PDF ${pdf.pubNum} text: ${text.length} chars`)
-  log(`[mashcal] PDF ${pdf.pubNum} sample: ${text.substring(0, 500).replace(/\n/g, '\\n')}`)
+  log(`[mashcal] PDF ${pubNum} text: ${text.length} chars`)
+  log(`[mashcal] PDF ${pubNum} sample: ${text.substring(0, 500).replace(/\n/g, '\\n')}`)
 
   const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean)
-  log(`[mashcal] PDF ${pdf.pubNum} lines: ${lines.length}`)
+  log(`[mashcal] PDF ${pubNum} lines: ${lines.length}`)
 
   let foundInPdf = 0
   let skippedJob = 0
@@ -178,7 +62,6 @@ async function parsePdfBuffer(
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-
     if (line.length < 8) continue
     if (isJobPosting(line)) { skippedJob++; continue }
 
@@ -227,7 +110,6 @@ async function parsePdfBuffer(
         title = `${title} ${nextLine}`.trim()
       }
     }
-
     if (!title || title.length < 3) title = `מכרז ${tenderNum}`
     if (publisher && title.startsWith(publisher)) title = title.substring(publisher.length).trim()
 
@@ -236,18 +118,18 @@ async function parsePdfBuffer(
     const publishDateStr = dateMatches.length > 1 ? parseDate(dateMatches[0][1]) : undefined
 
     tenders.push({
-      external_id: `mashcal-${pdf.pubNum}-${tenderNum}`,
+      external_id: `mashcal-${pubNum}-${tenderNum}`,
       title,
       publisher,
       category: 'רשויות מקומיות',
       publish_date: publishDateStr,
       deadline: deadlineStr,
-      url: pdf.url,
+      url: pdfUrl || `meshek-${pubNum}-${year}.pdf`,
       budget,
       raw_data: {
-        pdf_url: pdf.url,
-        pub_number: pdf.pubNum,
-        year: pdf.year,
+        pdf_url: pdfUrl,
+        pub_number: pubNum,
+        year,
         line_index: i,
         full_line: line,
       },
@@ -255,7 +137,131 @@ async function parsePdfBuffer(
     foundInPdf++
   }
 
-  log(`[mashcal] PDF ${pdf.pubNum}: found=${foundInPdf} skippedJob=${skippedJob} skippedNoProcurement=${skippedNoProcurement} skippedPast=${skippedPastDeadline}`)
+  log(`[mashcal] PDF ${pubNum}: found=${foundInPdf} skippedJob=${skippedJob} skippedNoProcurement=${skippedNoProcurement} skippedPast=${skippedPastDeadline}`)
+  return { tenders, logs }
+}
+
+// ── Proxy fetch helper ──────────────────────────────────────────────────────
+async function fetchViaProxy(url: string, log: (msg: string) => void): Promise<Response> {
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+  log(`[mashcal] Trying proxy: ${proxyUrl.substring(0, 80)}...`)
+  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(30000) })
+  log(`[mashcal] Proxy status: ${res.status}`)
+  return res
+}
+
+// ── xAI fallback: ask Grok to find the PDF URLs ────────────────────────────
+async function getMashcalPdfUrlsViaXai(log: (msg: string) => void): Promise<{ url: string; pubNum: number; year: number }[]> {
+  const apiKey = process.env.XAI_API_KEY
+  if (!apiKey) {
+    log('[mashcal] XAI_API_KEY not set, cannot use xAI fallback')
+    return []
+  }
+
+  log('[mashcal] Using xAI web_search fallback to find PDF URLs...')
+
+  const prompt = `בקר בדף https://www.mashcal.co.il/published-tenders/ וחפש קישורים ל-PDF של meshek (משק) מ-2026.
+המבנה של כל קישור: https://www.mashcal.co.il/media/XXXX/meshek-NN-2026.pdf
+מצא את 3 הקישורים האחרונים (עם המספר הגבוה ביותר של NN).
+החזר JSON בלבד: {"pdfs": ["url1", "url2", "url3"]}`
+
+  try {
+    const res = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: prompt,
+        tools: [{ type: 'web_search' }],
+      }),
+      signal: AbortSignal.timeout(60000),
+    })
+    if (!res.ok) {
+      log(`[mashcal] xAI HTTP error: ${res.status}`)
+      return []
+    }
+    const data = await res.json()
+    const text = data.output
+      ?.filter((b: any) => b.type === 'message')
+      .flatMap((b: any) => b.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('') || ''
+
+    log(`[mashcal] xAI response: ${text.substring(0, 300)}`)
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) { log('[mashcal] xAI: no JSON'); return [] }
+
+    const urls: string[] = JSON.parse(jsonMatch[0]).pdfs || []
+    log(`[mashcal] xAI returned ${urls.length} URLs`)
+
+    return urls
+      .filter(u => u.includes('meshek') && u.endsWith('.pdf'))
+      .map(u => {
+        const m = u.match(/meshek-(\d+)-(\d+)/)
+        return { url: u, pubNum: parseInt(m?.[1] || '0'), year: parseInt(m?.[2] || '2026') }
+      })
+      .sort((a, b) => b.year - a.year || b.pubNum - a.pubNum)
+      .slice(0, 3)
+  } catch (err: any) {
+    log(`[mashcal] xAI error: ${err?.message}`)
+    return []
+  }
+}
+
+// ── Download a single PDF with fallbacks ────────────────────────────────────
+async function downloadPdf(
+  url: string,
+  log: (msg: string) => void
+): Promise<Buffer | null> {
+  // Try 1: Direct fetch with browser headers
+  try {
+    const res = await fetch(url, {
+      headers: { ...BROWSER_HEADERS, 'Accept': 'application/pdf,*/*;q=0.8' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000),
+    })
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer())
+      log(`[mashcal] Direct download OK: ${buf.length} bytes`)
+      return buf
+    }
+    log(`[mashcal] Direct download failed: ${res.status}`)
+  } catch (err: any) {
+    log(`[mashcal] Direct download error: ${err?.message}`)
+  }
+
+  // Try 2: Minimal headers
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer())
+      log(`[mashcal] Minimal download OK: ${buf.length} bytes`)
+      return buf
+    }
+    log(`[mashcal] Minimal download failed: ${res.status}`)
+  } catch (err: any) {
+    log(`[mashcal] Minimal download error: ${err?.message}`)
+  }
+
+  // Try 3: Proxy
+  try {
+    const res = await fetchViaProxy(url, log)
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer())
+      log(`[mashcal] Proxy download OK: ${buf.length} bytes`)
+      return buf
+    }
+    log(`[mashcal] Proxy download failed: ${res.status}`)
+  } catch (err: any) {
+    log(`[mashcal] Proxy download error: ${err?.message}`)
+  }
+
+  return null
 }
 
 // ── Main entry point ────────────────────────────────────────────────────────
@@ -273,83 +279,91 @@ export async function scrapeMashcalPdfs(): Promise<TenderPoolItem[]> {
       redirect: 'follow',
       signal: AbortSignal.timeout(15000),
     })
-    log(`[mashcal] list page status: ${res.status} ${res.statusText}`)
-
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
-
+    log(`[mashcal] list page: ${res.status} ${res.statusText}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const html = await res.text()
     log(`[mashcal] list page size: ${html.length}`)
-
-    // Match PDFs
-    const pdfRegex = /href="(https?:\/\/www\.mashcal\.co\.il\/media\/[^"]+\/meshek-(\d+)-(\d+)\.pdf)"/gi
-    const matches = [...html.matchAll(pdfRegex)]
-    log(`[mashcal] PDF regex matches: ${matches.length}`)
-
-    if (matches.length === 0) {
-      // Fallback regex
-      const fallbackRegex = /href="([^"]*meshek[^"]*\.pdf)"/gi
-      const fallbackMatches = [...html.matchAll(fallbackRegex)]
-      log(`[mashcal] Fallback PDF matches: ${fallbackMatches.length}`)
-
-      const meshekIdx = html.indexOf('meshek')
-      if (meshekIdx > -1) {
-        log(`[mashcal] HTML near "meshek": ${html.substring(Math.max(0, meshekIdx - 100), meshekIdx + 200)}`)
-      }
-      const pdfIdx = html.indexOf('.pdf')
-      if (pdfIdx > -1) {
-        log(`[mashcal] HTML near ".pdf": ${html.substring(Math.max(0, pdfIdx - 100), pdfIdx + 100)}`)
-      }
-
-      for (const m of fallbackMatches) {
-        let url = m[1]
-        if (!url.startsWith('http')) url = new URL(url, LIST_URL).href
-        const numMatch = url.match(/meshek-(\d+)-(\d+)/)
-        if (numMatch) {
-          pdfs.push({ url, pubNum: parseInt(numMatch[1]), year: parseInt(numMatch[2]) })
-        }
-      }
-    } else {
-      pdfs = matches.map(m => ({ url: m[1], pubNum: parseInt(m[2]), year: parseInt(m[3]) }))
-    }
+    pdfs = extractPdfUrls(html, log)
   } catch (err: any) {
-    log(`[mashcal] Direct fetch FAILED: ${err?.message}${err?.cause?.message ? ` | cause: ${err.cause.message}` : ''}${err?.code ? ` | code: ${err.code}` : ''}`)
+    log(`[mashcal] Direct fetch FAILED: ${err?.message}${err?.cause?.message ? ` | cause: ${err.cause.message}` : ''}`)
   }
 
-  // ── Try 2: xAI fallback if direct fetch failed ────────────────────────
+  // ── Try 2: Proxy fetch of list page ───────────────────────────────────
   if (pdfs.length === 0) {
-    log('[mashcal] No PDFs from direct fetch, trying xAI fallback...')
+    try {
+      log('[mashcal] Trying proxy for list page...')
+      const res = await fetchViaProxy(LIST_URL, log)
+      if (res.ok) {
+        const html = await res.text()
+        log(`[mashcal] Proxy list page size: ${html.length}`)
+        pdfs = extractPdfUrls(html, log)
+      }
+    } catch (err: any) {
+      log(`[mashcal] Proxy list page FAILED: ${err?.message}`)
+    }
+  }
+
+  // ── Try 3: xAI fallback ──────────────────────────────────────────────
+  if (pdfs.length === 0) {
+    log('[mashcal] No PDFs from fetch, trying xAI...')
     pdfs = await getMashcalPdfUrlsViaXai(log)
   }
 
-  // Sort and limit
-  pdfs = pdfs
-    .sort((a, b) => b.year - a.year || b.pubNum - a.pubNum)
-    .slice(0, 3)
-
+  pdfs = pdfs.sort((a, b) => b.year - a.year || b.pubNum - a.pubNum).slice(0, 3)
   log(`[mashcal] Processing ${pdfs.length} PDFs: ${pdfs.map(p => `meshek-${p.pubNum}-${p.year}`).join(', ')}`)
 
   if (pdfs.length === 0) {
-    log('[mashcal] No PDFs found from any method, aborting')
-    const result: TenderPoolItem[] = []
-    // Return a dummy item with logs so they're visible in UI
-    result.push({
+    log('[mashcal] No PDFs found, aborting. Use manual upload instead.')
+    return [{
       external_id: 'mashcal-debug-log',
-      title: '[DEBUG] Mashcal scraper logs — no tenders found',
+      title: '[DEBUG] Mashcal — no PDFs found. Use "העלה PDF" to upload manually.',
       category: 'רשויות מקומיות',
       raw_data: { _logs: logs, _debug: true },
-    })
-    return result
+    }]
   }
 
-  // ── Process PDFs ──────────────────────────────────────────────────────
-  const tenders = await processPdfs(pdfs, log)
+  // ── Download and parse PDFs ───────────────────────────────────────────
+  const tenders: TenderPoolItem[] = []
+  for (const pdf of pdfs) {
+    log(`[mashcal] Downloading meshek-${pdf.pubNum}-${pdf.year}...`)
+    const buffer = await downloadPdf(pdf.url, log)
+    if (!buffer) {
+      log(`[mashcal] PDF ${pdf.pubNum} — all download methods failed`)
+      continue
+    }
+
+    const result = await parseMashcalPdfBuffer(buffer, pdf.pubNum, pdf.year, pdf.url)
+    result.logs.forEach(l => log(l))
+    tenders.push(...result.tenders)
+  }
 
   log(`[mashcal] TOTAL: ${tenders.length} tenders from ${pdfs.length} PDFs`)
 
-  // Attach logs to first tender
   if (tenders.length > 0) {
     tenders[0].raw_data = { ...tenders[0].raw_data, _logs: logs }
   }
-
   return tenders
+}
+
+// ── Extract PDF URLs from HTML ──────────────────────────────────────────────
+function extractPdfUrls(html: string, log: (msg: string) => void): { url: string; pubNum: number; year: number }[] {
+  const pdfRegex = /href="(https?:\/\/www\.mashcal\.co\.il\/media\/[^"]+\/meshek-(\d+)-(\d+)\.pdf)"/gi
+  const matches = [...html.matchAll(pdfRegex)]
+  log(`[mashcal] PDF regex matches: ${matches.length}`)
+
+  if (matches.length > 0) {
+    return matches.map(m => ({ url: m[1], pubNum: parseInt(m[2]), year: parseInt(m[3]) }))
+  }
+
+  // Fallback
+  const fallback = [...html.matchAll(/href="([^"]*meshek[^"]*\.pdf)"/gi)]
+  log(`[mashcal] Fallback matches: ${fallback.length}`)
+  return fallback
+    .map(m => {
+      let url = m[1]
+      if (!url.startsWith('http')) url = new URL(url, LIST_URL).href
+      const nm = url.match(/meshek-(\d+)-(\d+)/)
+      return nm ? { url, pubNum: parseInt(nm[1]), year: parseInt(nm[2]) } : null
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
 }
