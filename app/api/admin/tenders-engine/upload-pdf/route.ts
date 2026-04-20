@@ -154,56 +154,62 @@ export async function POST(request: Request) {
       }))
     }
 
-    // ── STEP 4: Insert tenders one by one with logging ─────────────────────
-    console.log('[upload-pdf] Step 4: Inserting', tenders.length, 'tenders')
+    // ── STEP 4: Batch insert with per-row fallback ──────────────────────────
+    console.log('[upload-pdf] Step 4: Inserting', tenders.length, 'tenders in batches of 5')
     let upsertCount = 0
     const errors: string[] = []
+    const now = new Date().toISOString()
 
-    for (let i = 0; i < tenders.length; i++) {
-      const item = tenders[i]
-      const row = {
-        source_id: sourceId,
-        external_id: item.external_id,
-        title: item.title,
-        description: item.description || null,
-        publisher: item.publisher || null,
-        category: item.category || null,
-        publish_date: item.publish_date || null,
-        deadline: item.deadline || null,
-        url: item.url || null,
-        budget: item.budget || null,
-        location: item.location || null,
-        contact_info: item.contact_info || null,
-        status: 'open',
-        raw_data: item.raw_data || null,
-        scraped_at: new Date().toISOString(),
-      }
+    // Build rows
+    const rows = tenders.map((item: any) => ({
+      source_id: sourceId,
+      external_id: item.external_id,
+      title: item.title,
+      description: item.description || null,
+      publisher: item.publisher || null,
+      category: item.category || null,
+      publish_date: item.publish_date || null,
+      deadline: item.deadline || null,
+      url: item.url || null,
+      budget: item.budget || null,
+      location: item.location || null,
+      contact_info: item.contact_info || null,
+      status: 'open',
+      raw_data: item.raw_data || null,
+      scraped_at: now,
+    }))
 
-      // Log first row fully
-      if (i === 0) {
-        console.log('[upload-pdf] First row payload:', JSON.stringify(row))
-      }
+    // Log first row
+    console.log('[upload-pdf] First row payload:', JSON.stringify(rows[0]))
 
-      const { error, status, statusText } = await serviceClient
+    // Insert in batches of 5
+    for (let i = 0; i < rows.length; i += 5) {
+      const batch = rows.slice(i, i + 5)
+      const { error, data } = await serviceClient
         .from('tender_pool')
-        .upsert(row, { onConflict: 'source_id,external_id' })
+        .upsert(batch, { onConflict: 'source_id,external_id' })
+        .select('id')
 
       if (error) {
-        const errMsg = `${item.external_id}: ${error.message} (code: ${error.code}, details: ${error.details})`
-        errors.push(errMsg)
-        // Log first 3 errors in detail
-        if (errors.length <= 3) {
-          console.error('[upload-pdf] UPSERT ERROR:', errMsg)
-          console.error('[upload-pdf] Row that failed:', JSON.stringify(row).substring(0, 300))
+        console.error(`[upload-pdf] Batch ${i}-${i + batch.length} failed:`, error.message, 'code:', error.code)
+        // Try one-by-one for this batch to save what we can
+        for (const row of batch) {
+          const { error: singleErr } = await serviceClient
+            .from('tender_pool')
+            .upsert([row], { onConflict: 'source_id,external_id' })
+          if (singleErr) {
+            const errMsg = `${row.external_id}: ${singleErr.message} (code: ${singleErr.code})`
+            errors.push(errMsg)
+            console.error('[upload-pdf] Single row failed:', errMsg, 'deadline:', row.deadline)
+          } else {
+            upsertCount++
+          }
         }
       } else {
-        upsertCount++
+        upsertCount += (data?.length ?? batch.length)
       }
 
-      // Log progress every 5 items
-      if ((i + 1) % 5 === 0 || i === tenders.length - 1) {
-        console.log(`[upload-pdf] Progress: ${i + 1}/${tenders.length} (success: ${upsertCount}, errors: ${errors.length})`)
-      }
+      console.log(`[upload-pdf] Progress: ${Math.min(i + 5, rows.length)}/${rows.length} (success: ${upsertCount}, errors: ${errors.length})`)
     }
 
     // ── STEP 5: Verify DB state ────────────────────────────────────────────
@@ -216,17 +222,7 @@ export async function POST(request: Request) {
     console.log('[upload-pdf] Actual rows in DB for this source:', finalCount, 'error:', countError?.message || 'none')
 
     // ── STEP 6: Update source stats ────────────────────────────────────────
-    if (upsertCount > 0) {
-      await serviceClient
-        .from('tender_sources')
-        .update({
-          last_scan_status: 'success',
-          last_scanned_at: new Date().toISOString(),
-          last_error: null,
-          total_tenders_found: finalCount || 0,
-        })
-        .eq('id', sourceId)
-    } else if (errors.length > 0) {
+    if (upsertCount === 0 && errors.length > 0) {
       // ALL inserts failed
       await serviceClient
         .from('tender_sources')
@@ -247,6 +243,28 @@ export async function POST(request: Request) {
         logs,
         dbCount: finalCount,
       }, { status: 500 })
+    } else if (upsertCount > 0 && errors.length > 0) {
+      // Partial success
+      await serviceClient
+        .from('tender_sources')
+        .update({
+          last_scan_status: 'success',
+          last_scanned_at: new Date().toISOString(),
+          last_error: `Partial: ${errors.length} of ${tenders.length} failed`,
+          total_tenders_found: finalCount || 0,
+        })
+        .eq('id', sourceId)
+    } else {
+      // Full success
+      await serviceClient
+        .from('tender_sources')
+        .update({
+          last_scan_status: 'success',
+          last_scanned_at: new Date().toISOString(),
+          last_error: null,
+          total_tenders_found: finalCount || 0,
+        })
+        .eq('id', sourceId)
     }
 
     console.log('[upload-pdf] === DONE ===')

@@ -1,7 +1,7 @@
 // mashcal-pdf.ts — Manual PDF upload only
 // Auto-scan disabled: mashcal.co.il blocks all Vercel IPs and public proxies.
 // Parsing: pdf-parse extracts raw text, xAI structures it into tenders.
-// VERSION: 2026-04-20-v2 (xAI forced, no regex fallback)
+// VERSION: 2026-04-20-v3 (date validation, batch insert)
 
 import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import type { TenderPoolItem } from './types'
@@ -15,6 +15,52 @@ interface ParsedTender {
   deadline: string | null
 }
 
+// ── Date validation ─────────────────────────────────────────────────────────
+function normalizeDeadline(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null
+
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  // Try ISO format: YYYY-MM-DD
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch
+    const year = parseInt(y)
+    const month = parseInt(m)
+    const day = parseInt(d)
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      console.warn('[mashcal] Invalid date parts:', trimmed, '→ null')
+      return null
+    }
+    const date = new Date(year, month - 1, day)
+    if (date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day) {
+      console.warn('[mashcal] Impossible date:', trimmed, '→ null')
+      return null
+    }
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+
+  // Try DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (dmyMatch) {
+    const [, d, m, y] = dmyMatch
+    return normalizeDeadline(`${y}-${m}-${d}`)
+  }
+
+  // Try DD/MM/YY
+  const dmyShort = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/)
+  if (dmyShort) {
+    const [, d, m, y] = dmyShort
+    return normalizeDeadline(`20${y}-${m}-${d}`)
+  }
+
+  console.warn('[mashcal] Unrecognized date format:', trimmed, '→ null')
+  return null
+}
+
 // ── Parse PDF buffer via xAI (ONLY method — no regex fallback) ──────────────
 export async function parseMashcalPdfBuffer(
   buffer: Buffer,
@@ -25,7 +71,7 @@ export async function parseMashcalPdfBuffer(
   const logs: string[] = []
   const log = (msg: string) => { console.log(msg); logs.push(msg) }
 
-  log('[mashcal] === parseMashcalPdfBuffer v2 (xAI) ===')
+  log('[mashcal] === parseMashcalPdfBuffer v3 (xAI + date validation) ===')
   log(`[mashcal] pubNum=${pubNum} year=${year} bufferSize=${buffer.length}`)
 
   // Step 1: Extract raw text
@@ -54,11 +100,20 @@ Each tender row contains these fields:
 - city (שם הרשות המקומית)
 - tender_number (מס' המכרז, like '19/26' or '1/2026')
 - title (שם המכרז, full description)
-- deadline (מועד להגשה, DD/MM/YYYY format)
+- deadline (מועד להגשה, DD/MM/YYYY format in source)
 
 FILTER OUT rows about jobs/employment: דרוש, דרושים, משרה, מכרז כח אדם, איוש משרה, מנהל/ת, רכז/ת, עובד/ת סוציאלי, גננ/ת — any personnel tender.
 
 KEEP procurement/services: שירותים, רכש, אספקה, עבודות, הפעלה, ייעוץ, ביצוע, השכרה, מתן, שיקום, אחזקה, פיתוח, תחזוקה, תכנון, הקמה.
+
+CRITICAL DATE RULES:
+- Deadline must be YYYY-MM-DD format with month 01-12 and day 01-31
+- The source PDF uses DD/MM/YYYY Israeli format (day first, then month)
+- Example: '4/5/2026' in source means May 4, 2026 → output "2026-05-04"
+- Example: '13/5/2026' means May 13, 2026 → output "2026-05-13"
+- If deadline is unclear, ambiguous, or missing, output null (not a guess)
+- Never output a month > 12 or day > 31
+- Year in source might be written as '26' — interpret as 2026
 
 Output ONLY this JSON:
 {
@@ -73,7 +128,7 @@ Output ONLY this JSON:
 }
 
 Keep title concise — the essential service/procurement subject.
-Convert deadline to YYYY-MM-DD format. If deadline unclear, use null.
+If deadline unclear, output null.
 
 Raw PDF text:
 ---
@@ -83,7 +138,7 @@ ${rawText.substring(0, 30000)}
     ],
   }
 
-  log(`[mashcal] xAI request body (first 500): ${JSON.stringify(requestBody).slice(0, 500)}`)
+  log(`[mashcal] Calling xAI (grok-4-fast-non-reasoning)...`)
 
   const res = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
@@ -110,7 +165,7 @@ ${rawText.substring(0, 30000)}
     .map((c: any) => c.text)
     .join('') || ''
 
-  log(`[mashcal] xAI raw response (first 2000): ${responseText.substring(0, 2000)}`)
+  log(`[mashcal] xAI response length: ${responseText.length}`)
 
   // Extract JSON from response
   const jsonMatch = responseText.match(/\{[\s\S]*\}/)
@@ -119,8 +174,6 @@ ${rawText.substring(0, 30000)}
   }
 
   const result = JSON.parse(jsonMatch[0])
-  log(`[mashcal] xAI parsed JSON keys: ${Object.keys(result).join(', ')}`)
-
   const parsedTenders: ParsedTender[] = result.tenders || []
   log(`[mashcal] xAI returned ${parsedTenders.length} tenders`)
 
@@ -129,7 +182,18 @@ ${rawText.substring(0, 30000)}
     return { tenders: [], logs }
   }
 
-  // Step 3: Post-filter — remove any job postings xAI missed
+  // Step 3: Log invalid dates from xAI
+  const badDates = parsedTenders.filter(t => {
+    if (!t.deadline) return false
+    const m = t.deadline.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+    if (!m) return true
+    return parseInt(m[2]) > 12 || parseInt(m[3]) > 31
+  })
+  if (badDates.length > 0) {
+    log(`[mashcal] WARNING: xAI returned ${badDates.length} invalid dates: ${JSON.stringify(badDates.map(t => ({ n: t.tender_number, d: t.deadline })))}`)
+  }
+
+  // Step 4: Post-filter — remove any job postings xAI missed
   const filtered = parsedTenders.filter(t => {
     const combined = `${t.title} ${t.city}`
     return !JOB_KEYWORDS.some(kw => combined.includes(kw))
@@ -139,17 +203,17 @@ ${rawText.substring(0, 30000)}
     log(`[mashcal] Post-filter removed ${parsedTenders.length - filtered.length} job postings`)
   }
 
-  // Step 4: Map to TenderPoolItem (3 key fields: title, publisher, deadline)
+  // Step 5: Map to TenderPoolItem with date normalization
   const tenders: TenderPoolItem[] = filtered.map(t => ({
     external_id: `${pubNum}-${year}-${t.tender_number.replace(/\//g, '-')}`,
     title: `${t.title} (מכרז ${t.tender_number})`,
     publisher: t.city,
     category: 'רשויות מקומיות',
-    publish_date: `${year}-${String(Math.ceil(pubNum / 2)).padStart(2, '0')}-01`,
-    deadline: t.deadline || null,
+    publish_date: `${year}-${String(Math.min(Math.ceil(pubNum / 2), 12)).padStart(2, '0')}-01`,
+    deadline: normalizeDeadline(t.deadline),
     url: 'https://www.mashcal.co.il/published-tenders',
     raw_data: {
-      _version: 'xai-v2',
+      _version: 'xai-v3',
       source: 'מכרזי משכ"ל',
       pub_number: pubNum,
       year,
@@ -157,7 +221,7 @@ ${rawText.substring(0, 30000)}
     },
   }))
 
-  log(`[mashcal] Final: ${tenders.length} tenders mapped`)
+  log(`[mashcal] Final: ${tenders.length} tenders mapped (all dates validated)`)
   return { tenders, logs }
 }
 
