@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 120
 
 import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
@@ -88,9 +88,18 @@ export async function POST(request: Request) {
     const { tenders, logs } = await parseMashcalPdfBuffer(buffer, pubNum, year, file.name)
     console.log('[upload-pdf] parsed', tenders.length, 'tenders')
 
-    // Upsert tenders into tender_pool
-    console.log('[upload-pdf] upserting to tender_pool')
     const serviceClient = await createServiceClient()
+
+    // Delete old tenders from same publication (removes scrambled garbage from previous attempts)
+    const { count: deletedCount } = await serviceClient
+      .from('tender_pool')
+      .delete({ count: 'exact' })
+      .eq('source_id', sourceId)
+      .like('external_id', `${pubNum}-${year}-%`)
+    console.log('[upload-pdf] Deleted', deletedCount || 0, 'old tenders from same publication')
+
+    // Insert fresh parsed tenders
+    console.log('[upload-pdf] upserting to tender_pool')
     let upsertCount = 0
     const errors: string[] = []
 
@@ -120,6 +129,7 @@ export async function POST(request: Request) {
         upsertCount++
       }
     }
+    console.log('[upload-pdf] Upserted', upsertCount, 'new tenders')
 
     // Update source stats
     const { count } = await serviceClient
