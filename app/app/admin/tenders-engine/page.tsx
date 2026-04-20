@@ -314,7 +314,7 @@ export default function TendersEnginePage() {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('source_id', uploadSourceId)
-      const res = await fetch('/api/admin/tenders-engine/upload-pdf', {
+      const res = await fetch('/api/admin/tenders-engine/upload-pdf?clear=1', {
         method: 'POST',
         body: formData,
       })

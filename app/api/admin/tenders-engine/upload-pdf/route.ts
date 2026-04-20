@@ -54,6 +54,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    console.log('[upload-pdf] === v2 (xAI forced) ===')
+
+    const url = new URL(request.url)
+    const clearAll = url.searchParams.get('clear') === '1'
+
     const formData = await request.formData()
     console.log('[upload-pdf] formData parsed')
 
@@ -62,6 +67,16 @@ export async function POST(request: Request) {
     const pubNumberStr = formData.get('pub_number') as string | null
 
     console.log('[upload-pdf] file:', file?.name, file?.size)
+
+    // If clear=1, delete ALL tenders for this source before processing
+    if (clearAll && sourceId) {
+      const sc = await createServiceClient()
+      const { count } = await sc
+        .from('tender_pool')
+        .delete({ count: 'exact' })
+        .eq('source_id', sourceId)
+      console.log('[upload-pdf] CLEAR ALL: deleted', count || 0, 'tenders for source', sourceId)
+    }
 
     if (!file || !sourceId) {
       return NextResponse.json({ error: 'file and source_id required' }, { status: 400 })
@@ -84,8 +99,21 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer())
     console.log('[upload-pdf] buffer size:', buffer.length)
 
-    console.log('[upload-pdf] calling parseMashcalPdfBuffer')
-    const { tenders, logs } = await parseMashcalPdfBuffer(buffer, pubNum, year, file.name)
+    console.log('[upload-pdf] calling parseMashcalPdfBuffer (xAI v2)')
+    let tenders: any[]
+    let logs: string[]
+    try {
+      const result = await parseMashcalPdfBuffer(buffer, pubNum, year, file.name)
+      tenders = result.tenders
+      logs = result.logs
+    } catch (parseErr: any) {
+      console.error('[upload-pdf] parseMashcalPdfBuffer THREW:', parseErr.message)
+      return NextResponse.json({
+        error: 'Parse failed',
+        message: parseErr.message,
+        stack: parseErr.stack?.split('\n').slice(0, 5),
+      }, { status: 500 })
+    }
     console.log('[upload-pdf] parsed', tenders.length, 'tenders')
 
     const serviceClient = await createServiceClient()

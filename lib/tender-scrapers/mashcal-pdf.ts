@@ -1,7 +1,7 @@
 // mashcal-pdf.ts — Manual PDF upload only
 // Auto-scan disabled: mashcal.co.il blocks all Vercel IPs and public proxies.
-// Use the admin "העלה PDF" button to upload PDFs manually.
 // Parsing: pdf-parse extracts raw text, xAI structures it into tenders.
+// VERSION: 2026-04-20-v2 (xAI forced, no regex fallback)
 
 import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 import type { TenderPoolItem } from './types'
@@ -15,15 +15,18 @@ interface ParsedTender {
   deadline: string | null
 }
 
-// ── Parse PDF buffer via xAI ────────────────────────────────────────────────
+// ── Parse PDF buffer via xAI (ONLY method — no regex fallback) ──────────────
 export async function parseMashcalPdfBuffer(
   buffer: Buffer,
   pubNum: number,
   year: number,
-  pdfUrl?: string,
+  _pdfUrl?: string,
 ): Promise<{ tenders: TenderPoolItem[]; logs: string[] }> {
   const logs: string[] = []
-  const log = (msg: string) => logs.push(msg)
+  const log = (msg: string) => { console.log(msg); logs.push(msg) }
+
+  log('[mashcal] === parseMashcalPdfBuffer v2 (xAI) ===')
+  log(`[mashcal] pubNum=${pubNum} year=${year} bufferSize=${buffer.length}`)
 
   // Step 1: Extract raw text
   const parsed = await pdfParse(buffer)
@@ -31,20 +34,21 @@ export async function parseMashcalPdfBuffer(
   log(`[mashcal] Raw text length: ${rawText.length}`)
 
   if (rawText.length < 50) {
-    log('[mashcal] PDF text too short, aborting')
-    return { tenders: [], logs }
+    throw new Error(`[mashcal] PDF text too short (${rawText.length} chars) — is this a valid PDF?`)
   }
 
   // Step 2: Send to xAI for structured parsing
   const apiKey = process.env.XAI_API_KEY
   if (!apiKey) {
-    log('[mashcal] XAI_API_KEY not set — cannot parse PDF')
-    return { tenders: [], logs }
+    throw new Error('[mashcal] XAI_API_KEY not set — cannot parse PDF. Set env var in Vercel.')
   }
 
-  log('[mashcal] Calling xAI to parse structure...')
-
-  const prompt = `Parse this PDF text from Israel's mashcal.co.il tender bulletin (publication ${pubNum}/${year}). Text is Hebrew RTL and may appear jumbled.
+  const requestBody = {
+    model: 'grok-4-fast-non-reasoning',
+    input: [
+      { role: 'system', content: 'You parse Hebrew municipal tender PDFs. Output strict JSON only, no markdown.' },
+      {
+        role: 'user', content: `Parse this PDF text from Israel's mashcal.co.il tender bulletin (publication ${pubNum}/${year}). Text is Hebrew RTL and may appear jumbled.
 
 Each tender row contains these fields:
 - city (שם הרשות המקומית)
@@ -74,56 +78,54 @@ Convert deadline to YYYY-MM-DD format. If deadline unclear, use null.
 Raw PDF text:
 ---
 ${rawText.substring(0, 30000)}
----`
-
-  let parsedTenders: ParsedTender[] = []
-
-  try {
-    const res = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+---`,
       },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [
-          { role: 'system', content: 'You parse Hebrew municipal tender PDFs. Output strict JSON only, no markdown.' },
-          { role: 'user', content: prompt },
-        ],
-      }),
-      signal: AbortSignal.timeout(90000),
-    })
+    ],
+  }
 
-    if (!res.ok) {
-      const errText = await res.text()
-      log(`[mashcal] xAI HTTP error: ${res.status} ${errText.substring(0, 200)}`)
-      return { tenders: [], logs }
-    }
+  log(`[mashcal] xAI request body (first 500): ${JSON.stringify(requestBody).slice(0, 500)}`)
 
-    const data = await res.json()
-    const text = data.output
-      ?.filter((b: any) => b.type === 'message')
-      .flatMap((b: any) => b.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('') || ''
+  const res = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(90000),
+  })
 
-    log(`[mashcal] xAI response length: ${text.length}`)
+  log(`[mashcal] xAI response status: ${res.status}`)
 
-    // Extract JSON from response
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      log('[mashcal] xAI returned no JSON')
-      log(`[mashcal] xAI raw: ${text.substring(0, 500)}`)
-      return { tenders: [], logs }
-    }
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`[mashcal] xAI HTTP ${res.status}: ${errText.substring(0, 300)}`)
+  }
 
-    const result = JSON.parse(jsonMatch[0])
-    parsedTenders = result.tenders || []
-    log(`[mashcal] xAI returned ${parsedTenders.length} tenders`)
-  } catch (err: any) {
-    log(`[mashcal] xAI error: ${err?.message}`)
+  const data = await res.json()
+  const responseText = data.output
+    ?.filter((b: any) => b.type === 'message')
+    .flatMap((b: any) => b.content)
+    .filter((c: any) => c.type === 'output_text')
+    .map((c: any) => c.text)
+    .join('') || ''
+
+  log(`[mashcal] xAI raw response (first 2000): ${responseText.substring(0, 2000)}`)
+
+  // Extract JSON from response
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) {
+    throw new Error(`[mashcal] xAI returned no JSON. Response: ${responseText.substring(0, 500)}`)
+  }
+
+  const result = JSON.parse(jsonMatch[0])
+  log(`[mashcal] xAI parsed JSON keys: ${Object.keys(result).join(', ')}`)
+
+  const parsedTenders: ParsedTender[] = result.tenders || []
+  log(`[mashcal] xAI returned ${parsedTenders.length} tenders`)
+
+  if (parsedTenders.length === 0) {
+    log('[mashcal] WARNING: xAI returned 0 tenders')
     return { tenders: [], logs }
   }
 
@@ -137,7 +139,7 @@ ${rawText.substring(0, 30000)}
     log(`[mashcal] Post-filter removed ${parsedTenders.length - filtered.length} job postings`)
   }
 
-  // Step 4: Map to TenderPoolItem
+  // Step 4: Map to TenderPoolItem (3 key fields: title, publisher, deadline)
   const tenders: TenderPoolItem[] = filtered.map(t => ({
     external_id: `${pubNum}-${year}-${t.tender_number.replace(/\//g, '-')}`,
     title: `${t.title} (מכרז ${t.tender_number})`,
@@ -147,10 +149,10 @@ ${rawText.substring(0, 30000)}
     deadline: t.deadline || null,
     url: 'https://www.mashcal.co.il/published-tenders',
     raw_data: {
+      _version: 'xai-v2',
       source: 'מכרזי משכ"ל',
       pub_number: pubNum,
       year,
-      pdf_url: pdfUrl,
       xai_parsed: t,
     },
   }))
