@@ -298,6 +298,19 @@ export default function TendersEnginePage() {
     await fetchData()
   }
 
+  const handleClearSource = async (id: string, name: string, count: number) => {
+    if (!confirm(`למחוק את כל ${count} המכרזים של "${name}"? פעולה זו לא ניתנת לביטול.`)) return
+    try {
+      const res = await fetch(`/api/admin/tenders-engine/clear-source?id=${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Clear failed')
+      toast({ title: 'מכרזים נמחקו', description: `${data.deleted} מכרזים נמחקו מ-${data.source}` })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה', description: err?.message, variant: 'destructive' })
+    }
+  }
+
   const handleDeleteSource = async (id: string) => {
     if (!confirm('למחוק מקור זה וכל המכרזים שלו?')) return
     try {
@@ -527,8 +540,18 @@ export default function TendersEnginePage() {
                   </div>
                 </div>
                 <div className="text-xs text-muted-foreground space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span>סה״כ מכרזים: {source.total_tenders_found}</span>
+                    {source.total_tenders_found > 0 && (
+                      <button
+                        className="text-[10px] text-red-400 hover:text-red-300 underline"
+                        onClick={() => handleClearSource(source.id, source.name, source.total_tenders_found)}
+                      >
+                        נקה מכרזים
+                      </button>
+                    )}
+                  </div>
                   <div>סריקה אחרונה: {formatRelativeTime(source.last_scanned_at)}</div>
-                  <div>סה״כ מכרזים: {source.total_tenders_found}</div>
                   {source.last_error && (
                     <div className="text-red-400 truncate" title={source.last_error}>
                       שגיאה: {source.last_error}

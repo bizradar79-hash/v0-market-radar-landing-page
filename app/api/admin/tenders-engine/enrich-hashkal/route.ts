@@ -86,13 +86,14 @@ interface EnrichResult {
   deadline: string | null
   description: string | null
   method: 'cheerio' | 'xai' | 'none'
+  isExemption: boolean
 }
 
 async function enrichFromHtml(url: string): Promise<EnrichResult> {
   const result: EnrichResult = {
     title: null, type: null, publisher: null,
     publishDate: null, deadline: null, description: null,
-    method: 'none',
+    method: 'none', isExemption: false,
   }
 
   // Phase A: cheerio
@@ -118,6 +119,19 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     const h1 = $('h1').first().text().trim()
     const h2 = $('h2').first().text().trim()
     const fullText = $('body').text()
+    const breadcrumbText = $('.breadcrumb, nav[aria-label="breadcrumb"]').text()
+
+    // Detect exemption notices
+    const isExemption =
+      /הודעות פטור/.test(breadcrumbText) ||
+      /כוונה להתקשרות|הודעת פטור|פטור ממכרז|התקשרות ספק יחיד/.test(h1)
+
+    if (isExemption) {
+      console.log('[hashkal-enrich] Detected exemption:', url, 'h1=', h1)
+      result.isExemption = true
+      result.method = 'cheerio'
+      return result
+    }
 
     const extractField = (label: string): string | null => {
       // Try structured data first: label in a dt/th followed by dd/td
@@ -271,6 +285,7 @@ export async function POST(request: Request) {
   let enrichedSuccess = 0
   let partial = 0
   let failed = 0
+  let skippedExemptions = 0
 
   for (const tender of tenders) {
     const url = tender.url
@@ -287,9 +302,18 @@ export async function POST(request: Request) {
     console.log('[hashkal-enrich] Processing:', url)
 
     const result = await enrichFromHtml(url)
-    console.log('[hashkal-enrich] Phase A result:', {
-      publisher: result.publisher, title: result.title, deadline: result.deadline, method: result.method,
+    console.log('[hashkal-enrich] Result:', {
+      publisher: result.publisher, title: result.title, deadline: result.deadline,
+      method: result.method, isExemption: result.isExemption,
     })
+
+    // Delete exemption notices — they aren't real tenders
+    if (result.isExemption) {
+      console.log('[hashkal-enrich] Deleting exemption:', tender.external_id)
+      await serviceClient.from('tender_pool').delete().eq('id', tender.id)
+      skippedExemptions++
+      continue
+    }
 
     if (result.method === 'none') {
       console.log('[hashkal-enrich] Final: not_found')
@@ -342,13 +366,14 @@ export async function POST(request: Request) {
     .is('metadata_enriched_at', null)
     .eq('status', 'open')
 
-  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} remaining=${remaining} ===`)
+  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} exemptions=${skippedExemptions} remaining=${remaining} ===`)
 
   return NextResponse.json({
     processed: tenders.length,
     enrichedSuccess,
     partial,
     failed,
+    skippedExemptions,
     remaining: remaining || 0,
   })
 }
