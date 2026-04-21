@@ -195,6 +195,17 @@ export async function POST(request: Request) {
     results.push(result)
   }
 
+  // Fire-and-forget enrichment for hashkal tenders
+  const hasHashkal = sources.some((s: any) => s.config?.scraper === 'mr_gov' || s.source_type === 'scraper')
+  if (hasHashkal) {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
+    fetch(`${baseUrl}/api/admin/tenders-engine/enrich-hashkal`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
+    }).catch(e => console.error('[scan] Hashkal enrichment trigger failed:', e?.message))
+    console.log('[scan] Hashkal enrichment triggered in background')
+  }
+
   return NextResponse.json({ success: true, results })
 }
 

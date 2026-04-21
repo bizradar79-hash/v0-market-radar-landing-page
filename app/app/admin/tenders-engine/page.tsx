@@ -50,6 +50,8 @@ interface TenderPoolItem {
   scraped_at: string
   url_enriched_at: string | null
   url_enrichment_status: string | null
+  metadata_enriched_at: string | null
+  metadata_enrichment_status: string | null
 }
 
 const SOURCE_ICONS: Record<string, typeof FileText> = {
@@ -356,6 +358,25 @@ export default function TendersEnginePage() {
     }
   }
 
+  const [enrichingHashkal, setEnrichingHashkal] = useState(false)
+  const handleEnrichHashkal = async () => {
+    setEnrichingHashkal(true)
+    try {
+      const res = await fetch('/api/admin/tenders-engine/enrich-hashkal', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+      toast({
+        title: 'העשרת מטא-דאטה',
+        description: `${data.enrichedSuccess} הועשרו, ${data.partial} חלקי, ${data.failed} נכשלו, ${data.remaining} ממתינים`,
+      })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
+    } finally {
+      setEnrichingHashkal(false)
+    }
+  }
+
   const [archiving, setArchiving] = useState(false)
   const handleArchiveExpired = async () => {
     setArchiving(true)
@@ -562,32 +583,63 @@ export default function TendersEnginePage() {
                       })()}
                     </>
                   ) : (
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => handleScan(source.id)}
-                        disabled={isScanning || scanningSource !== null}
-                      >
-                        {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
-                        סרוק עכשיו
-                      </Button>
-                      {source.source_type === 'pdf' && (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
                         <Button
                           size="sm"
                           variant="outline"
                           className="flex-1"
-                          onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
-                          disabled={uploading}
+                          onClick={() => handleScan(source.id)}
+                          disabled={isScanning || scanningSource !== null}
                         >
-                          {uploading && uploadSourceId === source.id
-                            ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
-                            : <Upload className="h-3 w-3 ml-1" />
-                          }
-                          העלה PDF
+                          {isScanning ? <Loader2 className="h-3 w-3 ml-1 animate-spin" /> : <RefreshCw className="h-3 w-3 ml-1" />}
+                          סרוק עכשיו
                         </Button>
-                      )}
+                        {source.source_type === 'pdf' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                            onClick={() => { setUploadSourceId(source.id); fileInputRef.current?.click() }}
+                            disabled={uploading}
+                          >
+                            {uploading && uploadSourceId === source.id
+                              ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                              : <Upload className="h-3 w-3 ml-1" />
+                            }
+                            העלה PDF
+                          </Button>
+                        )}
+                      </div>
+                      {source.source_type === 'scraper' && (() => {
+                        const srcTenders = tenders.filter(t => t.source_id === source.id)
+                        const enrichedCount = srcTenders.filter(t => t.metadata_enrichment_status === 'success' || t.metadata_enrichment_status === 'partial').length
+                        const total = srcTenders.length
+                        const pending = srcTenders.filter(t => !t.metadata_enriched_at).length
+                        if (total === 0) return null
+                        return (
+                          <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground text-center">
+                              מטא-דאטה הועשר: {enrichedCount} / {total}
+                              {pending > 0 && ` (${pending} ממתינים)`}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                              onClick={handleEnrichHashkal}
+                              disabled={enrichingHashkal || pending === 0}
+                            >
+                              {enrichingHashkal
+                                ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                                : <Search className="h-3 w-3 ml-1" />
+                              }
+                              העשר מטא-דאטה
+                            </Button>
+                            <p className="text-[10px] text-muted-foreground text-center italic">העשרה רצה ברקע אחרי סריקה</p>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/enrich-tenders",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/enrich-hashkal",
+      "schedule": "15 4 * * *"
     }
   ]
 }
