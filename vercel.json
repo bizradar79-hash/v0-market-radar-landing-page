@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/archive-expired-tenders",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/enrich-tenders",
+      "schedule": "0 4 * * *"
     }
   ]
 }

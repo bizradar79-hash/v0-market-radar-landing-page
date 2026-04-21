@@ -48,6 +48,8 @@ interface TenderPoolItem {
   status: string
   raw_data: any
   scraped_at: string
+  url_enriched_at: string | null
+  url_enrichment_status: string | null
 }
 
 const SOURCE_ICONS: Record<string, typeof FileText> = {
@@ -335,6 +337,25 @@ export default function TendersEnginePage() {
     }
   }
 
+  const [enriching, setEnriching] = useState(false)
+  const handleEnrichUrls = async () => {
+    setEnriching(true)
+    try {
+      const res = await fetch('/api/admin/tenders-engine/enrich-urls', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+      toast({
+        title: 'העשרת לינקים',
+        description: `${data.enriched} נמצאו, ${data.notFound} לא נמצאו, ${data.remaining} ממתינים`,
+      })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
+    } finally {
+      setEnriching(false)
+    }
+  }
+
   const [archiving, setArchiving] = useState(false)
   const handleArchiveExpired = async () => {
     setArchiving(true)
@@ -510,6 +531,35 @@ export default function TendersEnginePage() {
                         העלה PDF
                       </Button>
                       <p className="text-xs text-muted-foreground text-center">סריקה אוטומטית חסומה. העלה PDF ידני מ-mashcal.co.il</p>
+                      {(() => {
+                        const mashcalTenders = tenders.filter(t => t.source_id === source.id)
+                        const enrichedCount = mashcalTenders.filter(t => t.url_enrichment_status === 'success').length
+                        const total = mashcalTenders.length
+                        const pending = mashcalTenders.filter(t => !t.url_enriched_at).length
+                        if (total === 0) return null
+                        return (
+                          <div className="mt-1 space-y-1">
+                            <p className="text-xs text-muted-foreground text-center">
+                              לינקים ישירים: {enrichedCount} / {total} מכרזים
+                              {pending > 0 && ` (${pending} ממתינים)`}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full"
+                              onClick={handleEnrichUrls}
+                              disabled={enriching || pending === 0}
+                            >
+                              {enriching
+                                ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
+                                : <Search className="h-3 w-3 ml-1" />
+                              }
+                              העשר לינקים עכשיו
+                            </Button>
+                            <p className="text-[10px] text-muted-foreground text-center italic">העשרה אוטומטית רצה ברקע אחרי העלאה</p>
+                          </div>
+                        )
+                      })()}
                     </>
                   ) : (
                     <div className="flex gap-2">
@@ -689,9 +739,20 @@ export default function TendersEnginePage() {
                       <td className="p-3">
                         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                           {tender.url && (
-                            <Button size="icon" variant="ghost" className="h-7 w-7" asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7"
+                              asChild
+                              title={
+                                tender.url_enrichment_status === 'success' ? 'קישור ישיר למכרז'
+                                : tender.url_enrichment_status === 'not_found' ? 'לא נמצא קישור ישיר'
+                                : !tender.url_enriched_at ? 'בבדיקה'
+                                : 'קישור כללי'
+                              }
+                            >
                               <a href={tender.url} target="_blank" rel="noopener noreferrer">
-                                <ExternalLink className="h-3.5 w-3.5" />
+                                <ExternalLink className={`h-3.5 w-3.5 ${tender.url_enrichment_status === 'success' ? 'text-green-400' : ''}`} />
                               </a>
                             </Button>
                           )}

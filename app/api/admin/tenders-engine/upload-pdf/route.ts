@@ -238,11 +238,23 @@ export async function POST(request: Request) {
     console.log('[upload-pdf] === DONE ===')
     console.log('[upload-pdf] Parsed:', tenders.length, 'Inserted:', upsertCount, 'Errors:', errors.length, 'DB count:', finalCount)
 
+    // Fire-and-forget URL enrichment in background
+    if (upsertCount > 0) {
+      const enrichUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'}/api/admin/tenders-engine/enrich-urls`
+      fetch(enrichUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.CRON_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+      }).catch(err => console.error('[upload-pdf] Enrichment trigger failed:', err?.message))
+      console.log('[upload-pdf] Enrichment triggered in background')
+    }
+
     return NextResponse.json({
       success: true,
       parsed: tenders.length,
       saved: upsertCount,
-      deleted: clearAll ? 'all' : `pattern ${pubNum}-${year}-%`,
       dbCount: finalCount,
       errors: errors.length > 0 ? errors.slice(0, 5) : undefined,
       logs,
