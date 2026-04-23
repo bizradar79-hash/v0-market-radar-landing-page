@@ -87,13 +87,14 @@ interface EnrichResult {
   description: string | null
   method: 'cheerio' | 'xai' | 'none'
   isExemption: boolean
+  isRFI: boolean
 }
 
 async function enrichFromHtml(url: string): Promise<EnrichResult> {
   const result: EnrichResult = {
     title: null, type: null, publisher: null,
     publishDate: null, deadline: null, description: null,
-    method: 'none', isExemption: false,
+    method: 'none', isExemption: false, isRFI: false,
   }
 
   // Phase A: cheerio with targeted selectors for mr.gov.il detail pages
@@ -127,6 +128,18 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     if (isExemption) {
       console.log('[hashkal-enrich] Detected exemption:', url, 'h1=', h1)
       result.isExemption = true
+      result.method = 'cheerio'
+      return result
+    }
+
+    // Detect RFI (Request For Information) — not real tenders
+    const isRFI =
+      /RFI|בקשה למידע/i.test(h1) ||
+      /RFI|בקשה למידע/i.test(breadcrumbText)
+
+    if (isRFI) {
+      console.log('[hashkal-enrich] Detected RFI:', url, 'h1=', h1)
+      result.isRFI = true
       result.method = 'cheerio'
       return result
     }
@@ -356,6 +369,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ processed: 0, message: 'No hashkal sources found' })
   }
 
+  // One-time cleanup: delete RFIs that slipped through before this filter existed
+  const { count: rfiCleanup } = await serviceClient
+    .from('tender_pool')
+    .delete({ count: 'exact' })
+    .in('source_id', sourceIds)
+    .or('description.eq.RFI,description.ilike.RFI %,title.ilike.%RFI%,title.ilike.%בקשה למידע%')
+  if (rfiCleanup && rfiCleanup > 0) {
+    console.log('[hashkal-enrich] Cleaned up', rfiCleanup, 'existing RFIs')
+  }
+
   // Get up to 30 unenriched tenders per batch
   const { data: tenders, error } = await serviceClient
     .from('tender_pool')
@@ -382,6 +405,7 @@ export async function POST(request: Request) {
   let partial = 0
   let failed = 0
   let skippedExemptions = 0
+  let skippedRFI = 0
   let expiredDeleted = 0
 
   for (const tender of tenders) {
@@ -401,7 +425,7 @@ export async function POST(request: Request) {
     const result = await enrichFromHtml(url)
     console.log('[hashkal-enrich] Result:', {
       publisher: result.publisher, title: result.title, deadline: result.deadline,
-      method: result.method, isExemption: result.isExemption,
+      method: result.method, isExemption: result.isExemption, isRFI: result.isRFI,
     })
 
     // Delete exemption notices — they aren't real tenders
@@ -409,6 +433,14 @@ export async function POST(request: Request) {
       console.log('[hashkal-enrich] Deleting exemption:', tender.external_id)
       await serviceClient.from('tender_pool').delete().eq('id', tender.id)
       skippedExemptions++
+      continue
+    }
+
+    // Delete RFIs (Request For Information) — not real tenders
+    if (result.isRFI) {
+      console.log('[hashkal-enrich] Deleting RFI:', tender.external_id)
+      await serviceClient.from('tender_pool').delete().eq('id', tender.id)
+      skippedRFI++
       continue
     }
 
@@ -506,7 +538,7 @@ export async function POST(request: Request) {
     .is('metadata_enriched_at', null)
     .eq('status', 'open')
 
-  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} exemptions=${skippedExemptions} expired=${expiredDeleted} remaining=${remaining} ===`)
+  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} exemptions=${skippedExemptions} rfi=${skippedRFI} expired=${expiredDeleted} rfiCleanup=${rfiCleanup || 0} remaining=${remaining} ===`)
 
   return NextResponse.json({
     processed: tenders.length,
@@ -514,6 +546,7 @@ export async function POST(request: Request) {
     partial,
     failed,
     skippedExemptions,
+    skippedRFI: skippedRFI + (rfiCleanup || 0),
     expiredDeleted,
     remaining: remaining || 0,
   })
