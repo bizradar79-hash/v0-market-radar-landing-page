@@ -210,15 +210,18 @@ export async function POST(request: Request) {
     results.push(result)
   }
 
-  // Fire-and-forget enrichment for hashkal tenders
+  // Fire-and-forget enrichment for hashkal tenders (staggered 4x for larger batches)
   const hasHashkal = sources.some((s: any) => s.config?.scraper === 'mr_gov' || s.source_type === 'scraper')
   if (hasHashkal) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
-    fetch(`${baseUrl}/api/admin/tenders-engine/enrich-hashkal`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` },
-    }).catch(e => console.error('[scan] Hashkal enrichment trigger failed:', e?.message))
-    console.log('[scan] Hashkal enrichment triggered in background')
+    const enrichUrl = `${baseUrl}/api/admin/tenders-engine/enrich-hashkal`
+    const enrichHeaders = { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 500))
+      fetch(enrichUrl, { method: 'POST', headers: enrichHeaders })
+        .catch(e => console.error(`[scan] Enrich trigger ${i} failed:`, e?.message))
+    }
+    console.log('[scan] Hashkal enrichment triggered 4x in background')
   }
 
   return NextResponse.json({ success: true, results })
