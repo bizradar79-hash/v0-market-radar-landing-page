@@ -216,12 +216,12 @@ export async function POST(request: Request) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
     const enrichUrl = `${baseUrl}/api/admin/tenders-engine/enrich-hashkal`
     const enrichHeaders = { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
-    for (let i = 0; i < 4; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 500))
+    for (let i = 0; i < 8; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1000))
       fetch(enrichUrl, { method: 'POST', headers: enrichHeaders })
         .catch(e => console.error(`[scan] Enrich trigger ${i} failed:`, e?.message))
     }
-    console.log('[scan] Hashkal enrichment triggered 4x in background')
+    console.log('[scan] Hashkal enrichment triggered 8x in background (30/batch)')
   }
 
   return NextResponse.json({ success: true, results })

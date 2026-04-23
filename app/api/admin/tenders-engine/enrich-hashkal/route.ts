@@ -96,7 +96,7 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     method: 'none', isExemption: false,
   }
 
-  // Phase A: cheerio
+  // Phase A: cheerio with targeted selectors for mr.gov.il detail pages
   try {
     const res = await fetch(url, {
       headers: {
@@ -116,9 +116,7 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     const html = await res.text()
     const $ = cheerio.load(html)
 
-    const h1 = $('h1').first().text().trim()
-    const h2 = $('h2').first().text().trim()
-    const fullText = $('body').text()
+    const h1 = $('h1.bids-head').first().text().trim()
     const breadcrumbText = $('.breadcrumb, nav[aria-label="breadcrumb"]').text()
 
     // Detect exemption notices
@@ -133,34 +131,71 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
       return result
     }
 
-    const extractField = (label: string): string | null => {
-      // Try structured data first: label in a dt/th followed by dd/td
-      const labelEl = $(`dt:contains("${label}"), th:contains("${label}"), .label:contains("${label}"), span:contains("${label}")`)
-      if (labelEl.length) {
-        const valueEl = labelEl.first().next()
-        const val = valueEl.text().trim()
-        if (val && val.length > 1 && val.length < 500) return val
-      }
-      // Fallback: regex on full text
-      const regex = new RegExp(`${label}[:\\s]*([^\\n]{3,300})`, 'u')
-      const match = fullText.match(regex)
-      return match?.[1]?.trim() || null
+    // --- Targeted extraction using known DOM structure ---
+
+    // Deadline: <span id="lastDate">30/04/2026 ,12:00</span>
+    const lastDateRaw = $('#lastDate').text().trim()
+
+    // Publisher: #sub-head-details parent's <h2>
+    const publisher = $('#sub-head-details').parent().find('h2').text().trim()
+
+    // Publish date: .date .sub-head sibling span
+    const publishDateRaw = $('.date.details-item-wrapper span').first().text().trim()
+
+    // Title: first h2 inside .bids-top-sec-wrapper (after publisher h2)
+    // The title is the second h2, or the tender name in h1 sub-section
+    // Actually: h1 = type (e.g. "מכרז פומבי"), publisher h2 = publisher name
+    // The tender subject is in h2 inside .details-head (same as publisher section)
+    // Let's get it from the .bids-head-sub or the main content
+    const titleEl = $('h2.search-results-content-head, .bids-body-top-sec h2').first()
+    let title = titleEl.text().trim()
+    // If the h2 is the publisher, look for a different title element
+    if (title === publisher) {
+      // Try the h1 sub-text or the mahut
+      title = ''
     }
 
-    const publisher = extractField('שם המפרסם')
-    const publishDate = extractField('תאריך פרסום')
-    const deadline = extractField('מועד אחרון להגשה') || extractField('מועד אחרון')
-    const mahut = extractField('מהות ההתקשרות') || extractField('תיאור')
+    // Description / mahut: look for "מהות ההתקשרות" or "תיאור" in the main content only
+    const mainContent = $('#mainContent')
+    const mainText = mainContent.length ? mainContent.text() : $('body').text()
+
+    // Scope text to before "אולי יעניין אותך גם" (related tenders)
+    const relatedIdx = mainText.indexOf('אולי יעניין אותך גם')
+    const scopedText = relatedIdx > 0 ? mainText.slice(0, relatedIdx) : mainText
+
+    const mahutMatch = scopedText.match(/מהות ההתקשרות[:\s]*([^\n]{3,500})/u)
+    const mahut = mahutMatch?.[1]?.trim() || null
+
+    // Also try extracting a better title from scoped text
+    if (!title) {
+      // Fallback: first h2 in main content that isn't the publisher
+      $('h2').each((_, el) => {
+        const t = $(el).text().trim()
+        if (t && t !== publisher && t.length > 5 && t.length < 300 && !t.includes('אולי יעניין')) {
+          title = t
+          return false // break
+        }
+      })
+    }
 
     result.type = h1 || null
-    result.title = h2 || null
-    result.publisher = publisher
-    result.publishDate = normalizeDate(publishDate)
-    result.deadline = normalizeDate(deadline)
+    result.title = title || null
+    result.publisher = publisher || null
+    result.publishDate = normalizeDate(publishDateRaw)
+    result.deadline = normalizeDate(lastDateRaw)
     result.description = mahut
 
+    const deadlineMatches = (html.match(/מועד אחרון להגשה/g) || []).length
+    console.log('[hashkal-enrich] Cheerio extraction:', {
+      deadline: result.deadline, deadlineRaw: lastDateRaw || 'EMPTY',
+      deadlineMatchesInHtml: deadlineMatches,
+      publisher: result.publisher?.slice(0, 40),
+      publishDate: result.publishDate,
+      title: result.title?.slice(0, 50),
+    })
+
     // Check if we got enough from cheerio
-    if (result.title || result.publisher) {
+    if (result.title || result.publisher || result.deadline) {
       result.method = 'cheerio'
       return result
     }
@@ -321,7 +356,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ processed: 0, message: 'No hashkal sources found' })
   }
 
-  // Get up to 10 unenriched tenders
+  // Get up to 30 unenriched tenders per batch
   const { data: tenders, error } = await serviceClient
     .from('tender_pool')
     .select('id, title, url, external_id')
@@ -329,7 +364,7 @@ export async function POST(request: Request) {
     .is('metadata_enriched_at', null)
     .eq('status', 'open')
     .order('scraped_at', { ascending: false })
-    .limit(10)
+    .limit(30)
 
   if (error) {
     console.error('[hashkal-enrich] Query error:', error.message)
@@ -448,6 +483,19 @@ export async function POST(request: Request) {
 
     if (status === 'success') enrichedSuccess++
     else partial++
+  }
+
+  // Post-enrichment cleanup: delete any tenders with past deadline (across all hashkal)
+  const today = new Date().toISOString().split('T')[0]
+  const { count: postCleanup } = await serviceClient
+    .from('tender_pool')
+    .delete({ count: 'exact' })
+    .in('source_id', sourceIds)
+    .lt('deadline', today)
+    .not('deadline', 'is', null)
+  if (postCleanup && postCleanup > 0) {
+    console.log(`[hashkal-enrich] Post-cleanup: deleted ${postCleanup} expired tenders`)
+    expiredDeleted += postCleanup
   }
 
   // Count remaining
