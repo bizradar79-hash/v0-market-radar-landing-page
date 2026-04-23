@@ -240,6 +240,67 @@ If you cannot access the page, return all null.`,
   return result
 }
 
+async function enrichViaXai(url: string): Promise<{ title?: string; publisher?: string; deadline?: string } | null> {
+  const apiKey = process.env.XAI_API_KEY
+  if (!apiKey) return null
+
+  try {
+    console.log('[hashkal-enrich] enrichViaXai for', url)
+    const res = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [
+          { role: 'system', content: 'You extract metadata from Israeli government tender pages. Output JSON only, no markdown.' },
+          {
+            role: 'user', content: `Visit this Israeli government tender page and extract basic metadata:
+${url}
+
+Return JSON only:
+{"title": "tender name/subject or null", "publisher": "שם המפרסם or null", "deadline": "YYYY-MM-DD or null if expired/missing"}
+
+Date format: DD/MM/YYYY in source → YYYY-MM-DD in output.
+If deadline says "חלף" (expired), output null.
+If you cannot access the page, return all null.`,
+          },
+        ],
+        tools: [{ type: 'web_search' }],
+      }),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (!res.ok) {
+      console.log('[hashkal-enrich] enrichViaXai HTTP error:', res.status)
+      return null
+    }
+
+    const data = await res.json()
+    const text = data.output
+      ?.filter((b: any) => b.type === 'message')
+      .flatMap((b: any) => b.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('') || ''
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return null
+
+    const parsed = JSON.parse(jsonMatch[0])
+    return {
+      title: parsed.title || undefined,
+      publisher: parsed.publisher || undefined,
+      deadline: normalizeDate(parsed.deadline) || undefined,
+    }
+  } catch (err: any) {
+    console.log('[hashkal-enrich] enrichViaXai error:', err?.message)
+    return null
+  }
+}
+
 export async function POST(request: Request) {
   if (!(await verifyAccess(request))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -286,6 +347,7 @@ export async function POST(request: Request) {
   let partial = 0
   let failed = 0
   let skippedExemptions = 0
+  let expiredDeleted = 0
 
   for (const tender of tenders) {
     const url = tender.url
@@ -315,7 +377,37 @@ export async function POST(request: Request) {
       continue
     }
 
+    // Delete expired tenders (deadline in the past)
+    const today = new Date().toISOString().split('T')[0]
+    if (result.deadline && result.deadline < today) {
+      console.log('[hashkal-enrich] Expired tender, deleting:', tender.external_id, result.deadline)
+      await serviceClient.from('tender_pool').delete().eq('id', tender.id)
+      expiredDeleted++
+      continue
+    }
+
     if (result.method === 'none') {
+      // Phase B fallback: try xAI for publisher/deadline only
+      const xaiResult = await enrichViaXai(tender.url)
+      if (xaiResult) {
+        if (xaiResult.deadline && xaiResult.deadline < today) {
+          console.log('[hashkal-enrich] Expired (xAI), deleting:', tender.external_id)
+          await serviceClient.from('tender_pool').delete().eq('id', tender.id)
+          expiredDeleted++
+          continue
+        }
+        const update: Record<string, any> = {
+          metadata_enriched_at: new Date().toISOString(),
+          metadata_enrichment_status: 'partial',
+        }
+        if (xaiResult.publisher) update.publisher = xaiResult.publisher
+        if (xaiResult.deadline) update.deadline = xaiResult.deadline
+        if (xaiResult.title) update.title = xaiResult.title
+        await serviceClient.from('tender_pool').update(update).eq('id', tender.id)
+        partial++
+        continue
+      }
+
       console.log('[hashkal-enrich] Final: not_found')
       await serviceClient.from('tender_pool').update({
         metadata_enriched_at: new Date().toISOString(),
@@ -366,7 +458,7 @@ export async function POST(request: Request) {
     .is('metadata_enriched_at', null)
     .eq('status', 'open')
 
-  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} exemptions=${skippedExemptions} remaining=${remaining} ===`)
+  console.log(`[hashkal-enrich] === Done: success=${enrichedSuccess} partial=${partial} failed=${failed} exemptions=${skippedExemptions} expired=${expiredDeleted} remaining=${remaining} ===`)
 
   return NextResponse.json({
     processed: tenders.length,
@@ -374,6 +466,7 @@ export async function POST(request: Request) {
     partial,
     failed,
     skippedExemptions,
+    expiredDeleted,
     remaining: remaining || 0,
   })
 }
