@@ -7,6 +7,7 @@ import { cookies } from 'next/headers'
 import { scrapeMrGov } from '@/lib/tender-scrapers/mr-gov'
 import { scrapeMashcalPdfs } from '@/lib/tender-scrapers/mashcal-pdf'
 import { scrapePublicCompanies } from '@/lib/tender-scrapers/public-companies'
+import { scrapePublicTenderUrls } from '@/lib/tender-scrapers/public-tender-urls'
 import type { TenderPoolItem, TenderSource } from '@/lib/tender-scrapers/types'
 
 async function createServiceClient() {
@@ -61,6 +62,8 @@ async function runScraper(source: TenderSource): Promise<TenderPoolItem[]> {
       return scrapeMrGov()
     case 'mashcal_pdf':
       return scrapeMashcalPdfs()
+    case 'public_tender_urls':
+      return scrapePublicTenderUrls(source)
     case 'ai_search':
       return scrapePublicCompanies(source)
     default:
@@ -222,6 +225,20 @@ export async function POST(request: Request) {
         .catch(e => console.error(`[scan] Enrich trigger ${i} failed:`, e?.message))
     }
     console.log('[scan] Hashkal enrichment triggered 8x in background (30/batch)')
+  }
+
+  // Fire-and-forget enrichment for public tender URLs
+  const hasPublicUrls = sources.some((s: any) => s.config?.scraper === 'public_tender_urls')
+  if (hasPublicUrls) {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
+    const enrichUrl = `${baseUrl}/api/admin/tenders-engine/enrich-public`
+    const enrichHeaders = { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1000))
+      fetch(enrichUrl, { method: 'POST', headers: enrichHeaders })
+        .catch(e => console.error(`[scan] Public enrich trigger ${i} failed:`, e?.message))
+    }
+    console.log('[scan] Public tender enrichment triggered 4x in background')
   }
 
   return NextResponse.json({ success: true, results })

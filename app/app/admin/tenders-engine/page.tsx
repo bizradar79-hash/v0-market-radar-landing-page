@@ -89,6 +89,11 @@ function formatRelativeTime(dateStr: string | null): string {
   return `לפני ${days} ימים`
 }
 
+function isPublicUrlsSource(source: TenderSource | null): boolean {
+  if (!source) return false
+  return source.config?.scraper === 'public_tender_urls' || source.config?.scraper === 'ai_search'
+}
+
 // ── Source Modal ──────────────────────────────────────────────────────────────
 function SourceModal({ source, onClose, onSave }: {
   source: TenderSource | null  // null = new
@@ -104,14 +109,43 @@ function SourceModal({ source, onClose, onSave }: {
   const [saving, setSaving] = useState(false)
   const [configError, setConfigError] = useState('')
 
+  // URL list mode for public_tender_urls sources
+  const showUrlList = isPublicUrlsSource(source)
+  const [urls, setUrls] = useState<string[]>(source?.config?.urls || [])
+  const [newUrl, setNewUrl] = useState('')
+
+  const addUrl = () => {
+    const trimmed = newUrl.trim()
+    if (!trimmed) return
+    if (!trimmed.startsWith('https://')) {
+      setConfigError('URL חייב להתחיל ב-https://')
+      return
+    }
+    if (urls.includes(trimmed)) {
+      setConfigError('URL כבר קיים ברשימה')
+      return
+    }
+    setUrls(prev => [...prev, trimmed])
+    setNewUrl('')
+    setConfigError('')
+  }
+
+  const removeUrl = (idx: number) => {
+    setUrls(prev => prev.filter((_, i) => i !== idx))
+  }
+
   const handleSave = async () => {
     let config: any
-    try {
-      config = JSON.parse(configJson)
-      setConfigError('')
-    } catch {
-      setConfigError('JSON לא תקין')
-      return
+    if (showUrlList) {
+      config = { scraper: 'public_tender_urls', urls }
+    } else {
+      try {
+        config = JSON.parse(configJson)
+        setConfigError('')
+      } catch {
+        setConfigError('JSON לא תקין')
+        return
+      }
     }
     setSaving(true)
     try {
@@ -154,21 +188,58 @@ function SourceModal({ source, onClose, onSave }: {
             </Select>
           </div>
 
-          <div>
-            <Label>הגדרות (JSON)</Label>
-            <Textarea
-              value={configJson}
-              onChange={e => setConfigJson(e.target.value)}
-              className="font-mono text-xs h-32"
-              dir="ltr"
-            />
-            {configError && <p className="text-xs text-red-400 mt-1">{configError}</p>}
-            <p className="text-xs text-muted-foreground mt-1">
-              {sourceType === 'scraper' && 'דוגמה: {"scraper": "mr_gov", "base_url": "..."}'}
-              {sourceType === 'pdf' && 'דוגמה: {"scraper": "mashcal_pdf", "list_url": "..."}'}
-              {sourceType === 'api' && 'דוגמה: {"scraper": "ai_search", "queries": ["מכרזי בנקים 2026"]}'}
-            </p>
-          </div>
+          {showUrlList ? (
+            <div>
+              <Label>דפי מכרזים</Label>
+              <div className="mt-2 space-y-2">
+                {urls.map((url, idx) => (
+                  <div key={idx} className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2">
+                    <Globe className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="text-xs truncate flex-1" dir="ltr" title={url}>{url}</span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0 text-red-400 hover:text-red-300" onClick={() => removeUrl(idx)}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+                {urls.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-2">אין דפי מכרזים. הוסף URL למטה.</p>
+                )}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Input
+                  value={newUrl}
+                  onChange={e => { setNewUrl(e.target.value); setConfigError('') }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addUrl() } }}
+                  placeholder="https://www.example.co.il/tenders"
+                  className="text-xs flex-1"
+                  dir="ltr"
+                />
+                <Button size="sm" variant="outline" onClick={addUrl} disabled={!newUrl.trim()}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              {configError && <p className="text-xs text-red-400 mt-1">{configError}</p>}
+              <p className="text-xs text-muted-foreground mt-1">
+                הדבק URL של דף רשימת מכרזים. המערכת תזהה את המכרזים ותעשיר אוטומטית.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <Label>הגדרות (JSON)</Label>
+              <Textarea
+                value={configJson}
+                onChange={e => setConfigJson(e.target.value)}
+                className="font-mono text-xs h-32"
+                dir="ltr"
+              />
+              {configError && <p className="text-xs text-red-400 mt-1">{configError}</p>}
+              <p className="text-xs text-muted-foreground mt-1">
+                {sourceType === 'scraper' && 'דוגמה: {"scraper": "mr_gov", "base_url": "..."}'}
+                {sourceType === 'pdf' && 'דוגמה: {"scraper": "mashcal_pdf", "list_url": "..."}'}
+                {sourceType === 'api' && 'דוגמה: {"scraper": "ai_search", "queries": ["מכרזי בנקים 2026"]}'}
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <Label>פעיל</Label>
@@ -368,6 +439,25 @@ export default function TendersEnginePage() {
       toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
     } finally {
       setEnriching(false)
+    }
+  }
+
+  const [enrichingPublic, setEnrichingPublic] = useState(false)
+  const handleEnrichPublic = async () => {
+    setEnrichingPublic(true)
+    try {
+      const res = await fetch('/api/admin/tenders-engine/enrich-public', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+      toast({
+        title: 'העשרת מכרזים ציבוריים',
+        description: `${data.enrichedSuccess} הועשרו, ${data.skipped} דולגו, ${data.failed} נכשלו, ${data.remaining} ממתינים`,
+      })
+      await fetchData()
+    } catch (err: any) {
+      toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
+    } finally {
+      setEnrichingPublic(false)
     }
   }
 
@@ -634,12 +724,15 @@ export default function TendersEnginePage() {
                           </Button>
                         )}
                       </div>
-                      {source.source_type === 'scraper' && (() => {
+                      {(source.source_type === 'scraper' || source.config?.scraper === 'public_tender_urls' || source.config?.scraper === 'ai_search') && (() => {
                         const srcTenders = tenders.filter(t => t.source_id === source.id)
                         const enrichedCount = srcTenders.filter(t => t.metadata_enrichment_status === 'success' || t.metadata_enrichment_status === 'partial').length
                         const total = srcTenders.length
                         const pending = srcTenders.filter(t => !t.metadata_enriched_at).length
                         if (total === 0) return null
+                        const isPublic = source.config?.scraper === 'public_tender_urls' || source.config?.scraper === 'ai_search'
+                        const enrichHandler = isPublic ? handleEnrichPublic : handleEnrichHashkal
+                        const enrichLoading = isPublic ? enrichingPublic : enrichingHashkal
                         return (
                           <div className="space-y-1">
                             <p className="text-xs text-muted-foreground text-center">
@@ -650,10 +743,10 @@ export default function TendersEnginePage() {
                               size="sm"
                               variant="outline"
                               className="w-full"
-                              onClick={handleEnrichHashkal}
-                              disabled={enrichingHashkal || pending === 0}
+                              onClick={enrichHandler}
+                              disabled={enrichLoading || pending === 0}
                             >
-                              {enrichingHashkal
+                              {enrichLoading
                                 ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
                                 : <Search className="h-3 w-3 ml-1" />
                               }
