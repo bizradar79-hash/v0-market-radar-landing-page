@@ -94,6 +94,17 @@ function isPublicUrlsSource(source: TenderSource | null): boolean {
   return source.config?.scraper === 'public_tender_urls' || source.config?.scraper === 'ai_search'
 }
 
+// Client-side adapter registry (mirrors lib/tender-scrapers/adapters)
+const KNOWN_ADAPTERS: { pattern: RegExp; name: string }[] = [
+  { pattern: /rail\.co\.il/i, name: 'רכבת ישראל' },
+  // Add more as adapters are built
+]
+
+function getAdapterLabel(url: string): string | null {
+  const match = KNOWN_ADAPTERS.find(a => a.pattern.test(url))
+  return match ? match.name : null
+}
+
 // ── Source Modal ──────────────────────────────────────────────────────────────
 function SourceModal({ source, onClose, onSave }: {
   source: TenderSource | null  // null = new
@@ -192,15 +203,25 @@ function SourceModal({ source, onClose, onSave }: {
             <div>
               <Label>דפי מכרזים</Label>
               <div className="mt-2 space-y-2">
-                {urls.map((url, idx) => (
-                  <div key={idx} className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2">
-                    <Globe className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span className="text-xs truncate flex-1" dir="ltr" title={url}>{url}</span>
-                    <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0 text-red-400 hover:text-red-300" onClick={() => removeUrl(idx)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
+                {urls.map((url, idx) => {
+                  const adapterName = getAdapterLabel(url)
+                  return (
+                    <div key={idx} className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2">
+                      <Globe className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs truncate block" dir="ltr" title={url}>{url}</span>
+                        {adapterName ? (
+                          <span className="text-[10px] text-green-400">✓ {adapterName} (adapter)</span>
+                        ) : (
+                          <span className="text-[10px] text-yellow-400">⚠ AI fallback</span>
+                        )}
+                      </div>
+                      <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0 text-red-400 hover:text-red-300" onClick={() => removeUrl(idx)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )
+                })}
                 {urls.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-2">אין דפי מכרזים. הוסף URL למטה.</p>
                 )}

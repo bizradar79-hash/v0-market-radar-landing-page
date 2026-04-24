@@ -1,5 +1,6 @@
 import * as crypto from 'crypto'
 import type { TenderPoolItem, TenderSource } from './types'
+import { findAdapter } from './adapters'
 
 function extractXaiText(data: any): string {
   return data.output
@@ -14,17 +15,42 @@ function urlHash(url: string): string {
   return crypto.createHash('sha1').update(url).digest('hex').slice(0, 16)
 }
 
-interface DiscoveredTender {
-  url: string
-  preview_title: string
+// ── Adapter path: direct API call, returns fully enriched tenders ─────────
+
+async function fetchViaAdapter(listingUrl: string): Promise<TenderPoolItem[]> {
+  const adapter = findAdapter(listingUrl)
+  if (!adapter) return []
+
+  console.log(`[public-urls] Using adapter: ${adapter.siteName}`)
+  const normalized = await adapter.fetchTenders()
+
+  return normalized.map(t => ({
+    external_id: t.external_id,
+    title: t.title,
+    publisher: t.publisher,
+    description: t.description,
+    url: t.url,
+    deadline: t.deadline || undefined,
+    publish_date: t.publish_date || undefined,
+    category: t.category || 'מכרזים ציבוריים',
+    raw_data: {
+      source: 'adapter',
+      adapter: adapter.siteName,
+      tender_number: t.tender_number,
+      ...(t.raw ? { _raw: t.raw } : {}),
+    },
+  }))
 }
 
-async function discoverTendersFromUrl(listingUrl: string): Promise<{ siteName: string; tenders: DiscoveredTender[] }> {
+// ── AI fallback: xAI web_search discovery (for sites without adapter) ─────
+
+async function discoverViaXai(listingUrl: string): Promise<TenderPoolItem[]> {
   const apiKey = process.env.XAI_API_KEY
   if (!apiKey) throw new Error('XAI_API_KEY not set')
 
   const today = new Date().toISOString().split('T')[0]
 
+  console.log(`[public-urls] AI fallback for: ${listingUrl}`)
   const res = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
     headers: {
@@ -53,7 +79,7 @@ Skip:
 If the listing page requires filters/search to show tenders, use reasonable defaults (no filter, most recent).
 
 Output JSON only:
-{"site_name": "name of the publishing organization (מכבי, כללית, רכבת...)", "tenders": [{"url": "https://...", "preview_title": "..."}]}
+{"site_name": "name of the publishing organization", "tenders": [{"url": "https://...", "preview_title": "..."}]}
 
 If no tenders found, return {"site_name": "...", "tenders": []}.
 Return MAX 30 tenders per page.`,
@@ -63,9 +89,7 @@ Return MAX 30 tenders per page.`,
     signal: AbortSignal.timeout(60000),
   })
 
-  if (!res.ok) {
-    throw new Error(`xAI HTTP ${res.status}`)
-  }
+  if (!res.ok) throw new Error(`xAI HTTP ${res.status}`)
 
   const data = await res.json()
   const text = extractXaiText(data)
@@ -80,11 +104,22 @@ Return MAX 30 tenders per page.`,
     parsed = JSON.parse(jsonMatch[0])
   }
 
-  return {
-    siteName: parsed.site_name || new URL(listingUrl).hostname,
-    tenders: Array.isArray(parsed.tenders) ? parsed.tenders : [],
-  }
+  const siteName = parsed.site_name || new URL(listingUrl).hostname
+  const discovered: any[] = Array.isArray(parsed.tenders) ? parsed.tenders : []
+
+  return discovered
+    .filter(t => t.url)
+    .map(t => ({
+      external_id: urlHash(t.url),
+      title: t.preview_title || 'מכרז ללא כותרת',
+      url: t.url,
+      publisher: siteName,
+      category: 'מכרזים ציבוריים',
+      raw_data: { source: 'ai_fallback', listing_url: listingUrl, site_name: siteName },
+    }))
 }
+
+// ── Main entry point ──────────────────────────────────────────────────────
 
 export async function scrapePublicTenderUrls(source: TenderSource): Promise<TenderPoolItem[]> {
   const urls: string[] = source.config?.urls || []
@@ -95,31 +130,30 @@ export async function scrapePublicTenderUrls(source: TenderSource): Promise<Tend
 
   console.log(`[public-urls] === Scanning ${urls.length} listing URLs ===`)
   const tenders: TenderPoolItem[] = []
-  const seenUrls = new Set<string>()
+  const seenIds = new Set<string>()
 
   for (const listingUrl of urls) {
     try {
-      console.log(`[public-urls] Discovering from: ${listingUrl}`)
-      const { siteName, tenders: discovered } = await discoverTendersFromUrl(listingUrl)
-      console.log(`[public-urls] ${siteName}: found ${discovered.length} tenders`)
+      const adapter = findAdapter(listingUrl)
+      let items: TenderPoolItem[]
 
-      for (const t of discovered) {
-        if (!t.url || seenUrls.has(t.url)) continue
-        seenUrls.add(t.url)
+      if (adapter) {
+        items = await fetchViaAdapter(listingUrl)
+        console.log(`[public-urls] Adapter "${adapter.siteName}": ${items.length} tenders (fully enriched)`)
+      } else {
+        items = await discoverViaXai(listingUrl)
+        console.log(`[public-urls] AI fallback: ${items.length} tenders (need enrichment)`)
+      }
 
-        tenders.push({
-          external_id: urlHash(t.url),
-          title: t.preview_title || 'מכרז ללא כותרת',
-          url: t.url,
-          publisher: siteName,
-          category: 'מכרזים ציבוריים',
-          raw_data: { source: 'public_tender_urls', listing_url: listingUrl, site_name: siteName },
-        })
+      for (const item of items) {
+        if (seenIds.has(item.external_id)) continue
+        seenIds.add(item.external_id)
+        tenders.push(item)
       }
 
       // Polite delay between listing pages
       if (urls.indexOf(listingUrl) < urls.length - 1) {
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise(r => setTimeout(r, 500))
       }
     } catch (err: any) {
       console.warn(`[public-urls] Error scanning ${listingUrl}:`, err?.message)

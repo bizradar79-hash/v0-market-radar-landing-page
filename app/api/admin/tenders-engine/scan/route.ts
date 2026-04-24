@@ -107,6 +107,8 @@ async function scanSource(source: TenderSource, serviceClient: any) {
     let upsertCount = 0
     const upsertErrors: string[] = []
     for (const item of items) {
+      // Adapter-sourced tenders arrive fully enriched — mark them so enrichment skips them
+      const isFromAdapter = item.raw_data?.source === 'adapter'
       const { error } = await serviceClient
         .from('tender_pool')
         .upsert({
@@ -125,6 +127,10 @@ async function scanSource(source: TenderSource, serviceClient: any) {
           status: 'open',
           raw_data: item.raw_data || null,
           scraped_at: new Date().toISOString(),
+          ...(isFromAdapter ? {
+            metadata_enriched_at: new Date().toISOString(),
+            metadata_enrichment_status: 'success',
+          } : {}),
         }, {
           onConflict: 'source_id,external_id',
         })
