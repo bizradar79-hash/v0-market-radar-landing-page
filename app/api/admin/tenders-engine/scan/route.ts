@@ -88,7 +88,7 @@ async function scanSource(source: TenderSource, serviceClient: any) {
   try {
     // Pre-scan cleanup: delete expired tenders for this source
     const scraperName = source.config?.scraper || source.source_type
-    if (scraperName === 'mr_gov') {
+    if (scraperName === 'mr_gov' || scraperName === 'public_tender_urls') {
       const today = new Date().toISOString().split('T')[0]
       const { count: expiredDeleted } = await serviceClient
         .from('tender_pool')

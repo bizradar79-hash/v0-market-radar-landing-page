@@ -134,29 +134,39 @@ export async function scrapePublicTenderUrls(source: TenderSource): Promise<Tend
 
   for (const listingUrl of urls) {
     try {
+      console.log(`[public-urls] Processing URL: ${listingUrl}`)
       const adapter = findAdapter(listingUrl)
+      console.log(`[public-urls] Adapter found: ${adapter?.siteName || 'NONE (using AI fallback)'}`)
+
       let items: TenderPoolItem[]
 
       if (adapter) {
+        console.log(`[public-urls] Calling adapter.fetchTenders() for ${adapter.siteName}...`)
         items = await fetchViaAdapter(listingUrl)
         console.log(`[public-urls] Adapter "${adapter.siteName}": ${items.length} tenders (fully enriched)`)
+        if (items.length > 0) {
+          console.log(`[public-urls] First tender: ${JSON.stringify({ id: items[0].external_id, title: items[0].title?.slice(0, 60) })}`)
+        }
       } else {
         items = await discoverViaXai(listingUrl)
         console.log(`[public-urls] AI fallback: ${items.length} tenders (need enrichment)`)
       }
 
+      let addedCount = 0
       for (const item of items) {
         if (seenIds.has(item.external_id)) continue
         seenIds.add(item.external_id)
         tenders.push(item)
+        addedCount++
       }
+      console.log(`[public-urls] Added ${addedCount} new tenders (${items.length - addedCount} duplicates skipped)`)
 
       // Polite delay between listing pages
       if (urls.indexOf(listingUrl) < urls.length - 1) {
         await new Promise(r => setTimeout(r, 500))
       }
     } catch (err: any) {
-      console.warn(`[public-urls] Error scanning ${listingUrl}:`, err?.message)
+      console.error(`[public-urls] ERROR scanning ${listingUrl}:`, err?.message, err?.stack?.split('\n')[1] || '')
     }
   }
 
