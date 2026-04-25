@@ -90,6 +90,58 @@ interface EnrichResult {
   isRFI: boolean
 }
 
+function parseHebrewDate(raw: string): string | null {
+  const m = raw.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (!m) return null
+  const day = parseInt(m[1]), month = parseInt(m[2]), year = parseInt(m[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const dt = new Date(year, month - 1, day)
+  if (dt.getFullYear() !== year || dt.getMonth() !== month - 1) return null
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function extractDeadline(html: string, $: cheerio.CheerioAPI): string | null {
+  // Strategy 1: targeted DOM selector
+  const fromSelector = $('#lastDate').text().trim()
+  if (fromSelector) {
+    const parsed = parseHebrewDate(fromSelector)
+    if (parsed) {
+      console.log('[hashkal-enrich] Deadline via #lastDate selector:', parsed, 'raw:', fromSelector)
+      return parsed
+    }
+    console.log('[hashkal-enrich] #lastDate found but parse failed:', JSON.stringify(fromSelector))
+  } else {
+    console.log('[hashkal-enrich] #lastDate selector returned empty')
+  }
+
+  // Strategy 2: regex on raw HTML (bypasses cheerio parsing issues)
+  const htmlMatch = html.match(/id="lastDate"[^>]*>\s*([^<]+)</)
+  if (htmlMatch) {
+    const parsed = parseHebrewDate(htmlMatch[1])
+    if (parsed) {
+      console.log('[hashkal-enrich] Deadline via HTML regex:', parsed)
+      return parsed
+    }
+    console.log('[hashkal-enrich] HTML regex matched but parse failed:', JSON.stringify(htmlMatch[1]))
+  }
+
+  // Strategy 3: label-based regex on body text (FIRST occurrence only, before related tenders)
+  const bodyText = $('body').text()
+  const relatedIdx = bodyText.indexOf('אולי יעניין אותך גם')
+  const scopedBody = relatedIdx > 0 ? bodyText.slice(0, relatedIdx) : bodyText
+  const labelMatch = scopedBody.match(/מועד אחרון להגשה\s*[:：]\s*(\d{1,2}\/\d{1,2}\/\d{4})/)
+  if (labelMatch) {
+    const parsed = parseHebrewDate(labelMatch[1])
+    if (parsed) {
+      console.log('[hashkal-enrich] Deadline via body text label:', parsed)
+      return parsed
+    }
+  }
+
+  console.log('[hashkal-enrich] Deadline NOT FOUND by any strategy')
+  return null
+}
+
 async function enrichFromHtml(url: string): Promise<EnrichResult> {
   const result: EnrichResult = {
     title: null, type: null, publisher: null,
@@ -145,48 +197,46 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     }
 
     // --- Targeted extraction using known DOM structure ---
+    console.log('[hashkal-enrich]', url.split('/').pop(), 'HTML length:', html.length, 'has lastDate id:', html.includes('id="lastDate"'))
 
-    // Deadline: <span id="lastDate">30/04/2026 ,12:00</span>
-    const lastDateRaw = $('#lastDate').text().trim()
+    // Deadline: 3-strategy extraction
+    const deadline = extractDeadline(html, $)
 
     // Publisher: #sub-head-details parent's <h2>
-    const publisher = $('#sub-head-details').parent().find('h2').text().trim()
-
-    // Publish date: .date .sub-head sibling span
-    const publishDateRaw = $('.date.details-item-wrapper span').first().text().trim()
-
-    // Title: first h2 inside .bids-top-sec-wrapper (after publisher h2)
-    // The title is the second h2, or the tender name in h1 sub-section
-    // Actually: h1 = type (e.g. "מכרז פומבי"), publisher h2 = publisher name
-    // The tender subject is in h2 inside .details-head (same as publisher section)
-    // Let's get it from the .bids-head-sub or the main content
-    const titleEl = $('h2.search-results-content-head, .bids-body-top-sec h2').first()
-    let title = titleEl.text().trim()
-    // If the h2 is the publisher, look for a different title element
-    if (title === publisher) {
-      // Try the h1 sub-text or the mahut
-      title = ''
+    let publisher = $('#sub-head-details').parent().find('h2').text().trim()
+    // Fallback: regex on HTML
+    if (!publisher) {
+      const pubMatch = html.match(/id="sub-head-details"[\s\S]*?<h2[^>]*>([^<]+)<\/h2/)
+      if (pubMatch) publisher = pubMatch[1].trim()
     }
 
-    // Description / mahut: look for "מהות ההתקשרות" or "תיאור" in the main content only
+    // Publish date: .date .sub-head sibling span
+    let publishDateRaw = $('.date.details-item-wrapper span').first().text().trim()
+    if (!publishDateRaw) {
+      const pdMatch = html.match(/תאריך פרסום[\s\S]*?<span[^>]*>\s*(\d{1,2}\/\d{1,2}\/\d{4})/)
+      if (pdMatch) publishDateRaw = pdMatch[1]
+    }
+
+    // Title: first h2 that isn't the publisher
+    const titleEl = $('h2.search-results-content-head, .bids-body-top-sec h2').first()
+    let title = titleEl.text().trim()
+    if (title === publisher) title = ''
+
+    // Description / mahut: scope to before related tenders
     const mainContent = $('#mainContent')
     const mainText = mainContent.length ? mainContent.text() : $('body').text()
-
-    // Scope text to before "אולי יעניין אותך גם" (related tenders)
     const relatedIdx = mainText.indexOf('אולי יעניין אותך גם')
     const scopedText = relatedIdx > 0 ? mainText.slice(0, relatedIdx) : mainText
 
     const mahutMatch = scopedText.match(/מהות ההתקשרות[:\s]*([^\n]{3,500})/u)
     const mahut = mahutMatch?.[1]?.trim() || null
 
-    // Also try extracting a better title from scoped text
     if (!title) {
-      // Fallback: first h2 in main content that isn't the publisher
       $('h2').each((_, el) => {
         const t = $(el).text().trim()
         if (t && t !== publisher && t.length > 5 && t.length < 300 && !t.includes('אולי יעניין')) {
           title = t
-          return false // break
+          return false
         }
       })
     }
@@ -195,13 +245,11 @@ async function enrichFromHtml(url: string): Promise<EnrichResult> {
     result.title = title || null
     result.publisher = publisher || null
     result.publishDate = normalizeDate(publishDateRaw)
-    result.deadline = normalizeDate(lastDateRaw)
+    result.deadline = deadline
     result.description = mahut
 
-    const deadlineMatches = (html.match(/מועד אחרון להגשה/g) || []).length
-    console.log('[hashkal-enrich] Cheerio extraction:', {
-      deadline: result.deadline, deadlineRaw: lastDateRaw || 'EMPTY',
-      deadlineMatchesInHtml: deadlineMatches,
+    console.log('[hashkal-enrich] Extraction result:', {
+      deadline: result.deadline,
       publisher: result.publisher?.slice(0, 40),
       publishDate: result.publishDate,
       title: result.title?.slice(0, 50),

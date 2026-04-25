@@ -104,14 +104,19 @@ async function scanSource(source: TenderSource, serviceClient: any) {
     const items = await runScraper(source)
 
     // Upsert tenders into tender_pool
+    // For scrapers (hashkal/mr_gov), only upsert scraper-known fields.
+    // Enrichment-managed fields (deadline, publisher, description) are NOT included
+    // so Postgres preserves them on conflict update.
+    // For adapter-sourced tenders, all fields are populated — include everything.
     let upsertCount = 0
     const upsertErrors: string[] = []
     for (const item of items) {
-      // Adapter-sourced tenders arrive fully enriched — mark them so enrichment skips them
       const isFromAdapter = item.raw_data?.source === 'adapter'
-      const { error } = await serviceClient
-        .from('tender_pool')
-        .upsert({
+
+      let payload: Record<string, any>
+      if (isFromAdapter) {
+        // Adapter provides full data — upsert everything + mark as enriched
+        payload = {
           source_id: source.id,
           external_id: item.external_id,
           title: item.title,
@@ -127,13 +132,30 @@ async function scanSource(source: TenderSource, serviceClient: any) {
           status: 'open',
           raw_data: item.raw_data || null,
           scraped_at: new Date().toISOString(),
-          ...(isFromAdapter ? {
-            metadata_enriched_at: new Date().toISOString(),
-            metadata_enrichment_status: 'success',
-          } : {}),
-        }, {
-          onConflict: 'source_id,external_id',
-        })
+          metadata_enriched_at: new Date().toISOString(),
+          metadata_enrichment_status: 'success',
+        }
+      } else {
+        // Scraper provides partial data — only include scraper-known fields.
+        // Omit deadline, description, publisher so enrichment values are preserved on conflict.
+        payload = {
+          source_id: source.id,
+          external_id: item.external_id,
+          title: item.title,
+          url: item.url || null,
+          category: item.category || null,
+          status: 'open',
+          raw_data: item.raw_data || null,
+          scraped_at: new Date().toISOString(),
+        }
+        // Only set publisher/publish_date if scraper actually has them (from listing page)
+        if (item.publisher) payload.publisher = item.publisher
+        if (item.publish_date) payload.publish_date = item.publish_date
+      }
+
+      const { error } = await serviceClient
+        .from('tender_pool')
+        .upsert(payload, { onConflict: 'source_id,external_id' })
       if (error) {
         upsertErrors.push(`${item.external_id}: ${error.message}`)
       } else {
