@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Resend } from 'resend'
 import { renderWeeklyReportEmail } from '@/lib/emails/weekly-report-email'
+import { renderWeeklyReportText } from '@/lib/emails/weekly-report-text'
 import { generateWeeklyReportPdf } from '@/lib/pdf/weekly-report-pdf'
 
 export async function POST() {
@@ -74,12 +75,17 @@ export async function POST() {
       report = {}
     }
 
-    // 4. Generate email HTML
+    // 4. Generate email HTML + plain text
     const emailHtml = renderWeeklyReportEmail({
       companyName,
       weekDate,
       highlights,
       report,
+    })
+    const emailPlainText = renderWeeklyReportText({
+      companyName,
+      weekDate,
+      highlights,
     })
 
     // 5. Generate PDF
@@ -107,14 +113,25 @@ export async function POST() {
 
     const emailPayload: any = {
       from: 'North Star Radar <support@nsradar.co.il>',
+      replyTo: 'support@nsradar.co.il',
       to: user.email,
-      subject: `📊 הדוח השבועי שלך — ${weekDate}`,
+      subject: `הדוח השבועי שלך מ-North Star Radar | ${weekDate}`,
       html: emailHtml,
+      text: emailPlainText,
+      headers: {
+        'List-Unsubscribe': '<mailto:support@nsradar.co.il?subject=unsubscribe>, <https://www.nsradar.co.il/unsubscribe>',
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-Entity-Ref-ID': `weekly-report-${user.id}-${Date.now()}`,
+      },
+      tags: [
+        { name: 'category', value: 'weekly-report' },
+        { name: 'env', value: process.env.NODE_ENV || 'production' },
+      ],
     }
 
     if (pdfBuffer) {
       emailPayload.attachments = [{
-        filename: `weekly-report-${new Date().toISOString().split('T')[0]}.pdf`,
+        filename: `North-Star-Radar-Weekly-Report-${new Date().toISOString().split('T')[0]}.pdf`,
         content: pdfBuffer,
       }]
     }
