@@ -464,40 +464,66 @@ export default function TendersEnginePage() {
   }
 
   const [enrichingPublic, setEnrichingPublic] = useState(false)
+  const [enrichPublicProgress, setEnrichPublicProgress] = useState('')
   const handleEnrichPublic = async () => {
     setEnrichingPublic(true)
+    setEnrichPublicProgress('מתחיל העשרה...')
+    let totalSuccess = 0, totalFailed = 0, totalSkipped = 0, iteration = 0
     try {
-      const res = await fetch('/api/admin/tenders-engine/enrich-public', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+      while (true) {
+        iteration++
+        const res = await fetch('/api/admin/tenders-engine/enrich-public', { method: 'POST' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+        totalSuccess += data.enrichedSuccess || 0
+        totalFailed += data.failed || 0
+        totalSkipped += data.skipped || 0
+        const remaining = data.remaining || 0
+        setEnrichPublicProgress(`סבב ${iteration}: ${totalSuccess} הועשרו, ${remaining} ממתינים...`)
+        if (remaining === 0 || (data.processed || 0) === 0) break
+      }
       toast({
-        title: 'העשרת מכרזים ציבוריים',
-        description: `${data.enrichedSuccess} הועשרו, ${data.skipped} דולגו, ${data.failed} נכשלו, ${data.remaining} ממתינים`,
+        title: 'העשרה הושלמה',
+        description: `${totalSuccess} הועשרו, ${totalSkipped} דולגו, ${totalFailed} נכשלו (${iteration} סבבים)`,
       })
       await fetchData()
     } catch (err: any) {
       toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
     } finally {
       setEnrichingPublic(false)
+      setEnrichPublicProgress('')
     }
   }
 
   const [enrichingHashkal, setEnrichingHashkal] = useState(false)
+  const [enrichHashkalProgress, setEnrichHashkalProgress] = useState('')
   const handleEnrichHashkal = async () => {
     setEnrichingHashkal(true)
+    setEnrichHashkalProgress('מתחיל העשרה...')
+    let totalSuccess = 0, totalPartial = 0, totalFailed = 0, iteration = 0
     try {
-      const res = await fetch('/api/admin/tenders-engine/enrich-hashkal', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+      while (true) {
+        iteration++
+        const res = await fetch('/api/admin/tenders-engine/enrich-hashkal', { method: 'POST' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Enrichment failed')
+        totalSuccess += data.enrichedSuccess || 0
+        totalPartial += data.partial || 0
+        totalFailed += data.failed || 0
+        const remaining = data.remaining || 0
+        setEnrichHashkalProgress(`סבב ${iteration}: ${totalSuccess} הועשרו, ${remaining} ממתינים...`)
+        if (remaining === 0 || (data.processed || 0) === 0) break
+      }
       toast({
-        title: 'העשרת מטא-דאטה',
-        description: `${data.enrichedSuccess} הועשרו, ${data.partial} חלקי, ${data.failed} נכשלו, ${data.remaining} ממתינים`,
+        title: 'העשרה הושלמה',
+        description: `${totalSuccess} הועשרו, ${totalPartial} חלקי, ${totalFailed} נכשלו (${iteration} סבבים)`,
       })
       await fetchData()
     } catch (err: any) {
       toast({ title: 'שגיאה בהעשרה', description: err?.message, variant: 'destructive' })
     } finally {
       setEnrichingHashkal(false)
+      setEnrichHashkalProgress('')
     }
   }
 
@@ -771,8 +797,13 @@ export default function TendersEnginePage() {
                                 ? <Loader2 className="h-3 w-3 ml-1 animate-spin" />
                                 : <Search className="h-3 w-3 ml-1" />
                               }
-                              העשר מטא-דאטה
+                              העשר מטא-דאטה {enrichLoading && '(רץ...)'}
                             </Button>
+                            {(isPublic ? enrichPublicProgress : enrichHashkalProgress) && (
+                              <p className="text-[10px] text-blue-400 text-center animate-pulse">
+                                {isPublic ? enrichPublicProgress : enrichHashkalProgress}
+                              </p>
+                            )}
                             <p className="text-[10px] text-muted-foreground text-center italic">העשרה רצה ברקע אחרי סריקה</p>
                           </div>
                         )

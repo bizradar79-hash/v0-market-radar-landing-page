@@ -241,32 +241,49 @@ export async function POST(request: Request) {
     results.push(result)
   }
 
-  // Fire-and-forget enrichment for hashkal tenders (staggered 4x for larger batches)
+  // Synchronous enrichment loop for hashkal tenders
+  const MAX_ENRICH_ITERS = 20
   const hasHashkal = sources.some((s: any) => s.config?.scraper === 'mr_gov' || s.source_type === 'scraper')
   if (hasHashkal) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
     const enrichUrl = `${baseUrl}/api/admin/tenders-engine/enrich-hashkal`
-    const enrichHeaders = { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
-    for (let i = 0; i < 8; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1000))
-      fetch(enrichUrl, { method: 'POST', headers: enrichHeaders })
-        .catch(e => console.error(`[scan] Enrich trigger ${i} failed:`, e?.message))
+    const enrichHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${process.env.CRON_SECRET}`,
+      'Content-Type': 'application/json',
     }
-    console.log('[scan] Hashkal enrichment triggered 8x in background (30/batch)')
+    for (let i = 0; i < MAX_ENRICH_ITERS; i++) {
+      try {
+        const res = await fetch(enrichUrl, { method: 'POST', headers: enrichHeaders, signal: AbortSignal.timeout(280000) })
+        const data = await res.json()
+        console.log(`[scan] Hashkal enrich iteration ${i + 1}: processed=${data.processed} remaining=${data.remaining}`)
+        if (!data.remaining || data.remaining === 0 || !data.processed || data.processed === 0) break
+      } catch (e: any) {
+        console.error(`[scan] Hashkal enrich iteration ${i + 1} failed:`, e?.message)
+        break
+      }
+    }
   }
 
-  // Fire-and-forget enrichment for public tender URLs
+  // Synchronous enrichment loop for public tender URLs
   const hasPublicUrls = sources.some((s: any) => s.config?.scraper === 'public_tender_urls')
   if (hasPublicUrls) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://www.nsradar.co.il'
     const enrichUrl = `${baseUrl}/api/admin/tenders-engine/enrich-public`
-    const enrichHeaders = { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
-    for (let i = 0; i < 4; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1000))
-      fetch(enrichUrl, { method: 'POST', headers: enrichHeaders })
-        .catch(e => console.error(`[scan] Public enrich trigger ${i} failed:`, e?.message))
+    const enrichHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${process.env.CRON_SECRET}`,
+      'Content-Type': 'application/json',
     }
-    console.log('[scan] Public tender enrichment triggered 4x in background')
+    for (let i = 0; i < MAX_ENRICH_ITERS; i++) {
+      try {
+        const res = await fetch(enrichUrl, { method: 'POST', headers: enrichHeaders, signal: AbortSignal.timeout(280000) })
+        const data = await res.json()
+        console.log(`[scan] Public enrich iteration ${i + 1}: processed=${data.processed} remaining=${data.remaining}`)
+        if (!data.remaining || data.remaining === 0 || !data.processed || data.processed === 0) break
+      } catch (e: any) {
+        console.error(`[scan] Public enrich iteration ${i + 1} failed:`, e?.message)
+        break
+      }
+    }
   }
 
   return NextResponse.json({ success: true, results })
