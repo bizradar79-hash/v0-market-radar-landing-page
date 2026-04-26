@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import {
   Download, RefreshCw, TrendingUp, Users, Search, Globe,
   Zap, FileText, Calendar, Target, AlertTriangle, CheckCircle,
-  Star, Newspaper, ChevronRight, Loader2, BarChart3,
+  Star, Newspaper, ChevronRight, Loader2, BarChart3, Mail,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -143,15 +143,30 @@ export default function ReportsPage() {
   const [companyName, setCompanyName] = useState("")
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
+
+  const handleSendEmail = async () => {
+    setSendingEmail(true)
+    try {
+      const res = await fetch("/api/weekly-report/send-email", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "שגיאה בשליחת המייל")
+      toast({ title: "הדוח נשלח בהצלחה", description: `נשלח ל-${data.sentTo}` })
+    } catch (e: any) {
+      toast({ title: "שגיאה בשליחת דוח", description: e.message, variant: "destructive" })
+    } finally {
+      setSendingEmail(false)
+    }
+  }
 
   const loadReport = useCallback(async (force = false) => {
     if (force) setGenerating(true)
     else setLoading(true)
     setError(null)
     try {
-      const url = `/api/weekly-report${force ? "?force=true" : ""}`
+      const url = `/api/generate-weekly-report${force ? "?force=true" : ""}`
       const res = await fetch(url, { method: "POST" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה ביצירת הדוח")
@@ -223,6 +238,20 @@ export default function ReportsPage() {
               <RefreshCw className="w-4 h-4 ml-2" />
             )}
             {generating ? "מייצר..." : "רענן"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-slate-300 hover:text-white hover:bg-slate-700"
+            onClick={handleSendEmail}
+            disabled={sendingEmail}
+          >
+            {sendingEmail ? (
+              <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+            ) : (
+              <Mail className="w-4 h-4 ml-2" />
+            )}
+            {sendingEmail ? "שולח..." : "שלח למייל"}
           </Button>
           <Button
             size="sm"
