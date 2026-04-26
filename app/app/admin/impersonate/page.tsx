@@ -120,6 +120,7 @@ export default function ImpersonatePage() {
   const [showConfirmAll, setShowConfirmAll] = useState(false)
 
   const [logModalUser, setLogModalUser] = useState<UserRow | null>(null)
+  const [recoveringStuck, setRecoveringStuck] = useState(false)
 
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
@@ -330,6 +331,26 @@ export default function ImpersonatePage() {
     }
   }
 
+  async function recoverStuckSyncs() {
+    setRecoveringStuck(true)
+    try {
+      const res = await fetch('/api/admin/recover-stuck-syncs', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Recovery failed')
+      toast({
+        title: 'שחרור סנכרונים תקועים',
+        description: data.recovered > 0
+          ? `${data.recovered} סנכרונים שוחררו: ${(data.names || []).join(', ')}`
+          : 'לא נמצאו סנכרונים תקועים',
+      })
+      if (data.recovered > 0) fetchUsers()
+    } catch (e: any) {
+      toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setRecoveringStuck(false)
+    }
+  }
+
   async function deleteUser(targetUser: UserRow) {
     setDeleteConfirmUser(null)
     setDeleting(targetUser.id)
@@ -368,16 +389,30 @@ export default function ImpersonatePage() {
             <p className="text-muted-foreground">{users.length} משתמשים רשומים</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setShowConfirmAll(true)}
-          disabled={refreshingAll || users.length === 0}
-        >
-          {refreshingAll
-            ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מעדכן {refreshAllProgress}/{users.length} משתמשים...</>
-            : <><RefreshCw className="ml-2 h-4 w-4" />רענן כל המשתמשים</>
-          }
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={recoverStuckSyncs}
+            disabled={recoveringStuck}
+          >
+            {recoveringStuck
+              ? <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+              : <Cpu className="ml-2 h-4 w-4" />
+            }
+            שחרר תקועים
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowConfirmAll(true)}
+            disabled={refreshingAll || users.length === 0}
+          >
+            {refreshingAll
+              ? <><Loader2 className="ml-2 h-4 w-4 animate-spin" />מעדכן {refreshAllProgress}/{users.length} משתמשים...</>
+              : <><RefreshCw className="ml-2 h-4 w-4" />רענן כל המשתמשים</>
+            }
+          </Button>
+        </div>
       </div>
 
       <Card>
