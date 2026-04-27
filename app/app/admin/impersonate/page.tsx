@@ -121,6 +121,7 @@ export default function ImpersonatePage() {
 
   const [logModalUser, setLogModalUser] = useState<UserRow | null>(null)
   const [recoveringStuck, setRecoveringStuck] = useState(false)
+  const [runningWeekly, setRunningWeekly] = useState(false)
 
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
@@ -351,6 +352,26 @@ export default function ImpersonatePage() {
     }
   }
 
+  async function runWeeklyRefresh() {
+    setRunningWeekly(true)
+    try {
+      const res = await fetch('/api/cron/weekly-user-refresh', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed')
+      toast({
+        title: 'עדכון שבועי',
+        description: data.processed > 0
+          ? `${data.succeeded}/${data.processed} עודכנו בהצלחה, ${data.remaining} נותרו`
+          : 'אין משתמשים הממתינים לעדכון',
+      })
+      if (data.processed > 0) fetchUsers()
+    } catch (e: any) {
+      toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setRunningWeekly(false)
+    }
+  }
+
   async function deleteUser(targetUser: UserRow) {
     setDeleteConfirmUser(null)
     setDeleting(targetUser.id)
@@ -390,6 +411,18 @@ export default function ImpersonatePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={runWeeklyRefresh}
+            disabled={runningWeekly}
+          >
+            {runningWeekly
+              ? <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+              : <RefreshCw className="ml-2 h-4 w-4" />
+            }
+            הרץ עדכון שבועי
+          </Button>
           <Button
             variant="outline"
             size="sm"

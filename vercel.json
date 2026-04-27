@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/recover-stuck-syncs",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-user-refresh",
+      "schedule": "0 8 * * *"
     }
   ]
 }
