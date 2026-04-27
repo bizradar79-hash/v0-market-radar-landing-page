@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/recover-stuck-syncs",
-      "schedule": "0 * * * *"
+      "schedule": "0 5 * * *"
     }
   ]
 }
