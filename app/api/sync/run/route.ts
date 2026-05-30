@@ -167,6 +167,8 @@ export async function POST(request: Request) {
         'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
       }
       let kwUpdated = 0
+      const kwErrors: string[] = []
+      console.log(`[sync:keyword_trends] processing ${keywords.length} keywords for company ${companyId}`)
       for (const keyword of keywords) {
         try {
           const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
@@ -174,10 +176,27 @@ export async function POST(request: Request) {
             headers: adminHeaders,
             body: JSON.stringify({ keyword, force: true }),
           })
-          if (res.ok) kwUpdated++
-        } catch { /* continue */ }
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}))
+            const trendsCount = (data.israel || data.trends || []).length
+            console.log(`[sync:keyword_trends] "${keyword}" → ${trendsCount} trends`)
+            kwUpdated++
+          } else {
+            const errText = await res.text().catch(() => '')
+            const msg = `"${keyword}": HTTP ${res.status} — ${errText.slice(0, 100)}`
+            kwErrors.push(msg)
+            console.error(`[sync:keyword_trends] ${msg}`)
+            addLog('keyword_trends', 'error', msg)
+          }
+        } catch (e: any) {
+          const msg = `"${keyword}": ${e?.message}`
+          kwErrors.push(msg)
+          console.error(`[sync:keyword_trends] error for ${msg}`)
+          addLog('keyword_trends', 'error', msg)
+        }
       }
-      addLog('keyword_trends', 'ok', `${kwUpdated}/${keywords.length} keywords updated`)
+      const status: ModuleStatus = kwUpdated > 0 ? 'ok' : 'error'
+      addLog('keyword_trends', status, `${kwUpdated}/${keywords.length} keywords updated${kwErrors.length ? ` | errors: ${kwErrors.slice(0, 2).join('; ')}` : ''}`)
       await new Promise(res => setTimeout(res, 1000))
     }
 

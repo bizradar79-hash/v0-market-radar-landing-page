@@ -198,10 +198,31 @@ export default function TrendsPage() {
     if (!user) return
     const { data } = await supabase
       .from('companies').select('keywords, keyword_trends, last_sync_at, next_sync_at').eq('id', user.id).single()
-    if (data?.keywords) setKeywords(data.keywords)
+
+    // HARD limit: only first 8 keywords
+    const first8: string[] = ((data?.keywords as string[]) || []).slice(0, 8)
+    setKeywords(first8)
+
     if (data?.keyword_trends && Object.keys(data.keyword_trends).length > 0) {
-      setKwTrends(data.keyword_trends as KwTrendsMap)
+      const allTrends = data.keyword_trends as KwTrendsMap
+      // Keep only entries that belong to first 8 keywords
+      const trimmed: KwTrendsMap = {}
+      for (const kw of first8) {
+        if (allTrends[kw]) trimmed[kw] = allTrends[kw]
+      }
+      setKwTrends(trimmed)
+
+      // Persist cleanup if DB had extra keys
+      const dbKeys = Object.keys(allTrends)
+      const extraKeys = dbKeys.filter(k => !first8.includes(k))
+      if (extraKeys.length > 0) {
+        supabase.from('companies')
+          .update({ keyword_trends: trimmed, keywords: first8 })
+          .eq('id', user.id)
+          .then(() => {}) // fire-and-forget, non-blocking
+      }
     }
+
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
   }
 
