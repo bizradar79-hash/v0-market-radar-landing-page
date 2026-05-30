@@ -34,6 +34,24 @@ function hasKeyword(text: string, kw: string): boolean {
   return norm(text).includes(norm(kw))
 }
 
+// Hebrew stop-words too generic to be useful as match tokens.
+const STOP_TOKENS = new Set([
+  'שירות', 'שירותי', 'מתן', 'אספקת', 'אספקה', 'עבור', 'בתחום', 'בתחומי',
+  'ניהול', 'מערכת', 'מערכות', 'פיתוח', 'תחזוקה', 'רכישת', 'הספקת', 'כללי',
+])
+
+// Significant tokens (len ≥ 3, not stop-words) from a keyword phrase.
+function sigTokens(kw: string): string[] {
+  return norm(kw).split(' ').filter(t => t.length >= 3 && !STOP_TOKENS.has(t))
+}
+
+// A keyword "partially" hits text if any of its significant tokens appears.
+function hasTokenMatch(text: string, tokens: string[]): boolean {
+  if (tokens.length === 0) return false
+  const t = norm(text)
+  return tokens.some(tok => t.includes(tok))
+}
+
 function todayIsrael(): string {
   return new Date().toLocaleString('en-CA', { timeZone: 'Asia/Jerusalem' }).split(',')[0]
 }
@@ -99,29 +117,34 @@ export async function getEngineTendersForCompany(
     ...(bp?.primaryKeywords?.slice(0, 3) || []),
   ].filter(Boolean).map(norm)
 
+  // Precompute significant tokens per keyword once.
+  const kwTokens = keywords.map(kw => sigTokens(kw))
+
   const scored = withUrl.map((tender) => {
     const titleText = tender.title || ''
     const descText = tender.description || ''
     const catText = tender.category || ''
 
-    let titleHits = 0
-    let descHits = 0
-
-    for (const kw of keywords) {
-      if (hasKeyword(titleText, kw)) titleHits++
-      if (hasKeyword(descText, kw)) descHits++
+    let score = 0
+    for (let i = 0; i < keywords.length; i++) {
+      const kw = keywords[i]
+      const tokens = kwTokens[i]
+      // Title: full phrase (3) > partial token (2)
+      if (hasKeyword(titleText, kw)) score += 3
+      else if (hasTokenMatch(titleText, tokens)) score += 2
+      // Description: full phrase (2) > partial token (1)
+      if (hasKeyword(descText, kw)) score += 2
+      else if (hasTokenMatch(descText, tokens)) score += 1
     }
 
-    const titleScore = Math.min(titleHits * 3, 6)   // max 6 from title
-    const descScore = Math.min(descHits * 1, 3)      // max 3 from desc
     const normCat = norm(catText)
-    const categoryScore = profileTerms.some(t => t && normCat.includes(t)) ? 2 : 0
+    if (profileTerms.some(t => t && normCat.includes(t))) score += 2
 
-    return { tender, score: titleScore + descScore + categoryScore }
+    return { tender, score: Math.min(score, 12) }
   })
 
   const filtered = scored
-    .filter(({ score }) => score >= 3)
+    .filter(({ score }) => score >= 2)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score
       if (!a.tender.deadline && !b.tender.deadline) return 0

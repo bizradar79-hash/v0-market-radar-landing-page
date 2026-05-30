@@ -8,6 +8,29 @@ export interface TenderResult {
   source: string
 }
 
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+function stripTags(s: string): string {
+  return decodeEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
+}
+
+// Extract the value of a "LABEL:</span><span ...>VALUE</span>" field within a block.
+function extractField(block: string, labelPattern: string): string {
+  const re = new RegExp(
+    labelPattern + '\\s*:?\\s*(?:&nbsp;|\\s)*<\\/span>\\s*<span[^>]*>\\s*([^<]+?)\\s*<\\/span>'
+  )
+  const m = block.match(re)
+  return m ? decodeEntities(m[1]).trim() : ''
+}
+
 export async function scrapeMrGov(keywords: string[]): Promise<TenderResult[]> {
   const allResults: TenderResult[] = []
 
@@ -36,106 +59,56 @@ export async function scrapeMrGov(keywords: string[]): Promise<TenderResult[]> {
       continue
     }
 
-    // Debug: log what we actually got
     console.log(`[scrapeMrGov] keyword="${keyword}" HTML length:`, html.length)
-    console.log(`[scrapeMrGov] HTML sample:`, html.substring(0, 500))
-    console.log(`[scrapeMrGov] Has /p/ links:`, html.includes('/ilgstorefront/he/p/'))
-    console.log(`[scrapeMrGov] Has product class:`, html.includes('product'))
-    console.log(`[scrapeMrGov] Has TENDER:`, html.includes('TENDER'))
 
-    // Strategy 1: look for all /ilgstorefront/he/p/DIGITS links
-    const linkPattern = /href="(\/ilgstorefront\/he\/p\/(\d+))"[^>]*>([^<]{5,})/g
+    // Each result is an <a href="/ilgstorefront/he/p/ID"><h2>TITLE</h2></a>.
+    // Capture the anchor's inner HTML (the title lives in a nested element).
+    const anchorPattern = /<a\s+href="(\/ilgstorefront\/he\/p\/(\d+))"[^>]*>([\s\S]*?)<\/a>/g
     let m: RegExpExecArray | null
-    const foundByLinks = new Map<string, { tenderId: string; title: string; fullUrl: string }>()
+    const seenIds = new Set<string>()
+    let foundCount = 0
 
-    while ((m = linkPattern.exec(html)) !== null) {
+    while ((m = anchorPattern.exec(html)) !== null) {
       const tenderId = m[2]
-      const title = m[3].trim()
+      const title = stripTags(m[3])
       const fullUrl = `https://mr.gov.il${m[1]}`
-      if (!foundByLinks.has(tenderId)) {
-        foundByLinks.set(tenderId, { tenderId, title, fullUrl })
+      if (!title || seenIds.has(tenderId)) continue
+      seenIds.add(tenderId)
+      foundCount++
+
+      // Details live in the block AFTER the anchor.
+      const idx = m.index
+      const block = html.slice(idx, Math.min(html.length, idx + 2500))
+
+      const publisher = extractField(block, 'שם המפרסם')
+      const status = extractField(block, 'סטטוס')
+      const procedure = extractField(block, "מס[׳'’]\\s*הליך")
+
+      if (status.includes('חלף') || status.includes('ארכיון')) continue
+
+      // Deadline label is "מועד אחרון להגשה"; value may include a time → take date.
+      const deadlineRaw = extractField(block, 'מועד אחרון להגשה')
+      const deadlineDateMatch = deadlineRaw.match(/(\d{2}\/\d{2}\/\d{4})/)
+      let deadline = ''
+      if (deadlineDateMatch) {
+        const [day, month, year] = deadlineDateMatch[1].split('/')
+        const deadlineDate = new Date(`${year}-${month}-${day}`)
+        if (deadlineDate < new Date()) continue
+        deadline = deadlineDateMatch[1]
       }
+
+      allResults.push({
+        title: title.substring(0, 200),
+        url: fullUrl,
+        publisher: publisher || 'מינהל הרכש הממשלתי',
+        deadline,
+        procedure_number: procedure || tenderId,
+        status,
+        source: 'mr.gov.il',
+      })
     }
 
-    console.log(`[scrapeMrGov] keyword="${keyword}" found ${foundByLinks.size} /p/ links`)
-
-    if (foundByLinks.size > 0) {
-      // We have direct links — extract additional info from surrounding context
-      for (const { tenderId, title, fullUrl } of foundByLinks.values()) {
-        // Find the block around this URL in the HTML
-        const idx = html.indexOf(`/ilgstorefront/he/p/${tenderId}`)
-        const blockStart = Math.max(0, idx - 1000)
-        const blockEnd = Math.min(html.length, idx + 2000)
-        const block = html.slice(blockStart, blockEnd)
-
-        const publisherMatch = block.match(/שם המפרסם[:\s]+([^|<\n]{2,60})/)
-        const statusMatch = block.match(/סטטוס[:\s]+([^|<\n]{2,30})/)
-        const deadlineMatch = block.match(/תאריך הגש[^:]*[:\s]+(\d{2}\/\d{2}\/\d{4})/)
-        const procedureMatch = block.match(/מס[׳']\s*הליך[:\s]+([^\s|<]{3,30})/)
-
-        const status = statusMatch?.[1]?.trim() || ''
-        if (status.includes('חלף') || status.includes('ארכיון')) continue
-
-        let deadline = ''
-        if (deadlineMatch?.[1]) {
-          const [day, month, year] = deadlineMatch[1].split('/')
-          const deadlineDate = new Date(`${year}-${month}-${day}`)
-          if (deadlineDate < new Date()) continue
-          deadline = deadlineMatch[1]
-        }
-
-        allResults.push({
-          title: title.substring(0, 200),
-          url: fullUrl,
-          publisher: publisherMatch?.[1]?.trim() || 'מינהל הרכש הממשלתי',
-          deadline,
-          procedure_number: procedureMatch?.[1]?.trim() || tenderId,
-          status,
-          source: 'mr.gov.il',
-        })
-      }
-    } else {
-      // Strategy 2: split on <li class="...product..."> blocks (original approach)
-      const itemBlocks = html.split(/<li[^>]*class="[^"]*product[^"]*"/)
-      console.log(`[scrapeMrGov] keyword="${keyword}" strategy2 blocks:`, itemBlocks.length - 1)
-
-      for (const block of itemBlocks.slice(1)) {
-        const linkMatch = block.match(/href="(\/ilgstorefront\/he\/p\/(\d+))"[^>]*>([^<]{5,})/)
-        if (!linkMatch) continue
-
-        const tenderId = linkMatch[2]
-        const title = linkMatch[3].trim()
-        const fullUrl = `https://mr.gov.il${linkMatch[1]}`
-
-        const publisherMatch = block.match(/שם המפרסם[:\s]+([^|<\n]+)/)
-        const statusMatch = block.match(/סטטוס[:\s]+([^|<\n]+)/)
-        const deadlineMatch = block.match(/תאריך הגש[^:]*[:\s]+(\d{2}\/\d{2}\/\d{4})/)
-        const procedureMatch = block.match(/מס[׳']\s*הליך[:\s]+([^\s|<]+)/)
-
-        const status = statusMatch?.[1]?.trim() || ''
-        if (status.includes('חלף') || status.includes('ארכיון')) continue
-
-        let deadline = ''
-        if (deadlineMatch?.[1]) {
-          const [day, month, year] = deadlineMatch[1].split('/')
-          const deadlineDate = new Date(`${year}-${month}-${day}`)
-          if (deadlineDate < new Date()) continue
-          deadline = deadlineMatch[1]
-        }
-
-        allResults.push({
-          title: title.substring(0, 200),
-          url: fullUrl,
-          publisher: publisherMatch?.[1]?.trim() || 'מינהל הרכש הממשלתי',
-          deadline,
-          procedure_number: procedureMatch?.[1]?.trim() || tenderId,
-          status,
-          source: 'mr.gov.il',
-        })
-      }
-    }
-
-    console.log(`[scrapeMrGov] keyword="${keyword}" → ${allResults.length} total so far`)
+    console.log(`[scrapeMrGov] keyword="${keyword}" found ${foundCount} links → ${allResults.length} total so far`)
   }
 
   // Deduplicate by URL
