@@ -17,7 +17,7 @@ function getAdminSupabase() {
 const MODULE_ROUTES: Record<string, string[]> = {
   news:        ['/api/generate-news'],
   conferences: ['/api/generate-conferences'],
-  tenders:     ['/api/generate-tenders'],
+  tenders:     ['/api/find-tenders'],
   competitors: ['/api/find-competitors'],
   seo:         ['/api/generate-seo-ranking'],
   geo:         ['/api/generate-geo-ranking'],

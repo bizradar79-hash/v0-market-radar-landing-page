@@ -4,6 +4,7 @@ export const maxDuration = 60
 import { getFullContext } from '@/lib/context'
 import { scrapeMrGov } from '@/lib/tenders-scraper'
 import { getEngineTendersForCompany } from '@/lib/tenders/from-engine'
+import { validateUrl } from '@/lib/ai'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -68,11 +69,12 @@ export async function POST(request: Request) {
 
     // ── STAGE 1: Engine pool ──────────────────────────────────────────────
     steps.engine = 'starting'
-    const engineTenders = await getEngineTendersForCompany(
+    const engineResult = await getEngineTendersForCompany(
       { keywords: ctx.company?.keywords, industry: ctx.company?.industry, business_profile: ctx.company?.business_profile },
       TARGET
     )
-    steps.engine = { found: engineTenders.length }
+    const engineTenders = engineResult.tenders
+    steps.engine = { found: engineTenders.length, poolTotal: engineResult.poolTotal, poolActive: engineResult.poolActive }
 
     // ── STAGE 2: AI supplement (only if engine didn't fill TARGET) ────────
     let aiRows: Array<{
@@ -159,7 +161,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
           return a.deadlineIso.localeCompare(b.deadlineIso)
         })
 
-        aiRows = merged.slice(0, gap).map(t => ({
+        const candidates = merged.slice(0, gap).map(t => ({
           title: t.title,
           organization: t.publisher,
           deadline: t.deadlineIso ?? null,
@@ -169,6 +171,20 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
           relevance_score: Math.round(t.relevance * 10),
           company_id: ctx.user.id,
         }))
+
+        // MANDATORY link validation: every AI tender must have a real, resolvable
+        // http(s) URL. Drop any that is empty or fails to resolve — fewer real
+        // tenders beats fabricated ones.
+        const validated = await Promise.all(
+          candidates.map(async (row) => {
+            const url = (row.link || '').trim()
+            if (!/^https?:\/\//i.test(url)) return null
+            const ok = await validateUrl(url)
+            return ok ? { ...row, link: url } : null
+          })
+        )
+        aiRows = validated.filter((r): r is NonNullable<typeof r> => r !== null)
+        steps.aiValidated = { candidates: candidates.length, passed: aiRows.length }
       }
     }
 
@@ -194,7 +210,16 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
       !(r.link && engineUrlSet.has(normUrl(r.link)))
     )
 
-    const allRows = [...engineRows, ...deduped]
+    // Hard guard: never persist a tender without a real http(s) link.
+    const allRows = [...engineRows, ...deduped].filter(r => /^https?:\/\//i.test((r.link || '').trim()))
+
+    console.log(
+      '[tenders] pool_total=', engineResult.poolTotal,
+      'pool_active=', engineResult.poolActive,
+      'matched_engine=', engineTenders.length,
+      'ai=', aiRows.length,
+      'saved=', allRows.length,
+    )
 
     if (allRows.length === 0) {
       return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })

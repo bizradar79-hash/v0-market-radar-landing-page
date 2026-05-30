@@ -51,12 +51,22 @@ function makeServiceClient() {
   )
 }
 
+export interface EngineResult {
+  tenders: EngineTender[]
+  poolTotal: number
+  poolActive: number
+}
+
 export async function getEngineTendersForCompany(
   company: CompanyForTenders,
   limit: number
-): Promise<EngineTender[]> {
+): Promise<EngineResult> {
   const sc = makeServiceClient()
   const today = todayIsrael()
+
+  const { count: poolTotal } = await sc
+    .from('tender_pool')
+    .select('id', { count: 'exact', head: true })
 
   const { data, error } = await sc
     .from('tender_pool')
@@ -64,7 +74,11 @@ export async function getEngineTendersForCompany(
     .eq('status', 'open')
     .or(`deadline.gte.${today},deadline.is.null`)
 
-  if (error || !data || data.length === 0) return []
+  const poolActive = data?.length ?? 0
+
+  if (error || !data || data.length === 0) {
+    return { tenders: [], poolTotal: poolTotal ?? 0, poolActive }
+  }
 
   const bp = company.business_profile
   const keywords: string[] = (
@@ -73,7 +87,10 @@ export async function getEngineTendersForCompany(
     company.industry ? [company.industry] : []
   ).slice(0, 12).filter(Boolean)
 
-  if (keywords.length === 0) return []
+  if (keywords.length === 0) return { tenders: [], poolTotal: poolTotal ?? 0, poolActive }
+
+  // Engine tenders MUST carry a real scraped URL — drop any without one
+  const withUrl = data.filter(t => !!t.url && /^https?:\/\//i.test(t.url))
 
   // Terms used for category matching
   const profileTerms: string[] = [
@@ -82,7 +99,7 @@ export async function getEngineTendersForCompany(
     ...(bp?.primaryKeywords?.slice(0, 3) || []),
   ].filter(Boolean).map(norm)
 
-  const scored = data.map((tender) => {
+  const scored = withUrl.map((tender) => {
     const titleText = tender.title || ''
     const descText = tender.description || ''
     const catText = tender.category || ''
@@ -114,10 +131,12 @@ export async function getEngineTendersForCompany(
     })
     .slice(0, limit)
 
-  return filtered.map(({ tender, score }) => ({
+  const tenders = filtered.map(({ tender, score }) => ({
     ...tender,
     relevance_score: Math.min(100, 50 + score * 8),
     source: 'engine' as const,
     verified: true as const,
   }))
+
+  return { tenders, poolTotal: poolTotal ?? 0, poolActive }
 }

@@ -10,7 +10,7 @@ export async function GET() {
     { route: '/api/analyze', method: 'GET' },
     { route: '/api/find-competitors', method: 'POST' },
     { route: '/api/generate-leads', method: 'POST' },
-    { route: '/api/generate-tenders', method: 'POST' },
+    { route: '/api/find-tenders', method: 'POST' },
     { route: '/api/generate-trends', method: 'POST' },
     { route: '/api/generate-news', method: 'POST' },
     { route: '/api/generate-conferences', method: 'POST' },

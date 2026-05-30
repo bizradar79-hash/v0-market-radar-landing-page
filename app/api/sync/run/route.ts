@@ -218,7 +218,7 @@ export async function POST(request: Request) {
     {
       const { count: existingTenders } = await adminDb
         .from('tenders').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
-      const r = await callModule(origin, '/api/generate-tenders', companyId!)
+      const r = await callModule(origin, '/api/find-tenders', companyId!)
       const newCount = r.body?.count ?? 0
       if (r.ok && newCount >= (existingTenders ?? 0)) {
         addLog('tenders', 'ok', `${newCount} tenders`)

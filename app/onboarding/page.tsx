@@ -73,7 +73,7 @@ const SCAN_STEPS = [
   { label: 'מנתח טרנדים לפי מילות מפתח...', route: '/api/scan-keyword-trends' },
   { label: 'מנתח טרנדים מתחרים...', route: '/api/competitor-trends' },
   { label: 'מחפש חדשות...', route: '/api/generate-news' },
-  { label: 'מחפש מכרזים...', route: '/api/generate-tenders' },
+  { label: 'מחפש מכרזים...', route: '/api/find-tenders' },
   { label: 'מגלה לידים...', route: '/api/generate-leads' },
   { label: 'מייצר פעולות שבועיות...', route: '/api/generate-weekly-actions' },
   { label: 'מסנכרן דירוגי מתחרים...', route: '/api/sync-competitor-ratings' },

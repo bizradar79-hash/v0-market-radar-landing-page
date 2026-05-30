@@ -68,7 +68,8 @@ export default function TendersPage() {
       .order("deadline", { ascending: true })
 
     if (!error && data) {
-      setTenders(data)
+      // Only show tenders with a real, working link
+      setTenders(data.filter((t: Tender) => /^https?:\/\//i.test((t.link || '').trim())))
     }
     setLoading(false)
   }

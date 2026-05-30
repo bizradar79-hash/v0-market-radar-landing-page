@@ -11,7 +11,7 @@ const ROUTES = [
   '/api/analyze',
   '/api/find-competitors',
   '/api/generate-leads',
-  '/api/generate-tenders',
+  '/api/find-tenders',
   '/api/generate-trends',
   '/api/generate-news',
   '/api/generate-conferences',
