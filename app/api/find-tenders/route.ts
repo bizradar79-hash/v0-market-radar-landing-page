@@ -3,21 +3,31 @@ export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
 import { scrapeMrGov } from '@/lib/tenders-scraper'
+import { getEngineTendersForCompany } from '@/lib/tenders/from-engine'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const TARGET = 12
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
 }
 
-// Convert DD/MM/YYYY → YYYY-MM-DD (returns null if invalid)
 function parseDeadline(raw: string): string | null {
   const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
   if (!m) return null
   const iso = `${m[3]}-${m[2]}-${m[1]}`
   return isValidDate(iso) ? iso : null
+}
+
+// Normalize a title for dedup comparison
+function normTitle(s: string): string {
+  return (s || '').toLowerCase().replace(/[^א-תa-z0-9]/g, '').trim()
+}
+
+function normUrl(s: string | null): string {
+  return (s || '').replace(/\/$/, '').toLowerCase().trim()
 }
 
 export async function POST(request: Request) {
@@ -42,7 +52,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Build keywords from company profile ───────────────────────────────
+    // ── Build keywords ────────────────────────────────────────────────────
     const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
     const keywords: string[] = (
       ctx.company?.keywords?.length ? ctx.company.keywords :
@@ -56,21 +66,34 @@ export async function POST(request: Request) {
 
     steps.keywords = keywords
 
-    // ── Stage 1: Scrape mr.gov.il ─────────────────────────────────────────
-    steps.scraper = 'starting'
-    const scraped = await scrapeMrGov(keywords)
-    steps.scraper = { found: scraped.length }
-    console.log(`[find-tenders] scraped ${scraped.length} tenders`)
+    // ── STAGE 1: Engine pool ──────────────────────────────────────────────
+    steps.engine = 'starting'
+    const engineTenders = await getEngineTendersForCompany(
+      { keywords: ctx.company?.keywords, industry: ctx.company?.industry, business_profile: ctx.company?.business_profile },
+      TARGET
+    )
+    steps.engine = { found: engineTenders.length }
 
-    if (scraped.length === 0) {
-      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים בסריקה', steps })
-    }
+    // ── STAGE 2: AI supplement (only if engine didn't fill TARGET) ────────
+    let aiRows: Array<{
+      title: string; organization: string; deadline: string | null
+      budget: string; description: string; link: string | null
+      relevance_score: number; company_id: string
+    }> = []
 
-    // ── Stage 2: xAI relevance scoring (no web_search) ───────────────────
-    const companyDesc = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
-    const companyName = ctx.company?.name || ''
+    const gap = TARGET - engineTenders.length
 
-    const scoringPrompt = `אתה מומחה ניתוח מכרזים.
+    if (gap > 0) {
+      steps.scraper = 'starting'
+      const scraped = await scrapeMrGov(keywords)
+      steps.scraper = { found: scraped.length }
+
+      if (scraped.length > 0) {
+        // xAI relevance scoring
+        const companyDesc = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
+        const companyName = ctx.company?.name || ''
+
+        const scoringPrompt = `אתה מומחה ניתוח מכרזים.
 חברה: ${companyName}
 תחום פעילות: ${companyDesc}
 מילות מפתח: ${keywords.join(', ')}
@@ -86,108 +109,108 @@ ${scraped.map((t, i) => `${i + 1}. כותרת: ${t.title}\n   מפרסם: ${t.pu
 
 CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
 
-    steps.scoring = 'starting'
-    let scores: Array<{ index: number; relevance: number }> = []
-
-    try {
-      const xaiRes = await fetch('https://api.x.ai/v1/responses', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'grok-4-fast-non-reasoning',
-          input: scoringPrompt,
-          // No web_search — pure reasoning
-        }),
-      })
-
-      if (xaiRes.ok) {
-        const xaiData = await xaiRes.json()
-        const xaiText = xaiData.output
-          ?.filter((b: any) => b.type === 'message')
-          .flatMap((b: any) => b.content)
-          .filter((c: any) => c.type === 'output_text')
-          .map((c: any) => c.text)
-          .join('') || ''
+        steps.scoring = 'starting'
+        let scores: Array<{ index: number; relevance: number }> = []
 
         try {
-          const clean = xaiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-          const start = clean.indexOf('[')
-          const end = clean.lastIndexOf(']')
-          if (start !== -1 && end > start) {
-            scores = JSON.parse(clean.slice(start, end + 1))
+          const xaiRes = await fetch('https://api.x.ai/v1/responses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+            body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: scoringPrompt }),
+          })
+
+          if (xaiRes.ok) {
+            const xaiData = await xaiRes.json()
+            const xaiText = xaiData.output
+              ?.filter((b: any) => b.type === 'message')
+              .flatMap((b: any) => b.content)
+              .filter((c: any) => c.type === 'output_text')
+              .map((c: any) => c.text)
+              .join('') || ''
+
+            try {
+              const clean = xaiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+              const start = clean.indexOf('['); const end = clean.lastIndexOf(']')
+              if (start !== -1 && end > start) scores = JSON.parse(clean.slice(start, end + 1))
+            } catch (e) { console.warn('[find-tenders] scoring parse failed:', e) }
           }
-        } catch (e) {
-          console.warn('[find-tenders] scoring parse failed:', e)
+        } catch (e: any) { console.warn('[find-tenders] xAI scoring failed:', e?.message) }
+
+        steps.scoring = { scoresReturned: scores.length }
+
+        const scoreMap = new Map<number, number>()
+        for (const s of scores) {
+          if (typeof s.index === 'number' && typeof s.relevance === 'number') scoreMap.set(s.index, s.relevance)
         }
+
+        let merged = scraped.map((t, i) => ({
+          ...t,
+          relevance: scoreMap.get(i + 1) ?? 5,
+          deadlineIso: parseDeadline(t.deadline),
+        }))
+
+        const highRelevance = merged.filter(t => t.relevance >= 6)
+        if (highRelevance.length > 0) merged = highRelevance
+
+        merged.sort((a, b) => {
+          if (!a.deadlineIso && !b.deadlineIso) return 0
+          if (!a.deadlineIso) return 1
+          if (!b.deadlineIso) return -1
+          return a.deadlineIso.localeCompare(b.deadlineIso)
+        })
+
+        aiRows = merged.slice(0, gap).map(t => ({
+          title: t.title,
+          organization: t.publisher,
+          deadline: t.deadlineIso ?? null,
+          budget: 'לא צוין',
+          description: `[src:ai]מספר הליך: ${t.procedure_number} | סטטוס: ${t.status}`,
+          link: t.url,
+          relevance_score: Math.round(t.relevance * 10),
+          company_id: ctx.user.id,
+        }))
       }
-    } catch (e: any) {
-      console.warn('[find-tenders] xAI scoring failed:', e?.message)
     }
 
-    steps.scoring = { scoresReturned: scores.length }
+    steps.aiRows = aiRows.length
 
-    // Build score map (1-indexed)
-    const scoreMap = new Map<number, number>()
-    for (const s of scores) {
-      if (typeof s.index === 'number' && typeof s.relevance === 'number') {
-        scoreMap.set(s.index, s.relevance)
-      }
-    }
-
-    // ── Merge scraper + scores ─────────────────────────────────────────────
-    const today = new Date().toISOString().split('T')[0]
-
-    let merged = scraped.map((t, i) => ({
-      ...t,
-      relevance: scoreMap.get(i + 1) ?? 5, // default 5 if scoring failed
-      deadlineIso: parseDeadline(t.deadline),
+    // ── Merge: engine first, then AI, dedup ───────────────────────────────
+    const engineRows = engineTenders.map(t => ({
+      title: t.title,
+      organization: t.publisher,
+      deadline: t.deadline ?? null,
+      budget: t.budget || 'לא צוין',
+      description: `[src:engine]${t.description || ''}`,
+      link: t.url,
+      relevance_score: t.relevance_score,
+      company_id: ctx.user.id,
     }))
 
-    // Filter relevance >= 6 (or keep all if scoring failed / all scored < 6)
-    const highRelevance = merged.filter(t => t.relevance >= 6)
-    if (highRelevance.length > 0) merged = highRelevance
-    // else keep all (scoring may have failed)
+    const engineTitleSet = new Set(engineRows.map(r => normTitle(r.title)))
+    const engineUrlSet = new Set(engineRows.map(r => normUrl(r.link)))
 
-    // Sort by deadline ascending (nulls last)
-    merged.sort((a, b) => {
-      if (!a.deadlineIso && !b.deadlineIso) return 0
-      if (!a.deadlineIso) return 1
-      if (!b.deadlineIso) return -1
-      return a.deadlineIso.localeCompare(b.deadlineIso)
-    })
+    const deduped = aiRows.filter(r =>
+      !engineTitleSet.has(normTitle(r.title)) &&
+      !(r.link && engineUrlSet.has(normUrl(r.link)))
+    )
 
-    const top10 = merged.slice(0, 10)
-    steps.afterFilter = { kept: top10.length, totalScored: merged.length }
+    const allRows = [...engineRows, ...deduped]
+
+    if (allRows.length === 0) {
+      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })
+    }
 
     // ── Save to DB ────────────────────────────────────────────────────────
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
-    if (top10.length === 0) {
-      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })
-    }
-
-    const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(
-      top10.map(t => ({
-        title: t.title,
-        organization: t.publisher,
-        deadline: t.deadlineIso ?? null,
-        budget: 'לא צוין',
-        description: `מספר הליך: ${t.procedure_number} | סטטוס: ${t.status}`,
-        link: t.url,
-        relevance_score: Math.round(t.relevance * 10), // 1-10 → 10-100
-        company_id: ctx.user.id,
-      }))
-    ).select()
+    const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(allRows).select()
 
     if (insertError) {
       steps.db = { ok: false, error: insertError.message }
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
 
-    steps.db = { ok: true, saved: saved?.length }
+    steps.db = { ok: true, saved: saved?.length, engineCount: engineRows.length, aiCount: deduped.length }
     return NextResponse.json({ success: true, tenders: saved, count: saved?.length || 0, steps })
 
   } catch (e: any) {

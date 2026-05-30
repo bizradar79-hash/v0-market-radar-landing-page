@@ -139,11 +139,17 @@ export default function TendersPage() {
   const isBudgetKnown = (budget: string | null) =>
     !!budget && budget !== 'לא צוין' && budget !== 'not specified' && budget !== 'לא ידוע'
 
+  const getTenderSource = (description: string | null): 'engine' | 'ai' => {
+    if (description?.startsWith('[src:engine]')) return 'engine'
+    return 'ai'
+  }
+
   const cleanDesc = (text: string | null) => {
     if (!text) return ''
-    if (text.includes('0 obj') || text.includes('endobj') || text.includes('stream')) return ''
-    if (text.includes('&#') || text.includes('&amp;')) return ''
-    return text
+    const stripped = text.replace(/^\[src:(engine|ai)\]/, '')
+    if (stripped.includes('0 obj') || stripped.includes('endobj') || stripped.includes('stream')) return ''
+    if (stripped.includes('&#') || stripped.includes('&amp;')) return ''
+    return stripped
   }
 
   if (loading) {
@@ -189,7 +195,18 @@ export default function TendersPage() {
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
-                  <Badge variant="secondary">מכרז</Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="secondary">מכרז</Badge>
+                    {getTenderSource(tender.description) === 'engine' ? (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                        מאומת ✓
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
+                        AI
+                      </span>
+                    )}
+                  </div>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${deadlineStatus.badge}`}>
                     {deadlineStatus.text}
                   </span>
