@@ -335,6 +335,14 @@ export default function OnboardingPage() {
       setPhase('scanning')
       setScanStep(0)
 
+      // Layer 2: capture a pre-scan snapshot before the initial scan runs.
+      try {
+        await fetch('/api/scan/capture-snapshot', {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify({ trigger: 'initial' }),
+        })
+      } catch { /* best-effort */ }
+
       for (let i = 0; i < SCAN_STEPS.length; i++) {
         setScanStep(i)
         try {

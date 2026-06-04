@@ -150,6 +150,22 @@ export async function POST(request: Request) {
       ? company.keyword_trends
       : {}
 
+    // Guard: if this scan produced no trends for the keyword but we already have
+    // data for it, keep the existing key untouched (don't overwrite with empties).
+    const existingKey: any = (existing as any)[keyword]
+    const existingKeyCount = Array.isArray(existingKey?.israel) ? existingKey.israel.length
+      : Array.isArray(existingKey?.trends) ? existingKey.trends.length : 0
+    const newKeyCount = (israelTrends?.length ?? 0) + (worldTrends?.length ?? 0)
+
+    if (existingKeyCount > 0 && newKeyCount === 0) {
+      console.log(`[keyword_trends] "${keyword}" returned empty — keeping existing ${existingKeyCount} trends`)
+      return NextResponse.json({
+        success: true, keyword, kept_existing: true,
+        israel: existingKey?.israel ?? existingKey?.trends ?? [],
+        world: existingKey?.world ?? [],
+      })
+    }
+
     const updated = {
       ...existing,
       [keyword]: {

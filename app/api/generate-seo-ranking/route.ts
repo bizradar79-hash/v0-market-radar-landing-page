@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
+import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -345,6 +346,18 @@ export async function POST(request: Request) {
       scope,
       what_business_does: businessAnalysis?.what_business_does || '',
       fetchedAt: new Date().toISOString(),
+    }
+
+    // Guard: don't overwrite a good ranking with an empty/degraded one.
+    const { data: prevSeo } = await ctx.supabase
+      .from('companies').select('seo_ranking').eq('id', ctx.user.id).single()
+    const existingCount = Array.isArray(prevSeo?.seo_ranking?.results) ? prevSeo.seo_ranking.results.length : 0
+    const newCount = Array.isArray(result.results) ? result.results.length : 0
+    const guard = guardWrite(existingCount, newCount)
+
+    if (!guard.useNew) {
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'seo_ranking', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
     }
 
     await ctx.supabase.from('companies').update({ seo_ranking: result }).eq('id', ctx.user.id)

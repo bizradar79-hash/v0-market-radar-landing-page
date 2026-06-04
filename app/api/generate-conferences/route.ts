@@ -199,11 +199,13 @@ ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומ�
     })
 
     steps.db = 'starting'
-    await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
 
+    // Guard: don't delete existing conferences when the fallback search is empty.
     if (list.length === 0) {
-      return NextResponse.json({ success: true, conferences: [], count: 0, steps })
+      return NextResponse.json({ success: true, conferences: [], count: 0, kept_existing: true, steps })
     }
+
+    await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
 
     const { data: saved, error: insertError } = await ctx.supabase.from('conferences').insert(
       list.map((c: any) => ({

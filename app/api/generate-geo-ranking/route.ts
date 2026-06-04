@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -443,6 +444,18 @@ export async function POST(request: Request) {
       isLocal,
       scope,
       fetchedAt: new Date().toISOString(),
+    }
+
+    // Guard: don't overwrite a good ranking with an empty/degraded one.
+    const { data: prevGeo } = await ctx.supabase
+      .from('companies').select('geo_ranking').eq('id', ctx.user.id).single()
+    const existingCount = Array.isArray(prevGeo?.geo_ranking?.results) ? prevGeo.geo_ranking.results.length : 0
+    const newCount = Array.isArray(result.results) ? result.results.length : 0
+    const guard = guardWrite(existingCount, newCount)
+
+    if (!guard.useNew) {
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'geo_ranking', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
     }
 
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)

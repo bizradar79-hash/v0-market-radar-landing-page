@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { captureSnapshot } from '@/lib/scan/snapshot'
 
 function getAdminClient() {
   return createServerClient(
@@ -59,11 +60,15 @@ export async function POST(request: Request) {
   }
 
   const results: Record<string, { ok: boolean; error?: string }> = {}
+  const adminDb = getAdminClient()
 
   // Run users sequentially to avoid hammering the AI APIs
   for (const uid of userIds) {
     const h = { ...adminHeaders, 'x-admin-user-id': uid }
     try {
+      // Layer 2: capture a pre-scan snapshot before this partial re-scan runs.
+      await captureSnapshot(adminDb, uid, 'partial')
+
       // Run the 4 scans in parallel per user
       const [compRes, seoRes, geoRes, trendsRes] = await Promise.allSettled([
         fetch(`${origin}/api/find-competitors`,          { method: 'POST', headers: h }),

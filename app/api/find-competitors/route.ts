@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
+import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -290,13 +291,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     const manualCount = (manualComps || []).length
     steps.db = { manualKept: manualDomains.size }
 
-    const { error: deleteError } = await supabase.from('competitors').delete()
-      .eq('company_id', userId)
-      .or('source.eq.auto,source.is.null')
-    if (deleteError) {
-      await supabase.from('competitors').delete().eq('company_id', userId)
-    }
-
+    // Compute the new auto competitors BEFORE deleting anything.
     const deduped = mapped
       .filter((c: any) => {
         const domain = extractDomain(c.website || '')
@@ -307,8 +302,27 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       })
       .slice(0, Math.max(0, 10 - manualCount))
 
+    // Guard: never wipe existing auto competitors for an empty/degraded scan.
+    const { count: existingAuto } = await supabase
+      .from('competitors').select('id', { count: 'exact', head: true })
+      .eq('company_id', userId).or('source.eq.auto,source.is.null')
+    const guard = guardWrite(existingAuto ?? 0, deduped.length)
+
+    if (!guard.useNew) {
+      await logKeptExisting(supabase, userId, { module: 'competitors', reason: guard.reason, existing_count: existingAuto ?? 0, new_count: deduped.length })
+      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingAuto ?? 0, new_count: deduped.length, steps })
+    }
+
     if (deduped.length === 0) {
       return NextResponse.json({ success: true, competitors: [], count: 0, steps })
+    }
+
+    // Only now (we have real new data) replace the auto competitors.
+    const { error: deleteError } = await supabase.from('competitors').delete()
+      .eq('company_id', userId)
+      .or('source.eq.auto,source.is.null')
+    if (deleteError) {
+      await supabase.from('competitors').delete().eq('company_id', userId)
     }
 
     const insertRows = deduped.map((c: any) => ({

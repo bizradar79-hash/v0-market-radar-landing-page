@@ -16,7 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
-  CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu,
+  CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -126,6 +126,12 @@ export default function ImpersonatePage() {
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
   const [moduleSyncUser, setModuleSyncUser] = useState<UserRow | null>(null)
+
+  // Snapshot restore (Layer 3)
+  const [snapshotUser, setSnapshotUser] = useState<UserRow | null>(null)
+  const [snapshots, setSnapshots] = useState<any[]>([])
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false)
+  const [restoringId, setRestoringId] = useState<string | null>(null)
 
   const supabase = createClient()
   const router = useRouter()
@@ -298,6 +304,43 @@ export default function ImpersonatePage() {
         [userId]: { ...(prev[userId] || {}), [moduleId]: 'error' },
       }))
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
+    }
+  }
+
+  async function openSnapshots(u: UserRow) {
+    setSnapshotUser(u)
+    setSnapshots([])
+    setSnapshotsLoading(true)
+    try {
+      const res = await fetch(`/api/admin/list-snapshots?company_id=${u.id}`)
+      const data = await res.json().catch(() => ({}))
+      setSnapshots(Array.isArray(data.snapshots) ? data.snapshots : [])
+    } catch (e: any) {
+      toast({ title: "שגיאה בטעינת גיבויים", description: e?.message, variant: "destructive" })
+    } finally {
+      setSnapshotsLoading(false)
+    }
+  }
+
+  async function restoreSnapshot(companyId: string, snapshotId: string) {
+    if (!confirm('לשחזר את מצב הסריקה מגיבוי זה? פעולה זו תחליף את הנתונים הנוכחיים.')) return
+    setRestoringId(snapshotId)
+    try {
+      const res = await fetch('/api/admin/restore-snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: companyId, snapshot_id: snapshotId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        toast({ title: "✅ שוחזר בהצלחה", description: `גיבוי ${snapshotId.slice(0, 8)} שוחזר` })
+      } else {
+        toast({ title: "❌ שחזור נכשל", description: data.error ?? `HTTP ${res.status}`, variant: "destructive" })
+      }
+    } catch (e: any) {
+      toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
+    } finally {
+      setRestoringId(null)
     }
   }
 
@@ -536,6 +579,16 @@ export default function ImpersonatePage() {
                           <FileText className="h-3.5 w-3.5 ml-1" />
                           פרטים
                         </Button>
+                        {/* Snapshots / restore button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openSnapshots(u)}
+                          title="גיבויים ושחזור"
+                        >
+                          <History className="h-3.5 w-3.5 ml-1" />
+                          גיבויים
+                        </Button>
                         {/* Impersonate button */}
                         <Button
                           size="sm"
@@ -706,6 +759,61 @@ export default function ImpersonatePage() {
                 סנכרן עכשיו
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Snapshots / restore ── */}
+      <Dialog open={!!snapshotUser} onOpenChange={open => { if (!open) setSnapshotUser(null) }}>
+        <DialogContent className="max-w-lg" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              גיבויים — {snapshotUser?.company?.name || snapshotUser?.email}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {snapshotsLoading ? (
+              <div className="flex items-center justify-center p-8 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin ml-2" /> טוען גיבויים...
+              </div>
+            ) : snapshots.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
+                אין גיבויים זמינים עדיין
+              </div>
+            ) : (
+              snapshots.map((s: any) => (
+                <div key={s.id} className="rounded-lg border p-3 flex items-center justify-between gap-3">
+                  <div className="text-sm">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{s.trigger}</Badge>
+                      <span className="text-muted-foreground">
+                        {new Date(s.created_at).toLocaleString('he-IL')}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {s.counts && Object.entries(s.counts)
+                        .map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => restoreSnapshot(snapshotUser!.id, s.id)}
+                    disabled={restoringId === s.id}
+                  >
+                    {restoringId === s.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1" />
+                      : <RotateCcw className="h-3.5 w-3.5 ml-1" />
+                    }
+                    שחזר
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSnapshotUser(null)}>סגור</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

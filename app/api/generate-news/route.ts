@@ -246,11 +246,13 @@ export async function POST(request: Request) {
     }
 
     steps.db = 'starting'
-    await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
 
+    // Guard: don't delete existing news when the fallback search came back empty.
     if (list.length === 0) {
-      return NextResponse.json({ success: true, news: [], count: 0, steps })
+      return NextResponse.json({ success: true, news: [], count: 0, kept_existing: true, steps })
     }
+
+    await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
 
     const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
       list.map((n: any) => ({

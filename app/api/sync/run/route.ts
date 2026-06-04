@@ -4,6 +4,7 @@ export const maxDuration = 300 // Vercel Pro — long-running sync
 import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
+import { captureSnapshot } from '@/lib/scan/snapshot'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -91,6 +92,9 @@ export async function POST(request: Request) {
   if (!force && company.sync_status === 'running') {
     return NextResponse.json({ message: 'Sync already running', sync_status: 'running' })
   }
+
+  // Layer 2: capture a full pre-scan snapshot before anything mutates state.
+  await captureSnapshot(adminDb, companyId, 'full')
 
   // Mark as running
   await adminDb.from('companies').update({
@@ -318,11 +322,22 @@ export async function POST(request: Request) {
     const now = new Date().toISOString()
     const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()
     try {
+      // Merge any 'kept_existing' entries that modules appended to sync_log
+      // during the run (the guard layer writes them) so we don't clobber them.
+      let mergedLog: any[] = log
+      try {
+        const { data: cur } = await adminDb
+          .from('companies').select('sync_log').eq('id', companyId).single()
+        const curLog = Array.isArray((cur as any)?.sync_log) ? (cur as any).sync_log : []
+        const kept = curLog.filter((e: any) => e?.status === 'kept_existing')
+        mergedLog = [...log, ...kept]
+      } catch { /* best-effort merge */ }
+
       await adminDb.from('companies').update({
         sync_status: finalStatus,
         last_sync_at: now,
         ...(finalStatus === 'done' ? { next_sync_at: nextSync } : {}),
-        sync_log: log,
+        sync_log: mergedLog,
       } as any).eq('id', companyId)
     } catch (dbErr: any) {
       console.error('[sync/run] finally DB update failed:', dbErr?.message)

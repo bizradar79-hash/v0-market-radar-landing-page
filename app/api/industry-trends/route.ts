@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -143,6 +144,18 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       date_range: parsed.date_range || today,
       search_query: parsed.search_query || searchQuery,
       fetchedAt: new Date().toISOString(),
+    }
+
+    // Guard: don't overwrite good trends with an empty/degraded scan.
+    const { data: prevIt } = await ctx.supabase
+      .from('companies').select('industry_trends').eq('id', ctx.user.id).single()
+    const existingCount = Array.isArray((prevIt?.industry_trends as any)?.trends) ? (prevIt!.industry_trends as any).trends.length : 0
+    const newCount = Array.isArray(result.trends) ? result.trends.length : 0
+    const guard = guardWrite(existingCount, newCount)
+
+    if (!guard.useNew) {
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'industry_trends', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
     }
 
     // Save to DB — graceful if column missing
