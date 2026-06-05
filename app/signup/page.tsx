@@ -36,6 +36,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [companyName, setCompanyName] = useState('')
+  const [phone, setPhone] = useState('')
   const [otpCode, setOtpCode] = useState(['', '', '', '', '', '', '', ''])
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -68,6 +69,14 @@ export default function SignupPage() {
     setIsLoading(true)
     setError(null)
 
+    // Israeli phone validation (mobile 05XXXXXXXX or landline 0X-XXXXXXX).
+    const normalizedPhone = phone.replace(/[\s-]/g, '')
+    if (!/^0\d{8,9}$/.test(normalizedPhone)) {
+      setError('יש להזין מספר טלפון ישראלי תקין (לדוגמה 0501234567)')
+      setIsLoading(false)
+      return
+    }
+
     try {
       const { error } = await supabase.auth.signUp({
         email,
@@ -76,6 +85,7 @@ export default function SignupPage() {
           data: {
             full_name: fullName,
             company_name: companyName,
+            phone: normalizedPhone,
           },
         },
       })
@@ -329,6 +339,20 @@ export default function SignupPage() {
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
                       className="border-border bg-input text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="phone" className="text-foreground">טלפון</Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      inputMode="tel"
+                      placeholder="0501234567"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="border-border bg-input text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary"
+                      dir="ltr"
                     />
                   </div>
                   <div className="grid gap-2">

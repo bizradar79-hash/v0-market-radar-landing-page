@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import {
@@ -198,6 +198,17 @@ export default function OnboardingPage() {
 
   // Scanning
   const [scanStep, setScanStep] = useState(0)
+
+  // ── Prefill phone + name from signup (user_metadata) ──────────────────────
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      const meta = user.user_metadata || {}
+      if (meta.phone) setPhone((p) => p || meta.phone)
+      if (meta.company_name) setCompanyName((c) => c || meta.company_name)
+    })
+  }, [])
 
   // ── Analyze ─────────────────────────────────────────────────────────────
 

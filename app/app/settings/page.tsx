@@ -9,27 +9,25 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Plus, Save, Building2, KeyRound, Bell, User, Loader2 } from "lucide-react"
+import { X, Plus, Save, Building2, KeyRound, User, Loader2, MessageCircle } from "lucide-react"
 
-const ISRAELI_CITIES = [
-  'כל הארץ', 'תל אביב', 'ירושלים', 'חיפה', 'באר שבע', 'ראשון לציון',
-  'פתח תקווה', 'אשדוד', 'נתניה', 'בני ברק', 'חולון', 'רמת גן', 'אשקלון',
-  'רחובות', 'בת ים', 'הרצליה', 'כפר סבא', 'מודיעין', 'רעננה', 'לוד',
-  'נהריה', 'טבריה', 'אילת', 'צפת', 'עפולה', 'אחר',
+// Mirror the registration/onboarding area-of-activity options exactly.
+const GEOGRAPHIC_OPTIONS = [
+  { value: 'national', label: '🇮🇱 ארצי — פעיל בכל רחבי ישראל' },
+  { value: 'local', label: '🏙️ מקומי — פעיל באזור גיאוגרפי מוגדר' },
+  { value: 'international', label: '🌍 בינלאומי — פעיל גם מחוץ לישראל' },
 ]
+
+const WA_CANCEL_NUMBER = '972559137417'
 
 interface CompanyData {
   name: string
   website: string
-  industry: string
-  city: string
-  size: string
   description: string
-  geographic_scope: string[]
+  geographicScope: string
 }
 
 interface UserData {
@@ -39,20 +37,33 @@ interface UserData {
   role: string
 }
 
+interface SubscriptionData {
+  status: string
+  base_amount: number | null
+  final_amount: number | null
+  coupon_code: string | null
+  current_period_end: string | null
+}
+
+const STATUS_LABELS: Record<string, { label: string; className: string }> = {
+  active: { label: 'פעיל', className: 'bg-green-500/10 text-green-600' },
+  grace: { label: 'בתקופת חסד', className: 'bg-amber-500/10 text-amber-600' },
+  pending_payment: { label: 'ממתין לתשלום', className: 'bg-amber-500/10 text-amber-600' },
+  pending: { label: 'ממתין לתשלום', className: 'bg-amber-500/10 text-amber-600' },
+  canceled: { label: 'בוטל', className: 'bg-red-500/10 text-red-600' },
+}
+
 export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingAccount, setIsSavingAccount] = useState(false)
+
   const [companyData, setCompanyData] = useState<CompanyData>({
     name: "",
     website: "",
-    industry: "",
-    city: "כל הארץ",
-    size: "",
     description: "",
-    geographic_scope: ["national"],
+    geographicScope: "national",
   })
-  const [cityCustom, setCityCustom] = useState("")
-  const effectiveCity = companyData.city === 'אחר' ? cityCustom.trim() || '' : companyData.city
 
   const [userData, setUserData] = useState<UserData>({
     fullName: "",
@@ -61,64 +72,56 @@ export default function SettingsPage() {
     role: "",
   })
 
+  const [subscription, setSubscription] = useState<SubscriptionData | null>(null)
+
   const [keywords, setKeywords] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState("")
-
-  const [notifications, setNotifications] = useState({
-    opportunities: true,
-    competitors: true,
-    leads: true,
-    tenders: true,
-    trends: false,
-    news: false,
-    weeklyReport: true,
-    emailAlerts: true,
-  })
 
   useEffect(() => {
     const fetchData = async () => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      
+
       if (user) {
-        // Fetch company data
+        // Company profile
         const { data: company } = await supabase
           .from('companies')
           .select('*')
           .eq('id', user.id)
           .single()
-        
+
         if (company) {
-          const rawCity = company.city || ''
-          const cityDropdown = ISRAELI_CITIES.includes(rawCity) ? rawCity : (rawCity ? 'אחר' : 'כל הארץ')
-          if (cityDropdown === 'אחר') setCityCustom(rawCity)
+          const scope = Array.isArray(company.geographic_scope)
+            ? (company.geographic_scope[0] || 'national')
+            : (company.geographic_scope || 'national')
           setCompanyData({
             name: company.name || "",
             website: company.website || "",
-            industry: company.industry || "",
-            city: cityDropdown,
-            size: company.size || "",
             description: company.description || "",
-            geographic_scope: Array.isArray(company.geographic_scope)
-              ? company.geographic_scope
-              : [company.geographic_scope || 'national'],
+            geographicScope: scope,
           })
-          
-          // Extract keywords from company data
           if (company.keywords && Array.isArray(company.keywords)) {
             setKeywords(company.keywords)
           }
         }
 
-        // Set user data from auth
+        // Account — phone canonical source is companies.phone, fallback metadata.
         setUserData({
           fullName: user.user_metadata?.full_name || "",
           email: user.email || "",
-          phone: user.user_metadata?.phone || "",
-          role: user.user_metadata?.role || "מנהל חשבון",
+          phone: company?.phone || user.user_metadata?.phone || "",
+          role: user.user_metadata?.role || "",
         })
+
+        // Current subscription
+        const { data: sub } = await supabase
+          .from('subscriptions')
+          .select('status, base_amount, final_amount, coupon_code, current_period_end')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        if (sub) setSubscription(sub as SubscriptionData)
       }
-      
+
       setIsLoading(false)
     }
 
@@ -129,29 +132,48 @@ export default function SettingsPage() {
     setIsSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    
+
     if (user) {
       await supabase
         .from('companies')
         .update({
           name: companyData.name,
           website: companyData.website,
-          industry: companyData.industry,
-          city: effectiveCity,
-          size: companyData.size,
           description: companyData.description,
-          geographic_scope: companyData.geographic_scope,
+          geographic_scope: [companyData.geographicScope],
         })
         .eq('id', user.id)
     }
     setIsSaving(false)
   }
 
+  const saveAccountData = async () => {
+    setIsSavingAccount(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (user) {
+      // Persist editable fields: name/phone/role → user_metadata, phone → companies.
+      await supabase.auth.updateUser({
+        data: {
+          full_name: userData.fullName,
+          phone: userData.phone,
+          role: userData.role,
+        },
+      })
+      await supabase
+        .from('companies')
+        .update({ phone: userData.phone })
+        .eq('id', user.id)
+    }
+    setIsSavingAccount(false)
+  }
+
   const saveKeywords = async () => {
     setIsSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    
+
     if (user) {
       await supabase
         .from('companies')
@@ -172,6 +194,13 @@ export default function SettingsPage() {
     setKeywords(keywords.filter((k) => k !== keyword))
   }
 
+  const handleCancelSubscription = () => {
+    if (!confirm("לפנות לביטול המנוי בוואטסאפ?")) return
+    const msg = `שלום, אני מעוניין בביטול המנוי שלי. אימייל: ${userData.email}`
+    const url = `https://wa.me/${WA_CANCEL_NUMBER}?text=${encodeURIComponent(msg)}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
@@ -179,6 +208,14 @@ export default function SettingsPage() {
       </div>
     )
   }
+
+  const statusInfo = subscription
+    ? (STATUS_LABELS[subscription.status] || { label: subscription.status, className: 'bg-secondary text-foreground' })
+    : null
+  const monthlyPrice = subscription?.base_amount ?? 79
+  const renewalDate = subscription?.current_period_end
+    ? new Date(subscription.current_period_end).toLocaleDateString('he-IL')
+    : null
 
   return (
     <div className="space-y-6">
@@ -189,7 +226,7 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="company" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 bg-secondary">
+        <TabsList className="grid w-full grid-cols-3 bg-secondary">
           <TabsTrigger value="company" className="flex items-center gap-2">
             <Building2 className="h-4 w-4" />
             <span className="hidden sm:inline">פרופיל חברה</span>
@@ -198,17 +235,13 @@ export default function SettingsPage() {
             <KeyRound className="h-4 w-4" />
             <span className="hidden sm:inline">מילות מפתח</span>
           </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center gap-2">
-            <Bell className="h-4 w-4" />
-            <span className="hidden sm:inline">התראות</span>
-          </TabsTrigger>
           <TabsTrigger value="account" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             <span className="hidden sm:inline">חשבון</span>
           </TabsTrigger>
         </TabsList>
 
-        {/* Company Profile Tab */}
+        {/* Company Profile Tab — mirrors registration/onboarding company fields */}
         <TabsContent value="company">
           <Card className="border-border bg-card">
             <CardHeader>
@@ -225,7 +258,7 @@ export default function SettingsPage() {
                       setCompanyData({ ...companyData, name: e.target.value })
                     }
                     className="border-border bg-input"
-                    placeholder="הזן שם חברה"
+                    placeholder="שם החברה שלך"
                   />
                 </div>
                 <div className="space-y-2">
@@ -238,103 +271,31 @@ export default function SettingsPage() {
                     }
                     className="border-border bg-input"
                     dir="ltr"
-                    placeholder="https://example.co.il"
+                    placeholder="https://example.com"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="industry">תעשייה</Label>
-                  <Input
-                    id="industry"
-                    value={companyData.industry}
-                    onChange={(e) =>
-                      setCompanyData({ ...companyData, industry: e.target.value })
-                    }
-                    className="border-border bg-input"
-                    placeholder="בחר תעשייה"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="city">עיר</Label>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="geographicScope">איזור פעילות</Label>
                   <Select
-                    value={companyData.city}
-                    onValueChange={(v) => {
-                      setCompanyData({ ...companyData, city: v })
-                      if (v !== 'אחר') setCityCustom("")
-                    }}
+                    value={companyData.geographicScope}
+                    onValueChange={(v) => setCompanyData({ ...companyData, geographicScope: v })}
                   >
-                    <SelectTrigger className="border-border bg-input">
-                      <SelectValue placeholder="בחר עיר..." />
+                    <SelectTrigger id="geographicScope" className="border-border bg-input">
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ISRAELI_CITIES.map((c) => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      {GEOGRAPHIC_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {companyData.city === 'אחר' && (
-                    <Input
-                      value={cityCustom}
-                      onChange={(e) => setCityCustom(e.target.value)}
-                      placeholder="פרט את העיר..."
-                      className="border-border bg-input mt-2"
-                    />
-                  )}
-                </div>
-                <div className="space-y-3 md:col-span-2">
-                  <Label>היקף פעילות העסק</Label>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {[
-                      { value: 'local', emoji: '🏙️', label: 'מקומי', desc: 'פעיל באזור גיאוגרפי מוגדר' },
-                      { value: 'national', emoji: '🇮🇱', label: 'ארצי', desc: 'פעיל בכל רחבי ישראל' },
-                      { value: 'international', emoji: '🌍', label: 'בינלאומי', desc: 'פעיל גם מחוץ לישראל' },
-                    ].map(opt => (
-                      <label
-                        key={opt.value}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                          companyData.geographic_scope.includes(opt.value)
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border bg-input hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          value={opt.value}
-                          checked={companyData.geographic_scope.includes(opt.value)}
-                          onChange={() => {
-                            const prev = companyData.geographic_scope
-                            const next = prev.includes(opt.value)
-                              ? prev.filter(s => s !== opt.value)
-                              : [...prev, opt.value]
-                            if (next.length > 0) setCompanyData({ ...companyData, geographic_scope: next })
-                          }}
-                          className="mt-1 accent-primary"
-                        />
-                        <div>
-                          <span className="font-medium text-foreground text-sm">{opt.emoji} {opt.label}</span>
-                          <p className="text-xs text-muted-foreground">{opt.desc}</p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                  {companyData.geographic_scope.includes('international') && (
+                  {companyData.geographicScope === 'international' && (
                     <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="size">גודל חברה</Label>
-                  <Input
-                    id="size"
-                    value={companyData.size}
-                    onChange={(e) =>
-                      setCompanyData({ ...companyData, size: e.target.value })
-                    }
-                    className="border-border bg-input"
-                    placeholder="לדוגמה: 11-50 עובדים"
-                  />
-                </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">תיאור החברה</Label>
+                <Label htmlFor="description">תיאור קצר</Label>
                 <Textarea
                   id="description"
                   value={companyData.description}
@@ -342,10 +303,10 @@ export default function SettingsPage() {
                     setCompanyData({ ...companyData, description: e.target.value })
                   }
                   className="min-h-[100px] border-border bg-input"
-                  placeholder="תאר את פעילות החברה..."
+                  placeholder="2-3 משפטים על מה שהעסק עושה, למי הוא מוכר ומה הוא מציע..."
                 />
               </div>
-              <Button 
+              <Button
                 onClick={saveCompanyData}
                 disabled={isSaving}
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
@@ -401,7 +362,7 @@ export default function SettingsPage() {
                   ))
                 )}
               </div>
-              <Button 
+              <Button
                 onClick={saveKeywords}
                 disabled={isSaving}
                 className="bg-primary text-primary-foreground hover:bg-primary/90"
@@ -411,74 +372,6 @@ export default function SettingsPage() {
                 ) : (
                   <Save className="ml-2 h-4 w-4" />
                 )}
-                שמור שינויים
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Notifications Tab */}
-        <TabsContent value="notifications">
-          <Card className="border-border bg-card">
-            <CardHeader>
-              <CardTitle className="text-foreground">הגדרות התראות</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-muted-foreground">התראות מודולים</h3>
-                {[
-                  { key: "competitors", label: "פעילות מתחרים" },
-                  { key: "leads", label: "לידים חדשים" },
-                  { key: "tenders", label: "מכרזים רלוונטיים" },
-                  { key: "trends", label: "טרנדים חדשים" },
-                  { key: "news", label: "חדשות רלוונטיות" },
-                ].map((item) => (
-                  <div
-                    key={item.key}
-                    className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-4"
-                  >
-                    <Label htmlFor={item.key} className="text-foreground">
-                      {item.label}
-                    </Label>
-                    <Switch
-                      id={item.key}
-                      checked={notifications[item.key as keyof typeof notifications]}
-                      onCheckedChange={(checked) =>
-                        setNotifications({ ...notifications, [item.key]: checked })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-muted-foreground">הגדרות כלליות</h3>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-4">
-                  <Label htmlFor="weeklyReport" className="text-foreground">
-                    דוח שבועי במייל
-                  </Label>
-                  <Switch
-                    id="weeklyReport"
-                    checked={notifications.weeklyReport}
-                    onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, weeklyReport: checked })
-                    }
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-4">
-                  <Label htmlFor="emailAlerts" className="text-foreground">
-                    התראות דחופות במייל
-                  </Label>
-                  <Switch
-                    id="emailAlerts"
-                    checked={notifications.emailAlerts}
-                    onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, emailAlerts: checked })
-                    }
-                  />
-                </div>
-              </div>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                <Save className="ml-2 h-4 w-4" />
                 שמור שינויים
               </Button>
             </CardContent>
@@ -522,7 +415,7 @@ export default function SettingsPage() {
                     onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
                     className="border-border bg-input"
                     dir="ltr"
-                    placeholder="050-0000000"
+                    placeholder="0501234567"
                   />
                 </div>
                 <div className="space-y-2">
@@ -532,24 +425,56 @@ export default function SettingsPage() {
                     value={userData.role}
                     onChange={(e) => setUserData({ ...userData, role: e.target.value })}
                     className="border-border bg-input"
-                    placeholder="הזן תפקיד"
+                    placeholder="לדוגמה: מנכ״ל / בעלים"
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>חבילה נוכחית</Label>
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-4">
-                  <Badge className="bg-primary/10 text-primary">מקצועי</Badge>
-                  <span className="text-foreground">₪299/חודש</span>
-                  <Button variant="link" className="mr-auto text-primary">
-                    שדרג חבילה
+
+              <Button
+                onClick={saveAccountData}
+                disabled={isSavingAccount}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {isSavingAccount ? (
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="ml-2 h-4 w-4" />
+                )}
+                שמור שינויים
+              </Button>
+
+              {/* Current subscription */}
+              <div className="space-y-2 pt-4 border-t border-border">
+                <Label>המנוי שלי</Label>
+                <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">North Star Radar — מנוי חודשי</p>
+                      <p className="text-sm text-muted-foreground">{monthlyPrice} ₪ / חודש</p>
+                    </div>
+                    {statusInfo ? (
+                      <Badge className={statusInfo.className}>{statusInfo.label}</Badge>
+                    ) : (
+                      <Badge className="bg-secondary text-muted-foreground">אין מנוי פעיל</Badge>
+                    )}
+                  </div>
+
+                  {renewalDate && (
+                    <p className="text-sm text-muted-foreground">
+                      חידוש הבא: <span className="text-foreground">{renewalDate}</span>
+                    </p>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    onClick={handleCancelSubscription}
+                    className="gap-2 border-red-500/30 text-red-600 hover:bg-red-500/10 hover:text-red-600"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    ביטול מנוי
                   </Button>
                 </div>
               </div>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-                <Save className="ml-2 h-4 w-4" />
-                שמור שינויים
-              </Button>
             </CardContent>
           </Card>
         </TabsContent>
