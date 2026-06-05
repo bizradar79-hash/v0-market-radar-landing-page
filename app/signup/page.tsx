@@ -139,8 +139,8 @@ export default function SignupPage() {
         type: 'signup',
       })
       if (error) throw error
-      // Success - redirect to onboarding
-      router.push('/onboarding')
+      // Success — payment step comes before onboarding.
+      router.push('/checkout')
     } catch (error: unknown) {
       setError('קוד שגוי, נסה שנית')
       // Clear OTP inputs on error

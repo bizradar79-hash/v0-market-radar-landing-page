@@ -18,14 +18,24 @@ export async function GET(request: Request) {
         .select('onboarding_completed')
         .eq('id', data.user.id)
         .single()
-      
-      // If no company or onboarding not completed, go to onboarding
-      if (!company || !company.onboarding_completed) {
+
+      // Already onboarded → dashboard.
+      if (company?.onboarding_completed) {
+        return NextResponse.redirect(new URL('/app/dashboard', origin))
+      }
+
+      // Not onboarded yet. Payment step comes BEFORE onboarding: send users
+      // who don't already have an active/grace subscription to /checkout.
+      const { data: sub } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', data.user.id)
+        .maybeSingle()
+
+      if (sub && (sub.status === 'active' || sub.status === 'grace')) {
         return NextResponse.redirect(new URL('/onboarding', origin))
       }
-      
-      // Otherwise go to dashboard
-      return NextResponse.redirect(new URL('/app/dashboard', origin))
+      return NextResponse.redirect(new URL('/checkout', origin))
     }
   }
   

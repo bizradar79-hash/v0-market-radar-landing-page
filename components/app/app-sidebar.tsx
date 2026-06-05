@@ -24,6 +24,8 @@ import {
   SlidersHorizontal,
   Bookmark,
   Crosshair,
+  Tag,
+  CreditCard,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -263,6 +265,32 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                 >
                   <Crosshair className="h-5 w-5" />
                   <span>מנוע מכרזים</span>
+                </Link>
+                <Link
+                  href="/app/admin/coupons"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/coupons"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <Tag className="h-5 w-5" />
+                  <span>קופונים</span>
+                </Link>
+                <Link
+                  href="/app/admin/payments"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/payments"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <CreditCard className="h-5 w-5" />
+                  <span>תשלומים</span>
                 </Link>
               </div>
             </div>

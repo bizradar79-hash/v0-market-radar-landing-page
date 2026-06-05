@@ -5,6 +5,7 @@ import AppSidebar from "@/components/app/app-sidebar"
 import AppHeader from "@/components/app/app-header"
 import ImpersonationBanner from "@/components/admin/ImpersonationBanner"
 import SyncBanner from "@/components/app/SyncBanner"
+import PaywallGate from "@/components/billing/PaywallGate"
 
 export default function AppLayout({
   children,
@@ -25,6 +26,7 @@ export default function AppLayout({
   }, [])
 
   return (
+    <PaywallGate>
     <div className={`flex min-h-screen bg-background${impersonating ? ' pt-10' : ''}`}>
       <ImpersonationBanner />
 
@@ -48,5 +50,6 @@ export default function AppLayout({
         </main>
       </div>
     </div>
+    </PaywallGate>
   )
 }
