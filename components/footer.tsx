@@ -17,7 +17,7 @@ const footerLinks = {
       { label: "אודות", href: "#" },
       { label: "בלוג", href: "#" },
       { label: "קריירה", href: "#" },
-      { label: "צור קשר", href: "#" },
+      { label: "צור קשר", href: "/contact" },
     ],
   },
   resources: {

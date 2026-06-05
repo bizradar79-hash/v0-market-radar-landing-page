@@ -3,6 +3,7 @@ import { Heebo } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { CookieBanner } from '@/components/cookie-banner'
 import { AccessibilityWidget } from '@/components/accessibility-widget'
+import WhatsAppButton from '@/components/WhatsAppButton'
 import './globals.css'
 
 const heebo = Heebo({ 
@@ -44,6 +45,7 @@ export default function RootLayout({
         {children}
         <CookieBanner />
         <AccessibilityWidget />
+        <WhatsAppButton />
         <Analytics />
       </body>
     </html>
