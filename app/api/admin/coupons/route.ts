@@ -25,6 +25,15 @@ async function requireAdmin() {
 
 const PAID_TYPES: DiscountType[] = ['percent', 'fixed']
 
+// Accept either a bare URL or a pasted HTML anchor and return the first
+// http(s) URL found, or null if none. (Upay's dashboard hands you an <a> tag.)
+function extractUrl(raw: string): string | null {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return null
+  const match = trimmed.match(/https?:\/\/[^\s"'<>]+/i)
+  return match ? match[0] : trimmed
+}
+
 // GET — list coupons with computed price + redemption details.
 export async function GET() {
   const auth = await requireAdmin()
@@ -56,7 +65,9 @@ export async function POST(request: Request) {
   const code = normalizeCode(body.code || '')
   const discount_type = body.discount_type as DiscountType
   const discount_value = Number(body.discount_value) || 0
-  const payment_url = (body.payment_url || '').trim() || null
+  // Be tolerant of pasting a full Upay HTML snippet like
+  // `<a href="https://app.upay.co.il/...">- לדף התשלום</a>` — extract the URL.
+  const payment_url = extractUrl(body.payment_url || '')
   const scope = body.scope || 'first_payment'
   const active = body.active !== false
   const expires_at = body.expires_at || null
