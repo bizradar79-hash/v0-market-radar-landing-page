@@ -27,6 +27,24 @@ interface Payment {
   company_name: string | null
 }
 
+interface Activation {
+  id: string
+  user_id: string
+  status: string
+  final_amount: number | null
+  paid_amount: number | null
+  transaction_id: string | null
+  provider_confirmation: string | null
+  four_digits: string | null
+  coupon_code: string | null
+  auto_confirmed: boolean | null
+  review_flag: string | null
+  confirmed_at: string | null
+  created_at: string
+  email: string | null
+  company_name: string | null
+}
+
 export default function AdminPaymentsPage() {
   const router = useRouter()
   const { toast } = useToast()
@@ -34,6 +52,7 @@ export default function AdminPaymentsPage() {
 
   const [loading, setLoading] = useState(true)
   const [payments, setPayments] = useState<Payment[]>([])
+  const [activations, setActivations] = useState<Activation[]>([])
   const [acting, setActing] = useState<string | null>(null)
 
   useEffect(() => { checkAdminAndLoad() }, [])
@@ -53,6 +72,7 @@ export default function AdminPaymentsPage() {
       const res = await fetch('/api/admin/payments')
       const data = await res.json().catch(() => ({}))
       setPayments(Array.isArray(data.payments) ? data.payments : [])
+      setActivations(Array.isArray(data.activations) ? data.activations : [])
     } finally {
       setLoading(false)
     }
@@ -160,6 +180,66 @@ export default function AdminPaymentsPage() {
           )}
           <p className="mt-4 text-xs text-muted-foreground">
             אשר תשלומים מול לוח הבקרה של Upay. הפניה ל-/onboarding אינה הוכחת תשלום.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Recent activations — reconcile auto-confirmed Upay returns vs dashboard */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">הפעלות אחרונות</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {activations.length === 0 ? (
+            <p className="p-6 text-center text-sm text-muted-foreground">אין הפעלות אחרונות</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-right">לקוח</TableHead>
+                    <TableHead className="text-right">סכום ששולם</TableHead>
+                    <TableHead className="text-right">מס׳ עסקה</TableHead>
+                    <TableHead className="text-right">קופון</TableHead>
+                    <TableHead className="text-right">אישור</TableHead>
+                    <TableHead className="text-right">תאריך</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activations.map(a => (
+                    <TableRow key={a.id} className={a.review_flag ? 'bg-red-500/5' : undefined}>
+                      <TableCell className="text-sm">{a.email || <span className="font-mono text-xs">{a.user_id.slice(0, 8)}</span>}</TableCell>
+                      <TableCell className="font-semibold">
+                        {a.paid_amount ?? a.final_amount ?? '—'} ₪
+                        {a.review_flag === 'amount_mismatch' && (
+                          <Badge variant="destructive" className="mr-2">אי-התאמת סכום</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {a.transaction_id || '—'}
+                        {a.four_digits && <span className="text-muted-foreground"> ···{a.four_digits}</span>}
+                      </TableCell>
+                      <TableCell>
+                        {a.coupon_code
+                          ? <Badge variant="outline" className="font-mono">{a.coupon_code}</Badge>
+                          : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        {a.auto_confirmed
+                          ? <Badge variant="secondary">אוטומטי</Badge>
+                          : <Badge variant="outline">ידני</Badge>}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {new Date(a.confirmed_at || a.created_at).toLocaleString('he-IL')}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <p className="mt-4 text-xs text-muted-foreground">
+            הפעלות &quot;אוטומטי&quot; אושרו לפי פרמטרי החזרה של Upay (זמני) — יש להצליב מול לוח הבקרה.
           </p>
         </CardContent>
       </Card>

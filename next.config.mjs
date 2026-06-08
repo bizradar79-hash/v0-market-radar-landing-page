@@ -9,6 +9,13 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_SITE_URL: 'https://www.nsradar.co.il',
   },
+  async redirects() {
+    return [
+      // Permanent guard: Upay return URLs once had a typo (/onboaring). Forward
+      // to /onboarding preserving ALL query params so paid users land correctly.
+      { source: '/onboaring', destination: '/onboarding', permanent: false },
+    ]
+  },
   async headers() {
     return [
       {

@@ -41,7 +41,19 @@ export async function GET() {
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const userIds = [...new Set((subs ?? []).map((s: any) => s.user_id))]
+  // Recent activations (incl. auto-confirmed Upay returns) for reconciliation
+  // against the Upay dashboard — surfaces transaction id + amount + any flag.
+  const { data: activations } = await adminDb
+    .from('subscriptions')
+    .select('*')
+    .in('status', ['active', 'grace'])
+    .order('confirmed_at', { ascending: false, nullsFirst: false })
+    .limit(50)
+
+  const userIds = [...new Set([
+    ...(subs ?? []).map((s: any) => s.user_id),
+    ...(activations ?? []).map((s: any) => s.user_id),
+  ])]
 
   // Company names (companies.id = auth.uid)
   const { data: companies } = userIds.length
@@ -49,7 +61,7 @@ export async function GET() {
     : { data: [] as any[] }
   const companyById = new Map((companies ?? []).map((c: any) => [c.id, c.name]))
 
-  // Emails via auth admin lookup (small pending list).
+  // Emails via auth admin lookup (small lists).
   const emailById = new Map<string, string>()
   for (const uid of userIds) {
     try {
@@ -58,13 +70,16 @@ export async function GET() {
     } catch { /* ignore */ }
   }
 
-  const enriched = (subs ?? []).map((s: any) => ({
+  const enrich = (s: any) => ({
     ...s,
     email: emailById.get(s.user_id) || null,
     company_name: companyById.get(s.user_id) || null,
-  }))
+  })
 
-  return NextResponse.json({ payments: enriched })
+  return NextResponse.json({
+    payments: (subs ?? []).map(enrich),
+    activations: (activations ?? []).map(enrich),
+  })
 }
 
 // POST — admin action: { subscription_id, action: 'mark_paid' | 'cancel' }

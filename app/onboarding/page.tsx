@@ -84,7 +84,7 @@ const SCAN_STEPS = [
 // Types
 // ──────────────────────────────────────────────────────────────────────────
 
-type Phase = 'intake' | 'analyzing' | 'wizard' | 'saving' | 'scanning'
+type Phase = 'payment' | 'intake' | 'analyzing' | 'wizard' | 'saving' | 'scanning'
 interface WizardCompetitor { name: string; website: string; source: 'auto' | 'manual' }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -198,6 +198,66 @@ export default function OnboardingPage() {
 
   // Scanning
   const [scanStep, setScanStep] = useState(0)
+
+  // Payment-return handling
+  const [paymentFailed, setPaymentFailed] = useState(false)
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null)
+
+  // ── Process Upay payment-return params BEFORE showing onboarding ───────────
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const hasReturn =
+      params.has('transactionid') || params.has('errordescription') || params.has('providerconfirmationnumber')
+    if (!hasReturn) return
+
+    setPhase('payment')
+    ;(async () => {
+      const payload = {
+        errordescription: params.get('errordescription'),
+        providererrorcode: params.get('providererrorcode'),
+        providerconfirmationnumber: params.get('providerconfirmationnumber'),
+        transactionid: params.get('transactionid'),
+        amount: params.get('amount'),
+        fourdigits: params.get('fourdigits'),
+        email: params.get('email'),
+        actiondate: params.get('actiondate'),
+        productdescription: params.get('productdescription'),
+      }
+      let data: any = {}
+      try {
+        const supabase = createClient()
+        const { data: { session } } = await supabase.auth.getSession()
+        const res = await fetch('/api/upay/return', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify(payload),
+        })
+        data = await res.json().catch(() => ({}))
+      } catch {
+        data = { ok: false, reason: 'network' }
+      }
+
+      // STEP 4 — strip params so they don't linger / re-process on refresh.
+      window.history.replaceState({}, '', '/onboarding')
+
+      if (data.ok) {
+        if (data.review) {
+          setPaymentNotice('התשלום התקבל ונמצא בבדיקה. נאשר את הגישה בהקדם.')
+        }
+        setPhase('intake')
+      } else if (data.reason === 'not_success') {
+        setPaymentFailed(true) // stay on 'payment' phase, show retry card
+      } else {
+        // amount_mismatch / no_subscription / network → soft review, let them continue.
+        setPaymentNotice('התשלום התקבל אך נדרשת בדיקה ידנית. נאשר את הגישה בהקדם.')
+        setPhase('intake')
+      }
+    })()
+  }, [])
 
   // ── Prefill phone + name from signup (user_metadata) ──────────────────────
   useEffect(() => {
@@ -420,6 +480,35 @@ export default function OnboardingPage() {
 
         <div className="rounded-2xl border border-border/60 bg-card/90 backdrop-blur-sm shadow-2xl p-8">
 
+          {/* ── PAYMENT-RETURN PHASE ──────────────────────────────────── */}
+          {phase === 'payment' && (
+            paymentFailed ? (
+              <div className="flex flex-col items-center gap-5 py-12 text-center">
+                <div className="rounded-full bg-destructive/10 p-5">
+                  <X className="h-10 w-10 text-destructive" />
+                </div>
+                <div className="space-y-1">
+                  <h1 className="text-xl font-semibold text-foreground">התשלום לא הושלם</h1>
+                  <p className="text-sm text-muted-foreground">נסה שוב כדי להשלים את ההרשמה.</p>
+                </div>
+                <Button
+                  onClick={() => router.push('/checkout')}
+                  className="gap-2 bg-teal-600 hover:bg-teal-700 text-white"
+                >
+                  חזרה לתשלום
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-5 py-14 text-center">
+                <Loader2 className="h-12 w-12 animate-spin text-teal-500" />
+                <div className="space-y-1">
+                  <p className="text-lg font-semibold text-foreground">מאמת את התשלום...</p>
+                  <p className="text-sm text-muted-foreground">עוד רגע</p>
+                </div>
+              </div>
+            )
+          )}
+
           {/* ── INTAKE PHASE ──────────────────────────────────────────── */}
           {phase === 'intake' && (
             <div className="space-y-6">
@@ -429,6 +518,12 @@ export default function OnboardingPage() {
                   ספר לנו על העסק שלך ו-AI יבנה פרופיל עסקי מדויק תוך פחות מדקה
                 </p>
               </div>
+
+              {paymentNotice && (
+                <div className="rounded-lg border border-teal-500/30 bg-teal-500/10 p-3 text-sm text-teal-700">
+                  {paymentNotice}
+                </div>
+              )}
 
               {analysisError && (
                 <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive border border-destructive/20">

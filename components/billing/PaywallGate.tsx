@@ -21,6 +21,18 @@ export default function PaywallGate({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let cancelled = false
+
+    // Upay payment return: the customer lands back here with success params
+    // while the subscription is still pending_payment. Let the content render
+    // so /onboarding's return handler can process + activate the payment.
+    // (The handler itself re-validates server-side; this only avoids the gate
+    // blocking the page transiently before the params are processed.)
+    if (typeof window !== 'undefined' &&
+        /[?&](transactionid|errordescription|providerconfirmationnumber)=/i.test(window.location.search)) {
+      setState({ loading: false, hasAccess: true, pendingPayment: false })
+      return () => { cancelled = true }
+    }
+
     fetch('/api/billing/gate')
       .then(r => r.json())
       .then(data => {
