@@ -11,13 +11,20 @@ export async function POST() {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: comps } = await ctx.supabase
+    // FIX 2 — only competitors that don't already have a cached rating, and
+    // CAP at 7 (highest threat first) so a long competitor list can't fan out
+    // into hundreds of Google Places calls. Each getPlaceDetails is expensive.
+    const COMPETITOR_RATING_CAP = 7
+    const { data: allComps } = await ctx.supabase
       .from('competitors')
       .select('id, name, website, phone, source, threat_score')
       .eq('company_id', ctx.user.id)
       .is('google_rating', null)
+      .order('threat_score', { ascending: false, nullsFirst: false })
 
-    if (!comps?.length) {
+    const comps = (allComps ?? []).slice(0, COMPETITOR_RATING_CAP)
+
+    if (!comps.length) {
       return NextResponse.json({ success: true, updated: 0, skipped: 'all ratings present' })
     }
 
@@ -61,7 +68,7 @@ export async function POST() {
       }
     }
 
-    return NextResponse.json({ success: true, updated, total: comps.length })
+    return NextResponse.json({ success: true, updated, total: comps.length, capped: (allComps?.length ?? 0) > comps.length })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }

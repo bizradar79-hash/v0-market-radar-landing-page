@@ -94,17 +94,25 @@ export async function initScanControl(
   _opts: { force?: boolean } = {},
 ): Promise<ScanControl> {
   const existing = await readScanControl(db, companyId)
+  // Resumability (FIX 1): when restarting a STALE timed-out run, carry over the
+  // module flags that already completed so the new run skips them instead of
+  // redoing everything. A FRESH running scan still blocks (cross-invocation
+  // guard) regardless of `force`.
+  const carried: Record<string, ScanModuleState> = {}
   if (existing?.status === 'running') {
     const ageMs = Date.now() - new Date(existing.started_at).getTime()
     const fresh = ageMs < existing.max_seconds * 1000
     if (fresh) {
       throw new ScanAbortError('already_running', 'running')
     }
+    for (const [id, st] of Object.entries(existing.modules || {})) {
+      if (st?.status === 'done' || st?.status === 'skipped') carried[id] = st
+    }
   }
 
   const maxCalls = profile === 'initial' ? SCAN_MAX_CALLS_INITIAL : SCAN_MAX_CALLS
   const modules: Record<string, ScanModuleState> = {}
-  for (const id of moduleIds) modules[id] = { status: 'pending', updated_at: now() }
+  for (const id of moduleIds) modules[id] = carried[id] ?? { status: 'pending', updated_at: now() }
 
   const control: ScanControl = {
     status: 'running',

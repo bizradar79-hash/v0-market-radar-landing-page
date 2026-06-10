@@ -121,14 +121,25 @@ export async function POST(request: Request) {
 
   // FIX 3 — initialise the circuit breaker. This also guards against a second
   // invocation (504 retry) stacking a duplicate run while one is still fresh.
+  // FIX 1 — the returned control carries over modules already completed by a
+  // prior STALE run so we can resume (skip them) instead of redoing the scan.
+  let initialControl
   try {
-    await initScanControl(adminDb, companyId, profile as ScanProfile, MODULE_IDS, { force })
+    initialControl = await initScanControl(adminDb, companyId, profile as ScanProfile, MODULE_IDS, { force })
   } catch (e) {
     if (e instanceof ScanAbortError && e.reason === 'already_running') {
       return NextResponse.json({ message: 'Scan already running', scan_status: 'running' }, { status: 409 })
     }
     throw e
   }
+
+  // Modules already finished by a prior (resumed) run — skip without re-calling.
+  const resumeDone = new Set<string>(
+    MODULE_IDS.filter(id => {
+      const st = initialControl.modules?.[id]?.status
+      return st === 'done' || st === 'skipped'
+    }),
+  )
 
   // Pre-mark weekly-skipped modules so the modal shows them as skipped up front.
   for (const id of MODULE_IDS) {
@@ -166,6 +177,12 @@ export async function POST(request: Request) {
     if (isSkipped(moduleId)) {
       addLog(moduleId, 'skipped', 'weekly: lean scan')
       await setModuleStatus(adminDb, companyId!, moduleId, 'skipped', 'weekly: lean scan')
+      return
+    }
+    // FIX 1 — resume: a prior stale run already completed this module. Skip it
+    // (no AI call, no recount) so a restarted scan finishes the remainder.
+    if (resumeDone.has(moduleId)) {
+      addLog(moduleId, 'skipped', 'resumed: already complete')
       return
     }
     // FIX 3 — stop button / wall-clock timeout. Throws ScanAbortError to unwind.

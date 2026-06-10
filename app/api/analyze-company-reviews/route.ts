@@ -93,18 +93,20 @@ export async function POST(request: Request) {
     if (!companyName) return NextResponse.json({ error: 'Missing company name' }, { status: 400 })
 
     // Build name variations to try (handles lawyers, professionals, reversed name order)
+    // FIX 2 — cap variants to 3: each getPlaceDetails is an expensive multi-call
+    // sweep, so 6 variants × ~15 Google calls was the runaway multiplier. Keep
+    // the 3 highest-signal queries; the loop breaks on the first hit anyway.
     const nameParts = companyName.replace(/^(משרד |עורך דין |רואה חשבון |מהנדס )/u, '').trim()
     const searchVariants = [
       companyName,                                // e.g. "עורך דין דרור הראל"
+      city ? `${companyName} ${city}` : nameParts, // + city, or short name
       nameParts,                                  // e.g. "דרור הראל"
-      city ? `${companyName} ${city}` : null,     // + city
-      city ? `${nameParts} ${city}` : null,       // short name + city
-      `${nameParts} עורך דין`,                   // short name + profession
-      `משרד עורך דין ${nameParts}`,              // office prefix
     ].filter(Boolean) as string[]
+    // De-dupe (companyName === nameParts when no prefix matched)
+    const uniqueVariants = [...new Set(searchVariants)].slice(0, 3)
 
     let placesData = null
-    for (const variant of searchVariants) {
+    for (const variant of uniqueVariants) {
       console.log(`[analyze-company-reviews] trying: name="${variant}" website="${website}"`)
       placesData = await getPlaceDetails(variant, website, phone)
       if (placesData) {

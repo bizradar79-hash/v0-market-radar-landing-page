@@ -275,7 +275,7 @@ export async function getPlaceDetails(
     // ── Strategy 3: textsearch(domain) → details for each to check website ───
     console.log('[google-places] trying strategy 3: textsearch(domain) + place/details')
     const s3Results = await textsearch(domain, apiKey)
-    const s3Top5 = s3Results.slice(0, 5)
+    const s3Top5 = s3Results.slice(0, 3) // FIX 2 — cap detail lookups (was 5)
     for (const r of s3Top5) {
       if (!r.place_id) continue
       const details = await placeDetails(r.place_id, apiKey)
@@ -292,7 +292,7 @@ export async function getPlaceDetails(
     console.log('[google-places] trying strategy 4: textsearch(name+ישראל) + place/details')
     const s4Query = `${businessName} ישראל`
     const s4Results = await textsearch(s4Query, apiKey)
-    const s4Top5 = s4Results.slice(0, 5)
+    const s4Top5 = s4Results.slice(0, 3) // FIX 2 — cap detail lookups (was 5)
     for (const r of s4Top5) {
       if (!r.place_id) continue
       const details = await placeDetails(r.place_id, apiKey)

@@ -20,6 +20,7 @@ import {
   CalendarClock, Square,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { ScanProgressModal } from "@/components/scan-progress-modal"
 
 interface SyncLogEntry {
   module: string
@@ -124,6 +125,8 @@ export default function ImpersonatePage() {
   const [recoveringStuck, setRecoveringStuck] = useState(false)
   const [runningWeekly, setRunningWeekly] = useState(false)
   const [stopping, setStopping] = useState<Record<string, boolean>>({})
+  // FIX 5 — live progress modal target ({ id, name } of the scanning company)
+  const [progressUser, setProgressUser] = useState<UserRow | null>(null)
 
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
@@ -264,6 +267,9 @@ export default function ImpersonatePage() {
         body: JSON.stringify({ company_id: userId, force: true, profile }),
       }).catch(() => {})
       setPollingUsers(prev => new Set([...prev, userId]))
+      // FIX 5 — open the live progress modal for this company.
+      const target = users.find(u => u.id === userId) || null
+      if (target) setProgressUser(target)
       if (profile === 'weekly') {
         toast({ title: 'סריקה שבועית הופעלה', description: 'רענון רזה — מודולים דינמיים בלבד' })
       }
@@ -599,6 +605,16 @@ export default function ImpersonatePage() {
                           <CalendarClock className="h-3.5 w-3.5 ml-1" />
                           שבועית
                         </Button>
+                        {/* FIX 5 — open live progress modal */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setProgressUser(u)}
+                          title="צפה בהתקדמות הסריקה"
+                        >
+                          <Loader2 className={`h-3.5 w-3.5 ml-1 ${isRunning ? 'animate-spin' : ''}`} />
+                          התקדמות
+                        </Button>
                         {/* FIX 3 — Stop scan (only while running) */}
                         {isRunning && (
                           <Button
@@ -682,6 +698,14 @@ export default function ImpersonatePage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* ── FIX 5: live scan progress modal ── */}
+      <ScanProgressModal
+        companyId={progressUser?.id ?? null}
+        companyName={progressUser?.company?.name || progressUser?.email}
+        open={!!progressUser}
+        onClose={() => setProgressUser(null)}
+      />
 
       {/* ── Per-module sync dialog ── */}
       <Dialog open={!!moduleSyncUser} onOpenChange={open => { if (!open) setModuleSyncUser(null) }}>
