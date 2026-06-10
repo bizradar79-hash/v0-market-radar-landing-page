@@ -5,10 +5,16 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
 import { captureSnapshot } from '@/lib/scan/snapshot'
+import {
+  initScanControl, assertScanAlive, recordScanCall, setModuleStatus,
+  finishScan, ScanAbortError, type ScanProfile, type ModuleStatus as BreakerModuleStatus,
+} from '@/lib/scan/breaker'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-const SYNC_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes hard limit
+// Hard backstop BELOW Vercel's 300s function limit so the orchestrator aborts
+// itself (and persists state) before the platform 504s and retries it.
+const SYNC_TIMEOUT_MS = 280 * 1000
 
 function getAdminSupabase() {
   return createServerClient(
@@ -79,7 +85,6 @@ export async function POST(request: Request) {
   const profile: 'initial' | 'weekly' = body.profile === 'initial' ? 'initial' : 'weekly'
   const isWeekly = profile === 'weekly'
   const COMPETITOR_TARGET = 7
-  const MONTHLY_MS = 30 * 24 * 60 * 60 * 1000
 
   if (!companyId) {
     return NextResponse.json({ error: 'Missing company_id' }, { status: 400 })
@@ -95,14 +100,45 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Company not found' }, { status: 404 })
   }
 
-  if (!force && company.sync_status === 'running') {
-    return NextResponse.json({ message: 'Sync already running', sync_status: 'running' })
+  // FIX 4 — weekly is LEAN: these modules are skipped entirely (no AI call).
+  // Weekly runs only the dynamic data modules + cheap synthesis.
+  const WEEKLY_SKIP = new Set<string>([
+    'competitors',          // competitor DISCOVERY (expensive)
+    'competitor_ratings',   // Google Places sweep
+    'review_analysis',      // analyze-company-reviews (the runaway)
+    'leads',                // lead generation
+    'niche_opportunities',  // niche AI generation
+  ])
+  const isSkipped = (moduleId: string) => isWeekly && WEEKLY_SKIP.has(moduleId)
+
+  // Ordered module ids for the progress modal / circuit-breaker state.
+  const MODULE_IDS = [
+    'competitors', 'competitor_ratings', 'review_analysis',
+    'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
+    'competitor_trends', 'news', 'tenders', 'leads', 'weekly_actions',
+    'niche_opportunities', 'weekly_report',
+  ]
+
+  // FIX 3 — initialise the circuit breaker. This also guards against a second
+  // invocation (504 retry) stacking a duplicate run while one is still fresh.
+  try {
+    await initScanControl(adminDb, companyId, profile as ScanProfile, MODULE_IDS, { force })
+  } catch (e) {
+    if (e instanceof ScanAbortError && e.reason === 'already_running') {
+      return NextResponse.json({ message: 'Scan already running', scan_status: 'running' }, { status: 409 })
+    }
+    throw e
+  }
+
+  // Pre-mark weekly-skipped modules so the modal shows them as skipped up front.
+  for (const id of MODULE_IDS) {
+    if (isSkipped(id)) await setModuleStatus(adminDb, companyId, id, 'skipped', 'weekly: lean scan')
   }
 
   // Layer 2: capture a full pre-scan snapshot before anything mutates state.
   await captureSnapshot(adminDb, companyId, 'full')
 
-  // Mark as running
+  // Mark as running (legacy sync_status field, kept for older UI)
   await adminDb.from('companies').update({
     sync_status: 'running',
     last_sync_at: new Date().toISOString(),
@@ -116,97 +152,102 @@ export async function POST(request: Request) {
     log.push({ module, status, message, updated_at: ts() })
   }
 
+  // Map the log status vocabulary → breaker module-status vocabulary.
+  const mapStatus = (s: ModuleStatus): BreakerModuleStatus => (s === 'ok' ? 'done' : s)
+
+  // ── Guarded step wrapper ──────────────────────────────────────────────────
+  // Every module runs through here so the circuit breaker can stop/timeout/cap
+  // the scan, and so per-module progress is persisted for the modal (FIX 5).
+  async function runStep(
+    moduleId: string,
+    fn: () => Promise<{ status: ModuleStatus; message: string }>,
+  ) {
+    // FIX 4 — weekly skips stable/expensive modules entirely (no AI call).
+    if (isSkipped(moduleId)) {
+      addLog(moduleId, 'skipped', 'weekly: lean scan')
+      await setModuleStatus(adminDb, companyId!, moduleId, 'skipped', 'weekly: lean scan')
+      return
+    }
+    // FIX 3 — stop button / wall-clock timeout. Throws ScanAbortError to unwind.
+    await assertScanAlive(adminDb, companyId!)
+    await setModuleStatus(adminDb, companyId!, moduleId, 'running')
+
+    let outcome: { status: ModuleStatus; message: string }
+    try {
+      outcome = await fn()
+    } catch (e) {
+      if (e instanceof ScanAbortError) throw e
+      outcome = { status: 'error', message: (e as any)?.message ?? 'error' }
+    }
+
+    // FIX 3 — count one external-AI-call unit (only when we actually called out)
+    // and enforce SCAN_MAX_CALLS. Throws ScanAbortError('aborted_call_cap').
+    if (outcome.status !== 'skipped') {
+      await recordScanCall(adminDb, companyId!)
+    }
+    addLog(moduleId, outcome.status, outcome.message)
+    await setModuleStatus(adminDb, companyId!, moduleId, mapStatus(outcome.status), outcome.message)
+    await new Promise(res => setTimeout(res, 1200))
+  }
+
   // ── Inner function with all module calls ──────────────────────────────────
   async function runAllModules() {
-    // 1. Competitors — discovery is EXPENSIVE, so gate it by profile.
-    //   • initial: always (re)discover up to the target.
-    //   • weekly:  only run when we're SHORT of the target (backfill deleted
-    //              competitors back up to 7) OR the last discovery is >30 days
-    //              old (monthly full refresh). Otherwise skip to save cost.
-    // find-competitors already filters the company's deleted blacklist, so any
-    // user-deleted competitor is never re-added during backfill.
-    {
+    // 1. Competitor DISCOVERY — initial only (weekly skips it per FIX 4).
+    await runStep('competitors', async () => {
       const { count: autoCount } = await adminDb
         .from('competitors')
         .select('id', { count: 'exact', head: true })
         .eq('company_id', companyId)
         .neq('source', 'manual')
-
-      // Most-recent auto competitor — used for the monthly-refresh gate.
-      const { data: lastAuto } = await adminDb
-        .from('competitors')
-        .select('created_at')
-        .eq('company_id', companyId)
-        .neq('source', 'manual')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-      const lastDiscoveryMs = lastAuto?.created_at ? new Date(lastAuto.created_at).getTime() : 0
-      const monthlyDue = Date.now() - lastDiscoveryMs > MONTHLY_MS
-
-      const below = (autoCount ?? 0) < COMPETITOR_TARGET
-      let shouldDiscover: boolean
-      let reason: string
-      if (!isWeekly) {
-        shouldDiscover = below
-        reason = below ? 'initial discovery' : `already have ${autoCount} auto competitors`
-      } else if (below) {
-        shouldDiscover = true
-        reason = `backfill: only ${autoCount}/${COMPETITOR_TARGET} auto competitors`
-      } else if (monthlyDue) {
-        shouldDiscover = true
-        reason = 'monthly refresh (>30d since last discovery)'
-      } else {
-        shouldDiscover = false
-        reason = `weekly skip: have ${autoCount}, last discovery <30d ago`
+      if ((autoCount ?? 0) >= COMPETITOR_TARGET) {
+        return { status: 'skipped', message: `already have ${autoCount} auto competitors` }
       }
-
-      if (shouldDiscover) {
-        const r = await callModule(origin, '/api/find-competitors', companyId!, false)
-        addLog('competitors', r.ok ? 'ok' : 'error', r.ok ? `${reason} → found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`))
-        await new Promise(res => setTimeout(res, 2000))
-      } else {
-        addLog('competitors', 'skipped', reason)
+      const r = await callModule(origin, '/api/find-competitors', companyId!, false)
+      return {
+        status: r.ok ? 'ok' : 'error',
+        message: r.ok ? `found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`),
       }
-    }
+    })
 
-    // 1b. All competitor ratings (manual + auto, missing google_rating)
-    {
+    // 1b. Competitor ratings (Google Places) — initial only.
+    await runStep('competitor_ratings', async () => {
       const r = await callModule(origin, '/api/sync-competitor-ratings', companyId!)
-      addLog('competitor_ratings', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 1000))
-    }
+      return {
+        status: r.ok ? 'ok' : 'error',
+        message: r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`),
+      }
+    })
 
-    // 1c. Company Google Maps review data
-    {
-      const r = await callModule(origin, '/api/analyze-company-reviews', companyId!)
-      addLog('review_analysis', r.ok ? 'ok' : 'error', r.ok ? (r.body?.google_rating != null ? `rating=${r.body.google_rating}` : 'no rating found') : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 1000))
-    }
+    // 1c. Company Google review analysis — initial only, and WITHOUT force so the
+    // route's 7-day cache applies (FIX 2: at most once per cache window, no runaway).
+    await runStep('review_analysis', async () => {
+      const r = await callModule(origin, '/api/analyze-company-reviews', companyId!, false)
+      const msg = r.ok
+        ? (r.body?.cached ? 'cached' : (r.body?.google_rating != null ? `rating=${r.body.google_rating}` : 'no rating found'))
+        : (r.body?.error ?? `HTTP ${r.status}`)
+      return { status: r.ok ? 'ok' : 'error', message: msg }
+    })
 
     // 2. SEO ranking
-    {
+    await runStep('seo_ranking', async () => {
       const r = await callModule(origin, '/api/generate-seo-ranking', companyId!)
-      addLog('seo_ranking', r.ok ? 'ok' : 'error', r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 3. GEO ranking
-    {
+    await runStep('geo_ranking', async () => {
       const r = await callModule(origin, '/api/generate-geo-ranking', companyId!)
-      addLog('geo_ranking', r.ok ? 'ok' : 'error', r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 4. Industry trends
-    {
+    await runStep('industry_trends', async () => {
       const r = await callModule(origin, '/api/industry-trends', companyId!)
-      addLog('industry_trends', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
-    // 4b. Keyword trends
-    {
+    // 4b. Keyword trends (sequential; stop-aware between keywords)
+    await runStep('keyword_trends', async () => {
       const keywords: string[] = ((company as any).keywords || []).slice(0, 5)
       const adminHeaders = {
         'Content-Type': 'application/json',
@@ -215,93 +256,67 @@ export async function POST(request: Request) {
       }
       let kwUpdated = 0
       const kwErrors: string[] = []
-      console.log(`[sync:keyword_trends] processing ${keywords.length} keywords for company ${companyId}`)
       for (const keyword of keywords) {
+        await assertScanAlive(adminDb, companyId!) // honour stop mid-loop
         try {
           const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
-            method: 'POST',
-            headers: adminHeaders,
-            body: JSON.stringify({ keyword, force: true }),
+            method: 'POST', headers: adminHeaders, body: JSON.stringify({ keyword, force: true }),
           })
-          if (res.ok) {
-            const data = await res.json().catch(() => ({}))
-            const trendsCount = (data.israel || data.trends || []).length
-            console.log(`[sync:keyword_trends] "${keyword}" → ${trendsCount} trends`)
-            kwUpdated++
-          } else {
+          if (res.ok) { await res.json().catch(() => ({})); kwUpdated++ }
+          else {
             const errText = await res.text().catch(() => '')
-            const msg = `"${keyword}": HTTP ${res.status} — ${errText.slice(0, 100)}`
-            kwErrors.push(msg)
-            console.error(`[sync:keyword_trends] ${msg}`)
-            addLog('keyword_trends', 'error', msg)
+            kwErrors.push(`"${keyword}": HTTP ${res.status} — ${errText.slice(0, 80)}`)
           }
         } catch (e: any) {
-          const msg = `"${keyword}": ${e?.message}`
-          kwErrors.push(msg)
-          console.error(`[sync:keyword_trends] error for ${msg}`)
-          addLog('keyword_trends', 'error', msg)
+          kwErrors.push(`"${keyword}": ${e?.message}`)
         }
       }
-      const status: ModuleStatus = kwUpdated > 0 ? 'ok' : 'error'
-      addLog('keyword_trends', status, `${kwUpdated}/${keywords.length} keywords updated${kwErrors.length ? ` | errors: ${kwErrors.slice(0, 2).join('; ')}` : ''}`)
-      await new Promise(res => setTimeout(res, 1000))
-    }
+      return {
+        status: kwUpdated > 0 ? 'ok' : (keywords.length === 0 ? 'skipped' : 'error'),
+        message: `${kwUpdated}/${keywords.length} keywords${kwErrors.length ? ` | ${kwErrors.slice(0, 2).join('; ')}` : ''}`,
+      }
+    })
 
     // 5. Competitor trends
-    {
+    await runStep('competitor_trends', async () => {
       const r = await callModule(origin, '/api/competitor-trends', companyId!)
-      addLog('competitor_trends', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.competitor_data?.length ?? 0} competitors` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.competitor_data?.length ?? 0} competitors` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 6. News
-    {
+    await runStep('news', async () => {
       const r = await callModule(origin, '/api/generate-news', companyId!)
-      addLog('news', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.count ?? 0} articles` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} articles` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 7. Tenders
-    {
+    await runStep('tenders', async () => {
       const { count: existingTenders } = await adminDb
         .from('tenders').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
       const r = await callModule(origin, '/api/find-tenders', companyId!)
       const newCount = r.body?.count ?? 0
-      if (r.ok && newCount >= (existingTenders ?? 0)) {
-        addLog('tenders', 'ok', `${newCount} tenders`)
-      } else if (r.ok) {
-        addLog('tenders', 'skipped', `new count ${newCount} < existing ${existingTenders}`)
-      } else {
-        addLog('tenders', 'error', r.body?.error ?? `HTTP ${r.status}`)
-      }
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      if (r.ok && newCount >= (existingTenders ?? 0)) return { status: 'ok', message: `${newCount} tenders` }
+      if (r.ok) return { status: 'skipped', message: `new ${newCount} < existing ${existingTenders}` }
+      return { status: 'error', message: r.body?.error ?? `HTTP ${r.status}` }
+    })
 
-    // 8. Leads
-    {
+    // 8. Leads — initial only (weekly skips), and only when below threshold.
+    await runStep('leads', async () => {
       const { count: leadsCount } = await adminDb
         .from('leads').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
-      if ((leadsCount ?? 0) < 5) {
-        const r = await callModule(origin, '/api/generate-leads', companyId!)
-        addLog('leads', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.count ?? 0} leads` : (r.body?.error ?? `HTTP ${r.status}`))
-        await new Promise(res => setTimeout(res, 2000))
-      } else {
-        addLog('leads', 'skipped', `already have ${leadsCount} leads`)
-      }
-    }
+      if ((leadsCount ?? 0) >= 5) return { status: 'skipped', message: `already have ${leadsCount} leads` }
+      const r = await callModule(origin, '/api/generate-leads', companyId!)
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} leads` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 9. Weekly actions
-    {
+    await runStep('weekly_actions', async () => {
       const r = await callModule(origin, '/api/generate-weekly-actions', companyId!)
-      addLog('weekly_actions', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.actions?.length ?? 0} actions` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.actions?.length ?? 0} actions` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
-    // 10. Niche opportunities — expensive AI generation. Stable module: refresh
-    // only on the initial scan; weekly keeps the existing niches untouched.
-    if (isWeekly) {
-      addLog('niche_opportunities', 'skipped', 'weekly: kept existing niches')
-    } else {
+    // 10. Niche opportunities — initial only (weekly skips). Preserve user statuses.
+    await runStep('niche_opportunities', async () => {
       const { data: prevCompany } = await adminDb
         .from('companies').select('niche_opportunities').eq('id', companyId).single()
       const prevNiches: any[] = (prevCompany?.niche_opportunities as any)?.opportunities ?? []
@@ -311,10 +326,7 @@ export async function POST(request: Request) {
           preservedStatuses.set(n.nicheTitle.toLowerCase().trim(), n.status)
         }
       }
-
       const r = await callModule(origin, '/api/generate-niche-opportunities', companyId!)
-      addLog('niche_opportunities', r.ok ? 'ok' : 'error', r.ok ? `${r.body?.opportunities?.length ?? 0} niches` : (r.body?.error ?? `HTTP ${r.status}`))
-
       if (r.ok && preservedStatuses.size > 0) {
         const { data: freshCompany } = await adminDb
           .from('companies').select('niche_opportunities').eq('id', companyId).single()
@@ -324,10 +336,7 @@ export async function POST(request: Request) {
           const updated = freshData.opportunities.map((n: any) => {
             const key = (n.nicheTitle ?? '').toLowerCase().trim()
             const savedStatus = preservedStatuses.get(key)
-            if (savedStatus && n.status !== savedStatus) {
-              changed = true
-              return { ...n, status: savedStatus }
-            }
+            if (savedStatus && n.status !== savedStatus) { changed = true; return { ...n, status: savedStatus } }
             return n
           })
           if (changed) {
@@ -337,33 +346,44 @@ export async function POST(request: Request) {
           }
         }
       }
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.opportunities?.length ?? 0} niches` : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
 
     // 11. Weekly report
-    {
+    await runStep('weekly_report', async () => {
       const r = await callModule(origin, '/api/generate-weekly-report', companyId!)
-      addLog('weekly_report', r.ok ? 'ok' : 'error', r.ok ? (r.body?.report?.generated_at ? `generated at ${r.body.report.generated_at}` : 'generated') : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? (r.body?.report?.generated_at ? `generated at ${r.body.report.generated_at}` : 'generated') : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
   }
 
   // ── Run with timeout + guaranteed finally cleanup ─────────────────────────
-  let finalStatus: 'done' | 'error' | 'idle' = 'idle'
+  let finalStatus: 'done' | 'error' | 'idle' | 'stopped' = 'idle'
   let returnResponse: NextResponse
 
   try {
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Sync timeout: exceeded 10 minutes')), SYNC_TIMEOUT_MS)
+      setTimeout(() => reject(new Error('Sync timeout: exceeded scan window')), SYNC_TIMEOUT_MS)
     )
 
     await Promise.race([runAllModules(), timeoutPromise])
 
     finalStatus = 'done'
-    returnResponse = NextResponse.json({ success: true, company_id: companyId, log })
+    await finishScan(adminDb, companyId, 'done')
+    returnResponse = NextResponse.json({ success: true, company_id: companyId, profile, log })
   } catch (e: any) {
-    addLog('sync', 'error', e?.message ?? 'unexpected error')
-    finalStatus = 'error'
-    returnResponse = NextResponse.json({ success: false, error: e?.message, log }, { status: 500 })
+    // FIX 3 — a circuit-breaker abort (stop / call-cap / timeout) ends the scan
+    // cleanly with the right terminal state instead of looking like a crash.
+    if (e instanceof ScanAbortError) {
+      finalStatus = e.status === 'stopped' ? 'stopped' : 'error'
+      addLog('sync', e.status === 'stopped' ? 'skipped' : 'error', `aborted: ${e.reason}`)
+      await finishScan(adminDb, companyId, e.status)
+      returnResponse = NextResponse.json({ success: false, aborted: e.reason, profile, log }, { status: 200 })
+    } else {
+      addLog('sync', 'error', e?.message ?? 'unexpected error')
+      finalStatus = 'error'
+      await finishScan(adminDb, companyId, 'error')
+      returnResponse = NextResponse.json({ success: false, error: e?.message, log }, { status: 500 })
+    }
   } finally {
     const now = new Date().toISOString()
     const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()

@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
-  CalendarClock,
+  CalendarClock, Square,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -123,6 +123,7 @@ export default function ImpersonatePage() {
   const [logModalUser, setLogModalUser] = useState<UserRow | null>(null)
   const [recoveringStuck, setRecoveringStuck] = useState(false)
   const [runningWeekly, setRunningWeekly] = useState(false)
+  const [stopping, setStopping] = useState<Record<string, boolean>>({})
 
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
@@ -270,6 +271,30 @@ export default function ImpersonatePage() {
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
     } finally {
       setTriggering(prev => ({ ...prev, [userId]: false }))
+    }
+  }
+
+  // FIX 3 — "עצור סריקה": flip scan_control.status='stopped' so the running
+  // orchestrator aborts at its next module boundary.
+  async function stopSync(userId: string) {
+    setStopping(prev => ({ ...prev, [userId]: true }))
+    try {
+      const res = await fetch('/api/scan/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: userId }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setUsers(prev => prev.map(u => u.id === userId && u.company
+        ? { ...u, company: { ...u.company, sync_status: 'stopped' } }
+        : u
+      ))
+      toast({ title: 'נשלחה בקשת עצירה', description: 'הסריקה תיעצר בשלב הבא' })
+    } catch (e: any) {
+      toast({ title: 'שגיאה בעצירה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setStopping(prev => ({ ...prev, [userId]: false }))
     }
   }
 
@@ -574,6 +599,23 @@ export default function ImpersonatePage() {
                           <CalendarClock className="h-3.5 w-3.5 ml-1" />
                           שבועית
                         </Button>
+                        {/* FIX 3 — Stop scan (only while running) */}
+                        {isRunning && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                            onClick={() => stopSync(u.id)}
+                            disabled={stopping[u.id]}
+                            title="עצור סריקה"
+                          >
+                            {stopping[u.id]
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Square className="h-3.5 w-3.5 ml-1" />
+                            }
+                            עצור
+                          </Button>
+                        )}
                         {/* Per-module sync */}
                         <Button
                           size="sm"
