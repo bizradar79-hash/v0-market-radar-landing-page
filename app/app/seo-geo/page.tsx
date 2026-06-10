@@ -44,6 +44,7 @@ interface QueryVariant {
   topResults: string[]
   appeared: boolean
   results?: QueryVariantResult[]
+  status?: 'found' | 'not_found' | 'error'
 }
 
 interface SEORanking {
@@ -266,7 +267,7 @@ export default function SeoGeoPage() {
                               <tr
                                 key={`seo-row-${i}`}
                                 onClick={() => setExpandedSeoRow(expandedSeoRow === i ? null : i)}
-                                className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared && v.position != null ? 'bg-green-50/50' : 'bg-red-50/30'}`}
+                                className={`border-b border-border cursor-pointer hover:bg-muted/30 transition-colors ${v.appeared && v.position != null ? 'bg-green-50/50' : v.status === 'error' ? 'bg-amber-50/40' : 'bg-red-50/30'}`}
                               >
                                 <td className="py-2.5 px-3">
                                   <span className="block text-sm font-medium truncate" title={v.query}>
@@ -274,12 +275,18 @@ export default function SeoGeoPage() {
                                   </span>
                                 </td>
                                 <td className="py-2.5 px-3 text-center">
-                                  {v.appeared && v.position != null ? <span className="text-green-600">✅</span> : <span className="text-red-500">❌</span>}
+                                  {v.appeared && v.position != null
+                                    ? <span className="text-green-600">✅</span>
+                                    : v.status === 'error'
+                                      ? <span className="text-amber-600" title="הבדיקה נכשלה — לא ניתן לאמת דירוג">⚠</span>
+                                      : <span className="text-red-500">❌</span>}
                                 </td>
                                 <td className="py-2.5 px-3">
                                   {v.position != null
                                     ? <span className="font-bold text-green-700">#{v.position}</span>
-                                    : <span className="text-muted-foreground">—</span>
+                                    : v.status === 'error'
+                                      ? <span className="text-amber-600 text-xs">בדיקה נכשלה</span>
+                                      : <span className="text-muted-foreground">—</span>
                                   }
                                 </td>
                                 <td className="py-2.5 px-3 hidden md:table-cell text-muted-foreground truncate">
@@ -329,6 +336,8 @@ export default function SeoGeoPage() {
                                           <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
                                         )}
                                       </div>
+                                    ) : v.status === 'error' ? (
+                                      <p className="text-xs text-amber-600 flex items-center gap-1"><XCircle className="h-3 w-3" />⚠ בדיקה נכשלה — הנתונים יעודכנו בבדיקה הבאה</p>
                                     ) : (
                                       <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
                                     )}
@@ -479,9 +488,9 @@ export default function SeoGeoPage() {
                   {/* Engine info box */}
                   {(() => {
                     const ENGINE_INFO: Record<string, string> = {
-                      chatgpt: "מה ChatGPT ממליץ — מבוסס על Grok web search",
-                      gemini: "המלצות Google Gemini — מבוסס על Gemini API ישירות",
-                      grok: "תוצאות Grok בזמן אמת — מבוסס על Grok web search",
+                      chatgpt: "מה ChatGPT ממליץ — מבוסס על OpenAI",
+                      gemini: "מה Gemini ממליץ — מבוסס על Google Gemini",
+                      grok: "מה Grok ממליץ — מבוסס על חיפוש Grok",
                     }
                     return ENGINE_INFO[selectedGeoEngine] ? (
                       <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2 border">

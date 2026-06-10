@@ -301,15 +301,28 @@ export async function POST(request: Request) {
 
     // Run each keyword: DataForSEO real SERP first, Grok web_search only as a
     // per-query fallback when DataForSEO fails (SEO_PROVIDER controls default).
+    // Per-keyword status distinguishes a genuine "not found" (we got a SERP back
+    // but the domain wasn't in it) from an "error" (the call failed / empty).
     let providerUsed = SEO_PROVIDER
     const variantResults = await Promise.all(
       queryList.map(async (q) => {
+        let res: Awaited<ReturnType<typeof runSeoQuery>> & { provider?: string } | null = null
         if (SEO_PROVIDER === 'dataforseo') {
           const dfs = await runSeoQueryDFS(q, companyName, website, companyDomain, competitorWebsites)
-          if (dfs) return dfs
-          providerUsed = 'grok_fallback'
+          if (dfs) {
+            res = dfs
+          } else {
+            providerUsed = 'grok_fallback'
+          }
         }
-        return runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal)
+        if (!res) {
+          res = await runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal)
+        }
+        const resultCount = Array.isArray(res.results) ? res.results.length : 0
+        const status: 'found' | 'not_found' | 'error' =
+          res.appeared ? 'found' : resultCount > 0 ? 'not_found' : 'error'
+        console.log('[seo]', q, status, res.position, resultCount)
+        return { ...res, status, resultCount }
       })
     )
 
@@ -341,9 +354,11 @@ export async function POST(request: Request) {
       topResults: variantResults[i].topResults,
       appeared: variantResults[i].appeared,
       results: variantResults[i].results,
+      status: variantResults[i].status, // 'found' | 'not_found' | 'error'
     }))
 
-    // Per-keyword position summary { keyword, position, url, found }
+    // Per-keyword position summary { keyword, position, url, found, status }
+    // status: 'found' | 'not_found' (SERP returned, domain absent) | 'error' (call failed/empty)
     const keywordPositions = queryList.map((q, i) => {
       const own = (variantResults[i].results || []).find((r: any) => r.isOwn)
       return {
@@ -351,6 +366,8 @@ export async function POST(request: Request) {
         position: variantResults[i].position,
         url: own?.url || null,
         found: !!variantResults[i].appeared,
+        status: variantResults[i].status,
+        resultCount: variantResults[i].resultCount,
       }
     })
 
@@ -403,6 +420,15 @@ export async function POST(request: Request) {
       .from('companies').select('seo_ranking').eq('id', ctx.user.id).single()
     const existingCount = Array.isArray(prevSeo?.seo_ranking?.results) ? prevSeo.seo_ranking.results.length : 0
     const newCount = Array.isArray(result.results) ? result.results.length : 0
+
+    // Extra guard: if EVERY keyword errored (call failed / empty), this scan is
+    // degraded — never clobber existing good data with it.
+    const allErrored = keywordPositions.length > 0 && keywordPositions.every(k => k.status === 'error')
+    if (allErrored && existingCount > 0) {
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'seo_ranking', reason: 'all_keywords_error', existing_count: existingCount, new_count: newCount })
+      return NextResponse.json({ success: true, kept_existing: true, reason: 'all_keywords_error', existing_count: existingCount, new_count: newCount })
+    }
+
     const guard = guardWrite(existingCount, newCount)
 
     if (!guard.useNew) {
