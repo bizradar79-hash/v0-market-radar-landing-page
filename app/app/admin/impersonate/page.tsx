@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
+  CalendarClock,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -249,7 +250,7 @@ export default function ImpersonatePage() {
     }
   }
 
-  async function triggerSync(userId: string) {
+  async function triggerSync(userId: string, profile: 'initial' | 'weekly' = 'initial') {
     setTriggering(prev => ({ ...prev, [userId]: true }))
     try {
       setUsers(prev => prev.map(u => u.id === userId && u.company
@@ -259,9 +260,12 @@ export default function ImpersonatePage() {
       fetch('/api/sync/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: userId, force: true }),
+        body: JSON.stringify({ company_id: userId, force: true, profile }),
       }).catch(() => {})
       setPollingUsers(prev => new Set([...prev, userId]))
+      if (profile === 'weekly') {
+        toast({ title: 'סריקה שבועית הופעלה', description: 'רענון רזה — מודולים דינמיים בלבד' })
+      }
     } catch (e: any) {
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
     } finally {
@@ -546,18 +550,29 @@ export default function ImpersonatePage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2 flex-wrap">
-                        {/* Full sync button */}
+                        {/* Full (initial) sync button */}
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => triggerSync(u.id)}
+                          onClick={() => triggerSync(u.id, 'initial')}
                           disabled={isTriggering || isRunning || refreshingAll}
-                          title="סנכרן עכשיו"
+                          title="סנכרון מלא (initial)"
                         >
                           {isTriggering || isRunning
                             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             : <RefreshCw className="h-3.5 w-3.5" />
                           }
+                        </Button>
+                        {/* Weekly (lean) sync button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => triggerSync(u.id, 'weekly')}
+                          disabled={isTriggering || isRunning || refreshingAll}
+                          title="הרץ סריקה שבועית (רזה — מודולים דינמיים בלבד)"
+                        >
+                          <CalendarClock className="h-3.5 w-3.5 ml-1" />
+                          שבועית
                         </Button>
                         {/* Per-module sync */}
                         <Button

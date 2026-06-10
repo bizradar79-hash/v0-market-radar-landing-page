@@ -47,6 +47,7 @@ import {
   UserPlus,
   Bot,
   Star,
+  RefreshCw,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -358,7 +359,7 @@ export default function CompetitorsPage() {
     setSaving(false)
   }
 
-  async function analyzeCompetitor(competitor: Competitor) {
+  async function analyzeCompetitor(competitor: Competitor, force = false) {
     setAnalyzing(competitor.id)
     setAnalysis(null)
     openModal(competitor, 'ai')
@@ -371,13 +372,14 @@ export default function CompetitorsPage() {
           competitorId: competitor.id,
           competitorName: competitor.name,
           competitorWebsite: competitor.website,
+          force,
         }),
       })
       const data = await response.json()
       if (data.success) {
         setAnalysis(data.analysis)
-        await fetchCompetitors()
-        toast({ title: "ניתוח הושלם!", description: `הניתוח של ${competitor.name} מוכן` })
+        if (!data.cached) await fetchCompetitors()
+        if (!data.cached) toast({ title: "ניתוח הושלם!", description: `הניתוח של ${competitor.name} מוכן` })
       } else {
         toast({ title: "שגיאה בניתוח", description: data.error || "לא הצלחנו לנתח", variant: "destructive" })
         setShowModal(false)
@@ -927,6 +929,16 @@ export default function CompetitorsPage() {
                       </div>
                     ) : analysis ? (
                       <div className="space-y-6">
+                        <div className="flex justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => analyzeCompetitor(selectedCompetitor, true)}
+                            disabled={analyzing === selectedCompetitor.id}
+                          >
+                            <RefreshCw className="ml-1 h-3.5 w-3.5" />רענן ניתוח
+                          </Button>
+                        </div>
                         <div className="rounded-lg bg-muted/50 p-4">
                           <h4 className="font-semibold mb-2 flex items-center gap-2">
                             <Eye className="h-4 w-4 text-primary" />סקירה כללית

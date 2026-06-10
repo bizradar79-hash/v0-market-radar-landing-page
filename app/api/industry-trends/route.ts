@@ -126,9 +126,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       return NextResponse.json({ success: true, trends: [], date_range: today, search_query: searchQuery, fetchedAt: new Date().toISOString() })
     }
 
-    // Normalize trends
+    // Normalize trends — cap at the 5 best to save tokens + keep the UI focused.
     const trends = (Array.isArray(parsed.trends) ? parsed.trends : [])
-      .slice(0, 8)
+      .slice(0, 5)
       .map((t: any) => ({
         name: String(t.name || ''),
         direction: ['rising', 'stable', 'declining'].includes(t.direction) ? t.direction : 'stable',

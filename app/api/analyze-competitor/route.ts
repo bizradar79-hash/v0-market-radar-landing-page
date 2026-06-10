@@ -17,10 +17,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "לא מחובר" }, { status: 401 })
     }
 
-    const { competitorId, competitorName, competitorWebsite } = await request.json()
+    const { competitorId, competitorName, competitorWebsite, force } = await request.json()
 
     if (!competitorId || !competitorName) {
       return NextResponse.json({ success: false, error: "חסרים פרטי מתחרה" }, { status: 400 })
+    }
+
+    // Scan-once cache: unless the user explicitly refreshes (force), return the
+    // saved analysis instead of re-running the AI on every open.
+    if (!force) {
+      const { data: cachedRows } = await supabase
+        .from("competitive_analysis")
+        .select("data, created_at")
+        .eq("company_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(20)
+      const hit = (cachedRows || []).find(
+        (row: any) => row?.data?.competitor_id === competitorId && row?.data?.analysis
+      )
+      if (hit) {
+        return NextResponse.json({ success: true, analysis: hit.data.analysis, cached: true })
+      }
     }
 
     const { data: company } = await supabase

@@ -4,54 +4,24 @@ import { getFullContext } from '@/lib/context'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { getPlaceDetails } from '@/lib/google-places'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
+// Cap on auto-discovered competitors (keep the best N).
+const COMPETITOR_CAP = 7
+
+// Ratings come from Google Places (project maps-leads-465314), NOT Grok.
 async function fetchGoogleRating(name: string, website: string): Promise<{ rating: number | null; reviewCount: number | null }> {
   try {
-    const prompt = `חפש את הפרטים הבאים על העסק: ${name}${website ? ` (אתר: ${website})` : ''}
-מצא: כתובת מדויקת, טלפון, דירוג גוגל, מספר ביקורות, 3 ביקורות טובות ו-3 ביקורות פחות טובות
-לכל ביקורת כלול: שם הכותב, ציון (1-5), טקסט הביקורת
-החזר JSON בלבד:
-{"address": "", "phone": "", "rating": 0, "review_count": 0, "top_reviews": [{"author": "", "rating": 0, "text": ""}], "bottom_reviews": [{"author": "", "rating": 0, "text": ""}]}`
-
-    const res = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search' }],
-      }),
-    })
-    if (!res.ok) return { rating: null, reviewCount: null }
-
-    const data = await res.json()
-    if (!data.output) return { rating: null, reviewCount: null }
-
-    const text = data.output
-      .filter((item: any) => item.type === 'message')
-      .flatMap((item: any) => item.content)
-      .filter((c: any) => c.type === 'output_text')
-      .map((c: any) => c.text)
-      .join('')
-
-    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-    const start = clean.indexOf('{')
-    const end = clean.lastIndexOf('}')
-    if (start === -1 || end <= start) return { rating: null, reviewCount: null }
-
-    let parsed: any = {}
-    try { parsed = JSON.parse(clean.slice(start, end + 1)) } catch { return { rating: null, reviewCount: null } }
-
-    const rating = typeof parsed.rating === 'number' && parsed.rating > 0 ? parsed.rating : null
-    const reviewCount = typeof parsed.review_count === 'number' ? parsed.review_count : null
-    return { rating, reviewCount }
+    const r = await getPlaceDetails(name, website || '')
+    if (!r) return { rating: null, reviewCount: null }
+    return {
+      rating: typeof r.google_rating === 'number' ? r.google_rating : null,
+      reviewCount: typeof r.google_review_count === 'number' ? r.google_review_count : null,
+    }
   } catch {
     return { rating: null, reviewCount: null }
   }
@@ -154,7 +124,7 @@ export async function POST(request: Request) {
 - חברות עם אותו מודל עסקי (B2B, B2C, יצרן, קמעונאי וכו')
 - חברות באותו אזור גיאוגרפי אם רלוונטי
 
-תן לי 8 מתחרים ישירים ועקיפים.
+תן לי 7 מתחרים ישירים ועקיפים.
 כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
 חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 4 חברות אמיתיות עם אתרים מאשר 8 ללא אתרים.
 חפש בעברית ובאנגלית. החזר את שמות החברות ותיאור השירותים בעברית.
@@ -222,8 +192,8 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       return true
     })
 
-    // Cap at 8
-    competitors = competitors.slice(0, 8)
+    // Cap at the best N
+    competitors = competitors.slice(0, COMPETITOR_CAP)
 
     // Map to working shape — base threat_score capped at 70, bonus added after rating fetch
     const mapped = competitors.map((c: any) => ({
@@ -300,7 +270,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
         if (name && manualNames.includes(name)) return false
         return true
       })
-      .slice(0, Math.max(0, 10 - manualCount))
+      .slice(0, Math.max(0, COMPETITOR_CAP - manualCount))
 
     // Guard: never wipe existing auto competitors for an empty/degraded scan.
     const { count: existingAuto } = await supabase

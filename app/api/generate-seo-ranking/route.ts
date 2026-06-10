@@ -3,12 +3,15 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { fetchSerp, findPosition, baseDomain as dfsBaseDomain } from '@/lib/seo/dataforseo'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+// Default to real Google SERP via DataForSEO; 'grok' keeps the old web_search path.
+const SEO_PROVIDER = (process.env.SEO_PROVIDER || 'dataforseo').toLowerCase()
 
 function extractDomain(url: string): string {
   try {
@@ -149,6 +152,50 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   }
 }
 
+// ── DataForSEO runner (real Google SERP) ────────────────────────────────────
+
+async function runSeoQueryDFS(
+  query: string,
+  companyName: string,
+  website: string,
+  companyDomain: string,
+  competitorWebsites: string[],
+): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[]; provider: string } | null> {
+  const serp = await fetchSerp(query)
+  if (!serp.ok) {
+    console.error(`[SEO dfs] "${query}" failed:`, serp.error)
+    return null // signal caller to fall back
+  }
+
+  const competitorDomains = competitorWebsites.map(w => dfsBaseDomain(w)).filter(Boolean)
+  const ownBase = dfsBaseDomain(companyDomain)
+
+  // Take top organic + paid, dedupe by base domain, cap 10.
+  const seen = new Set<string>()
+  const results: any[] = []
+  for (const it of serp.items) {
+    const base = dfsBaseDomain(it.domain || it.url)
+    if (!base || seen.has(base)) continue
+    seen.add(base)
+    const isOwn = !!ownBase && base === ownBase
+    results.push({
+      position: it.rankGroup || it.rank,
+      name: it.title || it.domain || base,
+      url: it.url,
+      title: it.title || '',
+      isOwn,
+      isKnownCompetitor: !isOwn && competitorDomains.some(d => d && base === d),
+      is_sponsored: it.type === 'paid',
+    })
+    if (results.length >= 10) break
+  }
+
+  const { position, found } = findPosition(serp.items, companyDomain)
+  const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
+
+  return { position, topResults, appeared: found, results, provider: 'dataforseo' }
+}
+
 // ── Gemini validation step ─────────────────────────────────────────────────
 
 async function reorderWithGemini(
@@ -240,48 +287,38 @@ export async function POST(request: Request) {
     const businessAnalysis = await analyzeBusinessForSearch(overview, city, isLocal, scopeLocation)
     const primaryQuery = businessAnalysis?.google_query || fallbackQuery
 
-    // Generate 5 distinct search queries via Gemini
-    let queryList: string[] = []
-    const geminiKey = process.env.GEMINI_API_KEY
-    if (geminiKey && businessProfile) {
-      try {
-        const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
-        const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
-        const qRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: qPrompt }] }] }),
-          }
-        )
-        if (qRes.ok) {
-          const qData = await qRes.json()
-          const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
-          const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-          const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
-          if (qs !== -1 && qe > qs) {
-            const arr = JSON.parse(qClean.slice(qs, qe + 1))
-            if (Array.isArray(arr)) {
-              queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, 5)
-            }
-          }
-        }
-      } catch { /* fallback */ }
-    }
+    // Query list = the company's own tracked keywords (the 5 best), so SEO
+    // reflects the terms they actually care about. Fall back to profile
+    // keywords / the analysed primary query when no keywords are set.
+    let queryList: string[] = (keywords || [])
+      .filter((k: any) => typeof k === 'string' && k.trim().length >= 2)
+      .slice(0, 5)
+    if (queryList.length === 0 && profileKeywords) queryList = [profileKeywords]
     if (queryList.length === 0) queryList = [primaryQuery]
 
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorWebsites = savedCompetitors.map((c: any) => c.website).filter(Boolean).slice(0, 10)
 
-    // Run all queries in parallel
+    // Run each keyword: DataForSEO real SERP first, Grok web_search only as a
+    // per-query fallback when DataForSEO fails (SEO_PROVIDER controls default).
+    let providerUsed = SEO_PROVIDER
     const variantResults = await Promise.all(
-      queryList.map(q => runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal))
+      queryList.map(async (q) => {
+        if (SEO_PROVIDER === 'dataforseo') {
+          const dfs = await runSeoQueryDFS(q, companyName, website, companyDomain, competitorWebsites)
+          if (dfs) return dfs
+          providerUsed = 'grok_fallback'
+        }
+        return runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal)
+      })
     )
 
-    // Gemini validation: reorder primary query results
-    const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0])
-    if (primaryReordered) variantResults[0].results = primaryReordered
+    // Gemini reorder only meaningful for the (less reliable) Grok path; with
+    // DataForSEO the ranking is already real Google order.
+    if (providerUsed !== 'dataforseo' && variantResults[0]) {
+      const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0])
+      if (primaryReordered) variantResults[0].results = primaryReordered
+    }
 
     // Dedup each variant by base domain (within-query), then dedup across ALL queries globally
     // so the same domain never appears in more than one query variant
@@ -305,6 +342,17 @@ export async function POST(request: Request) {
       appeared: variantResults[i].appeared,
       results: variantResults[i].results,
     }))
+
+    // Per-keyword position summary { keyword, position, url, found }
+    const keywordPositions = queryList.map((q, i) => {
+      const own = (variantResults[i].results || []).find((r: any) => r.isOwn)
+      return {
+        keyword: q,
+        position: variantResults[i].position,
+        url: own?.url || null,
+        found: !!variantResults[i].appeared,
+      }
+    })
 
     // Primary result uses first query for backward-compat display
     const primaryVariant = variantResults[0]
@@ -341,6 +389,8 @@ export async function POST(request: Request) {
       query: primaryQuery,
       results: primaryVariant.results,
       queryVariants,
+      keywordPositions,
+      provider: providerUsed,
       recommendations,
       isLocal,
       scope,

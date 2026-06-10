@@ -2,10 +2,14 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { fetchOpenAIGeoRaw } from '@/lib/geo/openai-engine'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 120
+
+// 3 queries × 3 real engines (Grok, OpenAI, Gemini). Cap via env.
+const GEO_QUERY_LIMIT = Math.max(1, parseInt(process.env.GEO_QUERY_LIMIT || '3', 10) || 3)
 
 function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
@@ -25,7 +29,9 @@ function isOwnResult(r: any, companyName: string, companyDomain: string): boolea
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-const ENGINES = ['general', 'chatgpt', 'gemini', 'grok'] as const
+// Real engines only: 'openai' = ChatGPT (Responses API + web_search),
+// 'gemini' = Google API, 'grok' = xAI. ('general' kept for legacy callers.)
+const ENGINES = ['general', 'openai', 'gemini', 'grok'] as const
 type Engine = typeof ENGINES[number]
 
 // ── Query generation ───────────────────────────────────────────────────────
@@ -75,16 +81,16 @@ function buildEnginePrompt(
     : ''
   const jsonTemplate = `{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}`
 
+  // Only 'general' and 'grok' actually reach this function — 'openai' and
+  // 'gemini' are handled by dedicated runners before buildEnginePrompt is called.
   const bases: Record<Engine, string> = {
     general: `Use web_search to find the top 10 organic Google results for "${query}" in Israel.
 List businesses/websites as they appear in Google search results.`,
 
-    chatgpt: `Search for what ChatGPT recommends when asked: "${query}" in Israel.
-Find screenshots, blog posts, or Reddit threads showing ChatGPT answers to this question.
-List the top 10 businesses mentioned in ChatGPT responses you find online.`,
+    openai: `Use your live web search to directly search for "${query}" in Israel.
+List the top 10 most relevant businesses or websites.`,
 
     gemini: `Search for what Google Gemini recommends when asked: "${query}" in Israel.
-Find real examples of Gemini answers to this question — blog posts, screenshots, or forum discussions.
 List the top 10 businesses mentioned in Gemini responses you find online.`,
 
     grok: `Use your live web search to directly search for "${query}" in Israel.
@@ -232,6 +238,13 @@ async function runGeoQuestion(
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
   if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, industry)
 
+  // OpenAI / ChatGPT engine — real Responses API + web_search.
+  if (engine === 'openai') {
+    const companyDomain = extractDomain(website)
+    const rawResults = await fetchOpenAIGeoRaw(query, companyName, website, competitorNames)
+    return processResults(rawResults, companyName, companyDomain, competitorNames)
+  }
+
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
   const companyDomain = extractDomain(website)
 
@@ -329,7 +342,7 @@ export async function POST(request: Request) {
     let queryList: string[] = []
     const seoVariants = (company?.seo_ranking as any)?.queryVariants
     if (Array.isArray(seoVariants) && seoVariants.length >= 2) {
-      queryList = seoVariants.map((v: any) => v.query).filter(Boolean).slice(0, 5)
+      queryList = seoVariants.map((v: any) => v.query).filter(Boolean).slice(0, GEO_QUERY_LIMIT)
       console.log('[GEO] reusing SEO queries:', queryList)
     }
 
@@ -356,7 +369,7 @@ export async function POST(request: Request) {
             if (qs !== -1 && qe > qs) {
               const arr = JSON.parse(qClean.slice(qs, qe + 1))
               if (Array.isArray(arr)) {
-                queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, 5)
+                queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, GEO_QUERY_LIMIT)
               }
             }
           }
@@ -376,11 +389,13 @@ export async function POST(request: Request) {
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // ── Run all queries × all 3 engines in parallel ─────────────────────────
+    // ── Run all queries × 3 REAL engines in parallel ────────────────────────
+    // chatgpt field = real OpenAI (Responses API + web_search); gemini =
+    // Google API; grok = xAI. No more fake 'chatgpt' routing to xAI.
     const queryVariantResults = await Promise.all(
       queryList.map(async (q) => {
         const [chatgptRes, geminiRes, grokRes] = await Promise.all([
-          runGeoQuestion(q, companyName, website, competitorNames, 'chatgpt', geminiIndustry),
+          runGeoQuestion(q, companyName, website, competitorNames, 'openai', geminiIndustry),
           runGeoQuestion(q, companyName, website, competitorNames, 'gemini', geminiIndustry),
           runGeoQuestion(q, companyName, website, competitorNames, 'grok'),
         ])

@@ -98,7 +98,7 @@ async function handleRequest(req: Request) {
           'Content-Type': 'application/json',
           'x-cron-secret': process.env.CRON_SECRET!,
         },
-        body: JSON.stringify({ company_id: company.id, force: true }),
+        body: JSON.stringify({ company_id: company.id, force: true, profile: 'weekly' }),
         signal: AbortSignal.timeout(240_000), // 4 min per user
       })
       const data = await r.json().catch(() => ({ error: 'invalid json' }))

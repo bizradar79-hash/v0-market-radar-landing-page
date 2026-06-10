@@ -74,6 +74,12 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}))
   const companyId: string | undefined = body.company_id
   const force: boolean = body.force === true
+  // Scan profile: 'initial' (rich, onboarding-grade) vs 'weekly' (lean refresh).
+  // sync/run is the recurring path, so default to the lean weekly profile.
+  const profile: 'initial' | 'weekly' = body.profile === 'initial' ? 'initial' : 'weekly'
+  const isWeekly = profile === 'weekly'
+  const COMPETITOR_TARGET = 7
+  const MONTHLY_MS = 30 * 24 * 60 * 60 * 1000
 
   if (!companyId) {
     return NextResponse.json({ error: 'Missing company_id' }, { status: 400 })
@@ -112,19 +118,56 @@ export async function POST(request: Request) {
 
   // ── Inner function with all module calls ──────────────────────────────────
   async function runAllModules() {
-    // 1. Competitors
-    const { count: autoCount } = await adminDb
-      .from('competitors')
-      .select('id', { count: 'exact', head: true })
-      .eq('company_id', companyId)
-      .neq('source', 'manual')
+    // 1. Competitors — discovery is EXPENSIVE, so gate it by profile.
+    //   • initial: always (re)discover up to the target.
+    //   • weekly:  only run when we're SHORT of the target (backfill deleted
+    //              competitors back up to 7) OR the last discovery is >30 days
+    //              old (monthly full refresh). Otherwise skip to save cost.
+    // find-competitors already filters the company's deleted blacklist, so any
+    // user-deleted competitor is never re-added during backfill.
+    {
+      const { count: autoCount } = await adminDb
+        .from('competitors')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .neq('source', 'manual')
 
-    if ((autoCount ?? 0) < 10) {
-      const r = await callModule(origin, '/api/find-competitors', companyId!, false)
-      addLog('competitors', r.ok ? 'ok' : 'error', r.ok ? `found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`))
-      await new Promise(res => setTimeout(res, 2000))
-    } else {
-      addLog('competitors', 'skipped', `already have ${autoCount} auto competitors`)
+      // Most-recent auto competitor — used for the monthly-refresh gate.
+      const { data: lastAuto } = await adminDb
+        .from('competitors')
+        .select('created_at')
+        .eq('company_id', companyId)
+        .neq('source', 'manual')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      const lastDiscoveryMs = lastAuto?.created_at ? new Date(lastAuto.created_at).getTime() : 0
+      const monthlyDue = Date.now() - lastDiscoveryMs > MONTHLY_MS
+
+      const below = (autoCount ?? 0) < COMPETITOR_TARGET
+      let shouldDiscover: boolean
+      let reason: string
+      if (!isWeekly) {
+        shouldDiscover = below
+        reason = below ? 'initial discovery' : `already have ${autoCount} auto competitors`
+      } else if (below) {
+        shouldDiscover = true
+        reason = `backfill: only ${autoCount}/${COMPETITOR_TARGET} auto competitors`
+      } else if (monthlyDue) {
+        shouldDiscover = true
+        reason = 'monthly refresh (>30d since last discovery)'
+      } else {
+        shouldDiscover = false
+        reason = `weekly skip: have ${autoCount}, last discovery <30d ago`
+      }
+
+      if (shouldDiscover) {
+        const r = await callModule(origin, '/api/find-competitors', companyId!, false)
+        addLog('competitors', r.ok ? 'ok' : 'error', r.ok ? `${reason} → found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`))
+        await new Promise(res => setTimeout(res, 2000))
+      } else {
+        addLog('competitors', 'skipped', reason)
+      }
     }
 
     // 1b. All competitor ratings (manual + auto, missing google_rating)
@@ -164,7 +207,7 @@ export async function POST(request: Request) {
 
     // 4b. Keyword trends
     {
-      const keywords: string[] = ((company as any).keywords || []).slice(0, 8)
+      const keywords: string[] = ((company as any).keywords || []).slice(0, 5)
       const adminHeaders = {
         'Content-Type': 'application/json',
         'x-admin-user-id': companyId!,
@@ -254,8 +297,11 @@ export async function POST(request: Request) {
       await new Promise(res => setTimeout(res, 2000))
     }
 
-    // 10. Niche opportunities
-    {
+    // 10. Niche opportunities — expensive AI generation. Stable module: refresh
+    // only on the initial scan; weekly keeps the existing niches untouched.
+    if (isWeekly) {
+      addLog('niche_opportunities', 'skipped', 'weekly: kept existing niches')
+    } else {
       const { data: prevCompany } = await adminDb
         .from('companies').select('niche_opportunities').eq('id', companyId).single()
       const prevNiches: any[] = (prevCompany?.niche_opportunities as any)?.opportunities ?? []

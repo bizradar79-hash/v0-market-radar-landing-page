@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const keywords: string[] = (ctx.company?.keywords || []).slice(0, 8)
+    const keywords: string[] = (ctx.company?.keywords || []).slice(0, 5)
     if (keywords.length === 0) return NextResponse.json({ success: true, processed: 0 })
 
     // Use request URL origin — never falls back to localhost in production
