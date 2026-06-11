@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // Vercel Pro — long-running sync
 
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
 import { captureSnapshot } from '@/lib/scan/snapshot'
@@ -12,9 +12,26 @@ import {
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-// Hard backstop BELOW Vercel's 300s function limit so the orchestrator aborts
-// itself (and persists state) before the platform 504s and retries it.
+// Hard backstop BELOW Vercel's 300s function limit so the background worker
+// aborts itself (and persists state) before the platform kills the invocation.
 const SYNC_TIMEOUT_MS = 280 * 1000
+// TIME fix — soft chaining deadline. When one invocation has been running this
+// long, it stops at the next module boundary, persists progress, and AUTOMATICALLY
+// re-invokes itself (resume:true) to finish the remaining modules in a fresh
+// window. This makes the scan resumable across invocations instead of dying with
+// 'aborted_timeout'. Kept well under SCAN_MAX_SECONDS / Vercel's limit so a single
+// in-flight module can still finish before the hard caps bite.
+const SYNC_CHAIN_AFTER_MS = Math.max(
+  30_000,
+  parseInt(process.env.SCAN_CHAIN_AFTER_MS || '170000', 10) || 170_000,
+)
+// Safety: never chain more than this many times for one scan (prevents loops).
+const SYNC_MAX_CHAINS = Math.max(1, parseInt(process.env.SCAN_MAX_CHAINS || '6', 10) || 6)
+
+/** Internal sentinel: unwind the run to chain into a fresh invocation. */
+class ScanChainSignal extends Error {
+  constructor() { super('scan chain'); this.name = 'ScanChainSignal' }
+}
 
 function getAdminSupabase() {
   return createServerClient(
@@ -80,6 +97,10 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}))
   const companyId: string | undefined = body.company_id
   const force: boolean = body.force === true
+  // Self-chained continuation (TIME fix): set by this route when it re-invokes
+  // itself to finish remaining modules in a fresh window.
+  const resume: boolean = body.resume === true
+  const chainIndex: number = Number.isFinite(body.chain_index) ? body.chain_index : 0
   // Scan profile: 'initial' (rich, onboarding-grade) vs 'weekly' (lean refresh).
   // sync/run is the recurring path, so default to the lean weekly profile.
   const profile: 'initial' | 'weekly' = body.profile === 'initial' ? 'initial' : 'weekly'
@@ -125,7 +146,7 @@ export async function POST(request: Request) {
   // prior STALE run so we can resume (skip them) instead of redoing the scan.
   let initialControl
   try {
-    initialControl = await initScanControl(adminDb, companyId, profile as ScanProfile, MODULE_IDS, { force })
+    initialControl = await initScanControl(adminDb, companyId, profile as ScanProfile, MODULE_IDS, { force, resume })
   } catch (e) {
     if (e instanceof ScanAbortError && e.reason === 'already_running') {
       return NextResponse.json({ message: 'Scan already running', scan_status: 'running' }, { status: 409 })
@@ -146,18 +167,23 @@ export async function POST(request: Request) {
     if (isSkipped(id)) await setModuleStatus(adminDb, companyId, id, 'skipped', 'weekly: lean scan')
   }
 
-  // Layer 2: capture a full pre-scan snapshot before anything mutates state.
-  await captureSnapshot(adminDb, companyId, 'full')
-
-  // Mark as running (legacy sync_status field, kept for older UI)
-  await adminDb.from('companies').update({
-    sync_status: 'running',
-    last_sync_at: new Date().toISOString(),
-    sync_log: [],
-  }).eq('id', companyId)
+  // Layer 2: capture a full pre-scan snapshot before anything mutates state —
+  // only on the FIRST window (a chained continuation must not re-snapshot or
+  // wipe the accumulated sync_log).
+  if (!resume) {
+    await captureSnapshot(adminDb, companyId, 'full')
+    await adminDb.from('companies').update({
+      sync_status: 'running',
+      last_sync_at: new Date().toISOString(),
+      sync_log: [],
+    }).eq('id', companyId)
+  }
 
   const log: LogEntry[] = []
   const ts = () => new Date().toISOString()
+  // TIME fix — wall-clock anchor for THIS invocation. When it exceeds
+  // SYNC_CHAIN_AFTER_MS at a module boundary we stop and chain into a fresh one.
+  const invocationStart = Date.now()
 
   function addLog(module: string, status: ModuleStatus, message: string) {
     log.push({ module, status, message, updated_at: ts() })
@@ -185,6 +211,15 @@ export async function POST(request: Request) {
       addLog(moduleId, 'skipped', 'resumed: already complete')
       return
     }
+    // TIME fix — soft chaining deadline. If THIS invocation has been running long
+    // enough, stop at this module boundary (progress for finished modules is
+    // already persisted in scan_control) and let the outer handler re-invoke us
+    // with resume:true to finish the rest in a fresh window. We only chain while
+    // we still have chain budget; once exhausted we fall through and rely on the
+    // circuit breaker's hard wall-clock cap instead of looping forever.
+    if (chainIndex < SYNC_MAX_CHAINS && Date.now() - invocationStart > SYNC_CHAIN_AFTER_MS) {
+      throw new ScanChainSignal()
+    }
     // FIX 3 — stop button / wall-clock timeout. Throws ScanAbortError to unwind.
     await assertScanAlive(adminDb, companyId!)
     await setModuleStatus(adminDb, companyId!, moduleId, 'running')
@@ -204,7 +239,9 @@ export async function POST(request: Request) {
     }
     addLog(moduleId, outcome.status, outcome.message)
     await setModuleStatus(adminDb, companyId!, moduleId, mapStatus(outcome.status), outcome.message)
-    await new Promise(res => setTimeout(res, 1200))
+    // Small breather to avoid hammering Groq's TPM limit. Trimmed from 1200ms →
+    // 500ms (TIME fix) so 14 sequential modules don't burn ~17s on sleeps alone.
+    await new Promise(res => setTimeout(res, 500))
   }
 
   // ── Inner function with all module calls ──────────────────────────────────
@@ -263,33 +300,35 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 4b. Keyword trends (sequential; stop-aware between keywords)
+    // 4b. Keyword trends — TIME fix: the 5 keyword fetches are independent, so run
+    // them CONCURRENTLY instead of one-by-one (cuts this module's wall-time ~5x).
+    // We honour the stop signal ONCE before firing the batch; the breaker's call
+    // counter still records this as a single module unit (one runStep).
     await runStep('keyword_trends', async () => {
       const keywords: string[] = ((company as any).keywords || []).slice(0, 5)
+      if (keywords.length === 0) return { status: 'skipped', message: '0 keywords' }
       const adminHeaders = {
         'Content-Type': 'application/json',
         'x-admin-user-id': companyId!,
         'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
       }
-      let kwUpdated = 0
-      const kwErrors: string[] = []
-      for (const keyword of keywords) {
-        await assertScanAlive(adminDb, companyId!) // honour stop mid-loop
+      await assertScanAlive(adminDb, companyId!) // honour stop before the batch
+      const results = await Promise.all(keywords.map(async (keyword) => {
         try {
           const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
             method: 'POST', headers: adminHeaders, body: JSON.stringify({ keyword, force: true }),
           })
-          if (res.ok) { await res.json().catch(() => ({})); kwUpdated++ }
-          else {
-            const errText = await res.text().catch(() => '')
-            kwErrors.push(`"${keyword}": HTTP ${res.status} — ${errText.slice(0, 80)}`)
-          }
+          if (res.ok) { await res.json().catch(() => ({})); return { ok: true as const } }
+          const errText = await res.text().catch(() => '')
+          return { ok: false as const, err: `"${keyword}": HTTP ${res.status} — ${errText.slice(0, 80)}` }
         } catch (e: any) {
-          kwErrors.push(`"${keyword}": ${e?.message}`)
+          return { ok: false as const, err: `"${keyword}": ${e?.message}` }
         }
-      }
+      }))
+      const kwUpdated = results.filter(r => r.ok).length
+      const kwErrors = results.filter(r => !r.ok).map(r => (r as any).err as string)
       return {
-        status: kwUpdated > 0 ? 'ok' : (keywords.length === 0 ? 'skipped' : 'error'),
+        status: kwUpdated > 0 ? 'ok' : 'error',
         message: `${kwUpdated}/${keywords.length} keywords${kwErrors.length ? ` | ${kwErrors.slice(0, 2).join('; ')}` : ''}`,
       }
     })
@@ -373,59 +412,98 @@ export async function POST(request: Request) {
     })
   }
 
-  // ── Run with timeout + guaranteed finally cleanup ─────────────────────────
-  let finalStatus: 'done' | 'error' | 'idle' | 'stopped' = 'idle'
-  let returnResponse: NextResponse
-
-  try {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Sync timeout: exceeded scan window')), SYNC_TIMEOUT_MS)
-    )
-
-    await Promise.race([runAllModules(), timeoutPromise])
-
-    finalStatus = 'done'
-    await finishScan(adminDb, companyId, 'done')
-    returnResponse = NextResponse.json({ success: true, company_id: companyId, profile, log })
-  } catch (e: any) {
-    // FIX 3 — a circuit-breaker abort (stop / call-cap / timeout) ends the scan
-    // cleanly with the right terminal state instead of looking like a crash.
-    if (e instanceof ScanAbortError) {
-      finalStatus = e.status === 'stopped' ? 'stopped' : 'error'
-      addLog('sync', e.status === 'stopped' ? 'skipped' : 'error', `aborted: ${e.reason}`)
-      await finishScan(adminDb, companyId, e.status)
-      returnResponse = NextResponse.json({ success: false, aborted: e.reason, profile, log }, { status: 200 })
-    } else {
-      addLog('sync', 'error', e?.message ?? 'unexpected error')
-      finalStatus = 'error'
-      await finishScan(adminDb, companyId, 'error')
-      returnResponse = NextResponse.json({ success: false, error: e?.message, log }, { status: 500 })
-    }
-  } finally {
-    const now = new Date().toISOString()
-    const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()
+  // ── Background execution (TIME fix) ───────────────────────────────────────
+  // The scan is a background job, NOT a request the caller waits on. We schedule
+  // it with after() so the HTTP response returns immediately (no client-side 504
+  // / retry storm) while the worker keeps running up to Vercel's maxDuration.
+  // When SYNC_CHAIN_AFTER_MS elapses at a module boundary the worker throws
+  // ScanChainSignal, persists progress, and re-invokes THIS route with
+  // resume:true so the remaining modules finish in a fresh window — the scan is
+  // resumable across invocations instead of dying with 'aborted_timeout'.
+  after(async () => {
+    let finalStatus: 'done' | 'error' | 'stopped' | 'chained' = 'done'
     try {
-      // Merge any 'kept_existing' entries that modules appended to sync_log
-      // during the run (the guard layer writes them) so we don't clobber them.
-      let mergedLog: any[] = log
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Sync timeout: exceeded scan window')), SYNC_TIMEOUT_MS)
+      )
+
+      await Promise.race([runAllModules(), timeoutPromise])
+
+      finalStatus = 'done'
+      await finishScan(adminDb, companyId!, 'done')
+    } catch (e: any) {
+      if (e instanceof ScanChainSignal) {
+        // TIME fix — soft deadline hit. Leave scan_control 'running' (do NOT
+        // finishScan) and chain into a fresh invocation to finish the rest.
+        finalStatus = 'chained'
+        addLog('sync', 'skipped', `chained → window ${chainIndex + 1}`)
+        try {
+          await fetch(`${origin}/api/sync/run`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cron-secret': process.env.CRON_SECRET || '',
+            },
+            body: JSON.stringify({
+              company_id: companyId,
+              profile,
+              resume: true,
+              chain_index: chainIndex + 1,
+            }),
+          })
+        } catch (chainErr: any) {
+          console.error('[sync/run] chain re-invoke failed:', chainErr?.message)
+          // If we couldn't hand off, don't leave the scan wedged 'running'.
+          finalStatus = 'error'
+          addLog('sync', 'error', `chain handoff failed: ${chainErr?.message}`)
+          await finishScan(adminDb, companyId!, 'error')
+        }
+      } else if (e instanceof ScanAbortError) {
+        // FIX 3 — circuit-breaker abort (stop / call-cap / timeout): clean terminal.
+        finalStatus = e.status === 'stopped' ? 'stopped' : 'error'
+        addLog('sync', e.status === 'stopped' ? 'skipped' : 'error', `aborted: ${e.reason}`)
+        await finishScan(adminDb, companyId!, e.status)
+      } else {
+        addLog('sync', 'error', e?.message ?? 'unexpected error')
+        finalStatus = 'error'
+        await finishScan(adminDb, companyId!, 'error')
+      }
+    } finally {
+      const now = new Date().toISOString()
+      const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()
       try {
-        const { data: cur } = await adminDb
-          .from('companies').select('sync_log').eq('id', companyId).single()
-        const curLog = Array.isArray((cur as any)?.sync_log) ? (cur as any).sync_log : []
-        const kept = curLog.filter((e: any) => e?.status === 'kept_existing')
-        mergedLog = [...log, ...kept]
-      } catch { /* best-effort merge */ }
+        // Accumulate this window's log onto whatever is already stored (prior
+        // chained windows + any 'kept_existing' rows the guard layer appended).
+        // The first window cleared sync_log, so curLog is empty there.
+        let mergedLog: any[] = log
+        try {
+          const { data: cur } = await adminDb
+            .from('companies').select('sync_log').eq('id', companyId).single()
+          const curLog = Array.isArray((cur as any)?.sync_log) ? (cur as any).sync_log : []
+          mergedLog = [...curLog, ...log]
+        } catch { /* best-effort merge */ }
 
-      await adminDb.from('companies').update({
-        sync_status: finalStatus,
-        last_sync_at: now,
-        ...(finalStatus === 'done' ? { next_sync_at: nextSync } : {}),
-        sync_log: mergedLog,
-      } as any).eq('id', companyId)
-    } catch (dbErr: any) {
-      console.error('[sync/run] finally DB update failed:', dbErr?.message)
+        // A chained window keeps the company 'running' (the scan continues in the
+        // next invocation) and must NOT set next_sync_at.
+        const persistedStatus = finalStatus === 'chained' ? 'running' : finalStatus
+        await adminDb.from('companies').update({
+          sync_status: persistedStatus,
+          last_sync_at: now,
+          ...(finalStatus === 'done' ? { next_sync_at: nextSync } : {}),
+          sync_log: mergedLog,
+        } as any).eq('id', companyId)
+      } catch (dbErr: any) {
+        console.error('[sync/run] finally DB update failed:', dbErr?.message)
+      }
     }
-  }
+  })
 
-  return returnResponse!
+  // Return immediately — the scan runs in the background (after()).
+  return NextResponse.json({
+    started: true,
+    company_id: companyId,
+    profile,
+    resume,
+    chain_index: chainIndex,
+  })
 }

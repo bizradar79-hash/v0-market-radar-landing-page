@@ -91,23 +91,31 @@ export async function initScanControl(
   companyId: string,
   profile: ScanProfile,
   moduleIds: string[],
-  _opts: { force?: boolean } = {},
+  opts: { force?: boolean; resume?: boolean } = {},
 ): Promise<ScanControl> {
   const existing = await readScanControl(db, companyId)
   // Resumability (FIX 1): when restarting a STALE timed-out run, carry over the
   // module flags that already completed so the new run skips them instead of
   // redoing everything. A FRESH running scan still blocks (cross-invocation
   // guard) regardless of `force`.
+  //
+  // Chaining (TIME fix): a self-chained continuation passes resume:true. It is
+  // ALLOWED to take over a fresh running scan (it IS that scan, continuing in a
+  // new invocation), carries over completed modules AND the cumulative
+  // call_count (so SCAN_MAX_CALLS still bounds the whole multi-window scan),
+  // and opens a fresh wall-clock window (started_at = now).
   const carried: Record<string, ScanModuleState> = {}
+  let carriedCalls = 0
   if (existing?.status === 'running') {
     const ageMs = Date.now() - new Date(existing.started_at).getTime()
     const fresh = ageMs < existing.max_seconds * 1000
-    if (fresh) {
+    if (fresh && !opts.resume) {
       throw new ScanAbortError('already_running', 'running')
     }
     for (const [id, st] of Object.entries(existing.modules || {})) {
       if (st?.status === 'done' || st?.status === 'skipped') carried[id] = st
     }
+    if (opts.resume) carriedCalls = existing.call_count || 0
   }
 
   const maxCalls = profile === 'initial' ? SCAN_MAX_CALLS_INITIAL : SCAN_MAX_CALLS
@@ -119,7 +127,7 @@ export async function initScanControl(
     profile,
     started_at: now(),
     finished_at: null,
-    call_count: 0,
+    call_count: carriedCalls,
     max_calls: maxCalls,
     max_seconds: SCAN_MAX_SECONDS,
     abort_reason: null,
