@@ -288,8 +288,21 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 3. GEO ranking
+    // 3. GEO ranking — the most expensive module (3 queries × 3 live-search
+    // engines). TIME fix: before paying for it, check whether it already produced
+    // FRESH data earlier in THIS scan (e.g. window 1 succeeded, then the run
+    // chained). If so, skip — this stops a chain-resume from re-running GEO and
+    // double-billing even if a prior attempt was recorded as an error.
     await runStep('geo_ranking', async () => {
+      const { data: geoRow } = await adminDb
+        .from('companies').select('geo_ranking').eq('id', companyId).single()
+      const fetchedAt = (geoRow?.geo_ranking as any)?.fetchedAt
+      if (fetchedAt) {
+        const ageMs = Date.now() - new Date(fetchedAt).getTime()
+        if (ageMs < 20 * 60 * 1000) {
+          return { status: 'skipped', message: `fresh (${Math.round(ageMs / 60000)}m ago)` }
+        }
+      }
       const r = await callModule(origin, '/api/generate-geo-ranking', companyId!)
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'refreshed' : (r.body?.error ?? `HTTP ${r.status}`) }
     })

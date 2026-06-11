@@ -11,6 +11,26 @@ export const maxDuration = 120
 // 3 queries × 3 real engines (Grok, OpenAI, Gemini). Cap via env.
 const GEO_QUERY_LIMIT = Math.max(1, parseInt(process.env.GEO_QUERY_LIMIT || '3', 10) || 3)
 
+// TIME fix — hard per-engine timeout (shared with the OpenAI engine). Prevents a
+// single hanging engine (live web_search can stall for minutes) from dragging
+// the whole GEO route to its maxDuration → 504 → chain-resume re-running GEO and
+// double-billing. A timed-out engine just yields an empty result for that cell.
+const GEO_ENGINE_TIMEOUT_MS = Math.max(
+  5_000,
+  parseInt(process.env.GEO_ENGINE_TIMEOUT_MS || '30000', 10) || 30_000,
+)
+
+/** fetch() with an AbortController deadline. Rejects with AbortError on timeout. */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = GEO_ENGINE_TIMEOUT_MS): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function extractDomain(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
 }
@@ -43,7 +63,7 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
   if (!desc) return null
   const prompt = `העסק מייצר/מוכר: ${desc}. מה השאילתה הכי ספציפית שלקוח ישראלי יחפש כדי למצוא עסק כזה? 3-5 מילים בלבד. ללא הסברים. רק השאילתה.`
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
@@ -161,7 +181,7 @@ async function runGeminiEngine(
   const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. איזה עסקים או פלטפורמות היית ממליץ? רשום את 10 הטובים ביותר לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
@@ -195,7 +215,7 @@ async function runGeminiEngine(
     if (!Array.isArray(arr) || arr.length === 0) {
       console.log('[GEO gemini] empty array, retrying with simple prompt')
       const retryPrompt = `רשום 10 חברות ישראליות שמוכרות ${query}. JSON: [{"rank": 1, "name": "", "domain": ""}]`
-      const retryRes = await fetch(
+      const retryRes = await fetchWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
@@ -248,17 +268,24 @@ async function runGeoQuestion(
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
   const companyDomain = extractDomain(website)
 
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-    body: JSON.stringify({
-      model: 'grok-4-fast-non-reasoning',
-      tools: [{ type: 'web_search' }],
-      input: [{ role: 'user', content: prompt }],
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetchWithTimeout('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        tools: [{ type: 'web_search' }],
+        input: [{ role: 'user', content: prompt }],
+      }),
+    })
+  } catch (err: any) {
+    const why = err?.name === 'AbortError' ? `timeout_${GEO_ENGINE_TIMEOUT_MS}ms` : err?.message
+    console.error(`[GEO ${engine}] Grok fetch failed: ${why}`)
+    return { position: null, topResults: [], appeared: false, results: [] }
+  }
 
-  const data = await response.json()
+  const data = await response.json().catch(() => ({}))
   if (!response.ok || !data.output) {
     console.error(`[GEO ${engine}] Grok error: status=${response.status}`, JSON.stringify(data).slice(0, 300))
     return { position: null, topResults: [], appeared: false, results: [] }
@@ -353,7 +380,7 @@ export async function POST(request: Request) {
         try {
           const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
           const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
-          const qRes = await fetch(
+          const qRes = await fetchWithTimeout(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {
               method: 'POST',
@@ -430,12 +457,12 @@ export async function POST(request: Request) {
     const recsPrompt = `Write 3 specific recommendations for how ${companyName} (${industry}) can improve its presence in AI engines like ChatGPT, Grok, Gemini and Perplexity when people search for "${primaryQuery}". Return JSON only: {"recommendations": ["", "", ""]}. No markdown.`
     let recommendations: string[] = []
     try {
-      const recsRes = await fetch('https://api.x.ai/v1/responses', {
+      const recsRes = await fetchWithTimeout('https://api.x.ai/v1/responses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
         body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
       })
-      const recsData = await recsRes.json()
+      const recsData = await recsRes.json().catch(() => ({}))
       const recsText = (recsData.output || [])
         .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
         .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')

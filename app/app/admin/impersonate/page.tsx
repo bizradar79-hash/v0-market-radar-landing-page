@@ -422,7 +422,7 @@ export default function ImpersonatePage() {
           ? `${data.recovered} סנכרונים שוחררו: ${(data.names || []).join(', ')}`
           : 'לא נמצאו סנכרונים תקועים',
       })
-      if (data.recovered > 0) fetchUsers()
+      if (data.recovered > 0) checkAdminAndLoad()
     } catch (e: any) {
       toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
     } finally {
@@ -442,7 +442,7 @@ export default function ImpersonatePage() {
           ? `${data.succeeded}/${data.processed} עודכנו בהצלחה, ${data.remaining} נותרו`
           : 'אין משתמשים הממתינים לעדכון',
       })
-      if (data.processed > 0) fetchUsers()
+      if (data.processed > 0) checkAdminAndLoad()
     } catch (e: any) {
       toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
     } finally {

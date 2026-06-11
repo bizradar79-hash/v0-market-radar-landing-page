@@ -9,6 +9,14 @@ const OPENAI_GEO_MODEL = process.env.OPENAI_GEO_MODEL || 'gpt-5-mini'
 // Responses API web search tool name. Newer accounts: 'web_search';
 // older: 'web_search_preview'. Configurable for safety.
 const OPENAI_WEB_SEARCH_TOOL = process.env.OPENAI_WEB_SEARCH_TOOL || 'web_search'
+// TIME fix — hard per-engine timeout. OpenAI's web_search can hang for minutes;
+// with no cap it dragged the whole GEO route to its maxDuration, got killed
+// mid-flight (504), and the scan's chain-resume then RE-RAN GEO, double-billing.
+// Cap each call so one slow engine degrades to "empty" instead of nuking GEO.
+const OPENAI_GEO_TIMEOUT_MS = Math.max(
+  5_000,
+  parseInt(process.env.GEO_ENGINE_TIMEOUT_MS || '30000', 10) || 30_000,
+)
 
 /**
  * Extract concatenated output_text from a Responses API payload.
@@ -36,6 +44,8 @@ export interface OpenAIGeoRaw {
 export async function callOpenAIWebSearch(prompt: string): Promise<OpenAIGeoRaw> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return { ok: false, text: '', error: 'missing_openai_key' }
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), OPENAI_GEO_TIMEOUT_MS)
   try {
     const res = await fetch(OPENAI_ENDPOINT, {
       method: 'POST',
@@ -45,6 +55,7 @@ export async function callOpenAIWebSearch(prompt: string): Promise<OpenAIGeoRaw>
         input: prompt,
         tools: [{ type: OPENAI_WEB_SEARCH_TOOL }],
       }),
+      signal: ctrl.signal,
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -53,7 +64,10 @@ export async function callOpenAIWebSearch(prompt: string): Promise<OpenAIGeoRaw>
     }
     return { ok: true, text: extractOpenAIText(data) }
   } catch (e: any) {
-    return { ok: false, text: '', error: e?.message ?? 'fetch_failed' }
+    const msg = e?.name === 'AbortError' ? `timeout_${OPENAI_GEO_TIMEOUT_MS}ms` : (e?.message ?? 'fetch_failed')
+    return { ok: false, text: '', error: msg }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
