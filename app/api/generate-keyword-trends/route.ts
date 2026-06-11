@@ -22,20 +22,36 @@ async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world',
 
 CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'grok-4-fast-non-reasoning',
-      input: [{ role: 'user', content: prompt }],
-      tools: [{ type: 'web_search' }],
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
+    })
+  } catch (err: any) {
+    console.error(`[keyword-trends ${region}] xAI fetch failed:`, err?.message)
+    return []
+  }
 
-  const data = await response.json()
+  // Guard: xAI can return a non-JSON body (502/504/empty/overload). An unguarded
+  // response.json() would throw and 500 the whole route, failing the keyword.
+  // Treat any unparseable / error response as "no trends" so the caller's
+  // keep-existing guard preserves this keyword's prior data.
+  let data: any
+  try {
+    data = await response.json()
+  } catch (err: any) {
+    console.error(`[keyword-trends ${region}] non-JSON xAI body (status ${response.status}):`, err?.message)
+    return []
+  }
   if (!response.ok || !data.output) return []
 
   const text = data.output

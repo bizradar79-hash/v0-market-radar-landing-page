@@ -203,22 +203,53 @@ ${trackedNiches.length > 0 ? `
 
 CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
-    const response = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        // No web_search — actions must be grounded in the data we provide
-      }),
-    })
+    // Helper: keep the existing stored actions if we have them, otherwise report
+    // a soft failure. Used whenever xAI returns nothing usable so a transient
+    // upstream hiccup never overwrites a good weekly-actions value with empty.
+    async function keepExistingOrFail(reason: string) {
+      const { data: prev } = await ctx!.supabase
+        .from('companies').select('weekly_actions').eq('id', ctx!.user.id).single()
+      const prevActions = (prev?.weekly_actions as any)?.actions
+      if (Array.isArray(prevActions) && prevActions.length > 0) {
+        console.warn(`[weekly_actions] ${reason} — keeping existing ${prevActions.length} actions`)
+        return NextResponse.json({
+          success: true, kept_existing: true, reason,
+          fetchedAt: (prev?.weekly_actions as any)?.fetchedAt ?? null,
+          actions: prevActions,
+        })
+      }
+      console.error(`[weekly_actions] ${reason} — no existing actions to fall back on`)
+      return NextResponse.json({ error: reason }, { status: 502 })
+    }
 
-    const data = await response.json()
+    let response: Response
+    try {
+      response = await fetch('https://api.x.ai/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'grok-4-fast-non-reasoning',
+          input: [{ role: 'user', content: prompt }],
+          // No web_search — actions must be grounded in the data we provide
+        }),
+      })
+    } catch (err: any) {
+      return keepExistingOrFail(`xAI fetch failed: ${err?.message}`)
+    }
+
+    // Guard: xAI can return a non-JSON body (502/504/empty/overload). Don't let
+    // an unguarded response.json() throw and 500 the route — fall back instead.
+    let data: any
+    try {
+      data = await response.json()
+    } catch {
+      return keepExistingOrFail(`non-JSON xAI body (status ${response.status})`)
+    }
     if (!response.ok || !data.output) {
-      return NextResponse.json({ error: 'Grok API error', detail: data }, { status: 500 })
+      return keepExistingOrFail('Grok API error')
     }
 
     const text = data.output
@@ -232,7 +263,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     const start = clean.indexOf('[')
     const end = clean.lastIndexOf(']')
     if (start === -1 || end <= start) {
-      return NextResponse.json({ error: 'No JSON array in response', raw: text.slice(0, 500) }, { status: 500 })
+      return keepExistingOrFail('No JSON array in response')
     }
 
     let actions: any[] = []
@@ -240,7 +271,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       const parsed = JSON.parse(clean.slice(start, end + 1))
       actions = Array.isArray(parsed) ? parsed.slice(0, 7) : []
     } catch {
-      return NextResponse.json({ error: 'JSON parse failed', raw: clean.slice(0, 500) }, { status: 500 })
+      return keepExistingOrFail('JSON parse failed')
     }
 
     // Normalize: ensure IDs are strings, signals is always an array
@@ -249,6 +280,13 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       id: String(a.id || i + 1),
       signals: Array.isArray(a.signals) ? a.signals : [],
     }))
+
+    // FIX 2 — empty-write guard. A successful-but-EMPTY actions array must never
+    // clobber a good stored value. If we produced nothing usable but already have
+    // actions, keep the existing ones (mirrors keyword_trends / geo guards).
+    if (actions.length === 0) {
+      return keepExistingOrFail('model returned 0 actions')
+    }
 
     const payload = { fetchedAt: now.toISOString(), actions }
 
