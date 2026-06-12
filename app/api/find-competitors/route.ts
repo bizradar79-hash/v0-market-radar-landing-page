@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { getPlaceDetails } from '@/lib/google-places'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -14,9 +15,9 @@ export const maxDuration = 60
 const COMPETITOR_CAP = 7
 
 // Ratings come from Google Places (project maps-leads-465314), NOT Grok.
-async function fetchGoogleRating(name: string, website: string): Promise<{ rating: number | null; reviewCount: number | null }> {
+async function fetchGoogleRating(name: string, website: string, cost?: ScanCostCollector): Promise<{ rating: number | null; reviewCount: number | null }> {
   try {
-    const r = await getPlaceDetails(name, website || '')
+    const r = await getPlaceDetails(name, website || '', undefined, cost)
     if (!r) return { rating: null, reviewCount: null }
     return {
       rating: typeof r.google_rating === 'number' ? r.google_rating : null,
@@ -27,20 +28,28 @@ async function fetchGoogleRating(name: string, website: string): Promise<{ ratin
   }
 }
 
-async function callXAI(prompt: string): Promise<any[]> {
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'grok-4-fast-non-reasoning',
-      input: [{ role: 'user', content: prompt }],
-      tools: [{ type: 'web_search' }],
-    }),
-  })
+async function callXAI(prompt: string, cost?: ScanCostCollector): Promise<any[]> {
+  const t0 = Date.now()
+  let response: Response
+  try {
+    response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
+    })
+  } catch (e) {
+    cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
+    throw e
+  }
   const data = await response.json()
+  cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
   if (!response.ok || !data.output) return []
   const text = data.output
     .filter((item: any) => item.type === 'message')
@@ -60,6 +69,7 @@ async function callXAI(prompt: string): Promise<any[]> {
 
 export async function POST(request: Request) {
   const steps: Record<string, any> = {}
+  let cost: ScanCostCollector | null = null
   try {
     let body: any = {}
     try { body = await request.json() } catch {}
@@ -82,6 +92,7 @@ export async function POST(request: Request) {
       saveToDb = true
       supabase = ctx.supabase
       userId = ctx.user.id
+      cost = new ScanCostCollector(userId, 'competitors')
       steps.context = { ok: true, company: ctx.company?.name }
     } else {
       const serverClient = await createClient()
@@ -135,7 +146,7 @@ export async function POST(request: Request) {
 CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with [ and end with ]`
 
     steps.ai = { status: 'starting' }
-    let competitors = await callXAI(prompt)
+    let competitors = await callXAI(prompt, cost ?? undefined)
 
     steps.ai = {
       ok: true,
@@ -216,7 +227,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
     await Promise.all(
       mapped.map(async (comp) => {
         try {
-          const { rating, reviewCount } = await fetchGoogleRating(comp.name, comp.website)
+          const { rating, reviewCount } = await fetchGoogleRating(comp.name, comp.website, cost ?? undefined)
           comp.google_rating = rating
           comp.google_review_count = reviewCount
         } catch { /* keep null */ }
@@ -328,5 +339,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
   } catch (e: any) {
     console.error('find-competitors error:', e?.message)
     return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })
+  } finally {
+    await cost?.flush()
   }
 }

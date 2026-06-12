@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 
 const CACHE_MS = 12 * 60 * 60 * 1000 // 12 hours
@@ -20,6 +21,7 @@ async function analyzeCompetitor(
   competitorWebsite: string,
   companyIndustry: string,
   companyActivity: string,
+  cost: ScanCostCollector,
 ): Promise<{ trending_topics: string[]; new_activity: string; opportunity: string } | null> {
   const siteHint = competitorWebsite ? ` (אתר: ${competitorWebsite})` : ''
   const today = new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })
@@ -43,6 +45,7 @@ async function analyzeCompetitor(
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
+  const t0 = Date.now()
   try {
     const res = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
@@ -58,6 +61,7 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     })
 
     const raw = await res.json()
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data: raw, ms: Date.now() - t0 })
     if (!res.ok || !raw.output) return null
 
     const text = raw.output
@@ -78,14 +82,18 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       opportunity: parsed.opportunity ? String(parsed.opportunity) : '',
     }
   } catch {
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
     return null
   }
 }
 
 export async function POST(request: Request) {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'competitor_trends')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -94,12 +102,13 @@ export async function POST(request: Request) {
       const cached = (co as any)?.competitor_trends as { fetchedAt?: string } | null
       if (cached?.fetchedAt) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
-        if (age < CACHE_MS) return NextResponse.json({ success: true, ...cached, cached: true })
+        if (age < CACHE_MS) { await cost.flush(); return NextResponse.json({ success: true, ...cached, cached: true }) }
       }
     }
 
     const competitors: any[] = ctx.competitors || []
     if (competitors.length === 0) {
+      await cost.flush()
       return NextResponse.json({
         success: true,
         competitor_data: [],
@@ -114,7 +123,7 @@ export async function POST(request: Request) {
     const top5 = competitors.slice(0, 5)
     const results = await Promise.all(
       top5.map(async (c) => {
-        const analysis = await analyzeCompetitor(c.name, c.website || '', companyIndustry, companyActivity)
+        const analysis = await analyzeCompetitor(c.name, c.website || '', companyIndustry, companyActivity, cost!)
         return {
           competitor_name: c.name,
           competitor_website: c.website || '',
@@ -138,8 +147,10 @@ export async function POST(request: Request) {
       await ctx.supabase.from('companies').update({ competitor_trends: result } as any).eq('id', ctx.user.id)
     } catch {}
 
+    await cost.flush()
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
+    await cost?.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

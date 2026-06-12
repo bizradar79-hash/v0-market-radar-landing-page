@@ -2,17 +2,20 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000
 
 export async function POST(request: Request) {
+  let cost = new ScanCostCollector(null, 'weekly_report')
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     const userId = ctx.user.id
+    cost = new ScanCostCollector(userId, 'weekly_report')
     const companyName = ctx.company?.name || ''
     const industry = ctx.company?.industry || ''
 
@@ -24,6 +27,7 @@ export async function POST(request: Request) {
       if (cached?.generated_at) {
         const age = Date.now() - new Date(cached.generated_at).getTime()
         if (age < CACHE_MS) {
+          await cost.flush()
           return NextResponse.json({ success: true, report: cached, company_name: companyName, cached: true })
         }
       }
@@ -97,7 +101,10 @@ export async function POST(request: Request) {
     }
 
     const geminiKey = process.env.GEMINI_API_KEY
-    if (!geminiKey) return NextResponse.json({ error: 'Missing GEMINI_API_KEY' }, { status: 500 })
+    if (!geminiKey) {
+      await cost.flush()
+      return NextResponse.json({ error: 'Missing GEMINI_API_KEY' }, { status: 500 })
+    }
 
     const nowIso = new Date().toISOString()
     const prompt = `אתה יועץ עסקי בכיר. צור דוח שבועי מקצועי בעברית לבעל עסק בתחום ${industry}.
@@ -139,6 +146,7 @@ export async function POST(request: Request) {
   "generated_at": "${nowIso}"
 }`
 
+    const aiT0 = Date.now()
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
@@ -149,14 +157,18 @@ export async function POST(request: Request) {
     )
 
     if (!res.ok) {
+      cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - aiT0 })
       const errText = await res.text()
       console.error('[weekly-report] Gemini HTTP error:', res.status, errText.slice(0, 300))
+      await cost.flush()
       return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
     }
 
     const data = await res.json()
+    cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - aiT0 })
     if (data.error) {
       console.error('[weekly-report] Gemini API error:', JSON.stringify(data.error))
+      await cost.flush()
       return NextResponse.json({ error: 'Gemini API error' }, { status: 500 })
     }
 
@@ -166,12 +178,14 @@ export async function POST(request: Request) {
     const e = clean.lastIndexOf('}')
     if (s === -1 || e <= s) {
       console.error('[weekly-report] no JSON in response:', clean.slice(0, 300))
+      await cost.flush()
       return NextResponse.json({ error: 'Invalid Gemini response' }, { status: 500 })
     }
 
     let report: any = {}
     try { report = JSON.parse(clean.slice(s, e + 1)) } catch (err) {
       console.error('[weekly-report] JSON parse error:', err)
+      await cost.flush()
       return NextResponse.json({ error: 'Failed to parse report JSON' }, { status: 500 })
     }
 
@@ -181,9 +195,11 @@ export async function POST(request: Request) {
       .from('companies').update({ last_report: report } as any).eq('id', userId)
     if (dbError) console.warn('[weekly-report] DB save error:', dbError.message)
 
+    await cost.flush()
     return NextResponse.json({ success: true, report, company_name: companyName })
   } catch (e: any) {
     console.error('[generate-weekly-report] error:', e?.message)
+    await cost.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

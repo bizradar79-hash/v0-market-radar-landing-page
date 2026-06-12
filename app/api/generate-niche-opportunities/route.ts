@@ -1,4 +1,5 @@
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -8,9 +9,12 @@ export const dynamic = 'force-dynamic'
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export async function POST(request: Request) {
+  let cost = new ScanCostCollector(null, 'niche_opportunities')
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'niche_opportunities')
 
     // Force: query param takes precedence, body is checked as fallback
     const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
@@ -26,6 +30,7 @@ export async function POST(request: Request) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
         if (age < CACHE_MS) {
           console.log('[generate-niche-opportunities] cache hit, age:', Math.round(age / 3600000), 'h')
+          await cost.flush()
           return NextResponse.json({ success: true, ...cached, cached: true })
         }
       }
@@ -228,6 +233,7 @@ ${usedSignalLabels.length > 0 ? usedSignalLabels.join('\n') : 'אין'}
 
 CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
+    const aiT0 = Date.now()
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
@@ -242,7 +248,9 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     })
 
     const data = await response.json()
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - aiT0 })
     if (!response.ok || !data.output) {
+      await cost.flush()
       return NextResponse.json({ error: 'Grok API error', detail: data }, { status: 500 })
     }
 
@@ -257,6 +265,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     const start = clean.indexOf('[')
     const end = clean.lastIndexOf(']')
     if (start === -1 || end <= start) {
+      await cost.flush()
       return NextResponse.json({ error: 'No JSON array in response', raw: text.slice(0, 500) }, { status: 500 })
     }
 
@@ -265,6 +274,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       const parsed = JSON.parse(clean.slice(start, end + 1))
       opportunities = Array.isArray(parsed) ? parsed : []
     } catch {
+      await cost.flush()
       return NextResponse.json({ error: 'JSON parse failed', raw: clean.slice(0, 500) }, { status: 500 })
     }
 
@@ -301,8 +311,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       console.error('niche_opportunities save error:', saveError.code, saveError.message)
     }
 
+    await cost.flush()
     return NextResponse.json({ success: true, ...payload, saveError: saveError?.message })
   } catch (e: any) {
+    await cost.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

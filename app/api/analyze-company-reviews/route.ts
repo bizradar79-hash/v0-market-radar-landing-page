@@ -3,6 +3,7 @@ export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
 import { getPlaceDetails } from '@/lib/google-places'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -26,7 +27,7 @@ async function fetchPlaceReviews(placeId: string): Promise<Array<{ text: string;
   }
 }
 
-async function analyzeReviewsWithGemini(companyName: string, rating: number, reviewCount: number, reviews: Array<{ text: string; rating: number }>): Promise<any | null> {
+async function analyzeReviewsWithGemini(companyName: string, rating: number, reviewCount: number, reviews: Array<{ text: string; rating: number }>, cost?: ScanCostCollector): Promise<any | null> {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return null
 
@@ -37,17 +38,28 @@ async function analyzeReviewsWithGemini(companyName: string, rating: number, rev
     ? `אתה יועץ עסקי. נתח את ביקורות הגוגל של "${companyName}" וספק תובנות מקצועיות.\n\nדירוג: ${rating}/5 (${reviewCount} ביקורות)\nביקורות:\n${reviewLines}\n\nהחזר JSON בלבד:\n{"sentiment_score":0,"summary":"תמצית 2-3 משפטים","positives":["חוזק 1","חוזק 2","חוזק 3"],"negatives":["חולשה 1","חולשה 2"],"opportunities":["הזדמנות לשיפור 1","הזדמנות 2"],"recommended_response":"תגובה מומלצת לביקורות שליליות"}\n\nCRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
     : `אתה יועץ עסקי. נתח את המוניטין הגוגל של "${companyName}" על בסיס הדירוג הממוצע.\n\nדירוג: ${rating}/5 (${reviewCount} ביקורות בגוגל מאפס)\n\nהחזר JSON בלבד:\n{"sentiment_score":0,"summary":"תמצית 2-3 משפטים על המוניטין","positives":["חוזק 1","חוזק 2","חוזק 3"],"negatives":["חולשה 1","חולשה 2"],"opportunities":["הזדמנות לשיפור 1","הזדמנות 2"],"recommended_response":"המלצה לניהול מוניטין מקוון"}\n\nCRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
 
+  const t0 = Date.now()
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
-    )
-    if (!res.ok) return null
+    let res: Response
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        }
+      )
+    } catch (e) {
+      cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
+      throw e
+    }
+    if (!res.ok) {
+      cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
+      return null
+    }
     const data = await res.json()
+    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
     const text: string = data.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text ?? ''
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const s = clean.indexOf('{')
@@ -61,9 +73,11 @@ async function analyzeReviewsWithGemini(companyName: string, rating: number, rev
 }
 
 export async function POST(request: Request) {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    cost = new ScanCostCollector(ctx.user.id, 'review_analysis')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -108,7 +122,7 @@ export async function POST(request: Request) {
     let placesData = null
     for (const variant of uniqueVariants) {
       console.log(`[analyze-company-reviews] trying: name="${variant}" website="${website}"`)
-      placesData = await getPlaceDetails(variant, website, phone)
+      placesData = await getPlaceDetails(variant, website, phone, cost ?? undefined)
       if (placesData) {
         console.log(`[analyze-company-reviews] HIT with variant="${variant}" rating=${placesData.google_rating}`)
         break
@@ -141,7 +155,8 @@ export async function POST(request: Request) {
         companyName,
         placesData.google_rating,
         placesData.google_review_count ?? 0,
-        reviews
+        reviews,
+        cost ?? undefined
       )
       if (analysis) {
         result.sentiment_score = analysis.sentiment_score ?? null
@@ -158,5 +173,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
+  } finally {
+    await cost?.flush()
   }
 }

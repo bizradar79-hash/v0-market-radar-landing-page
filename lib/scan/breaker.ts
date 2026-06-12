@@ -35,6 +35,10 @@ export interface ScanControl {
   max_seconds: number
   abort_reason?: string | null
   modules: Record<string, ScanModuleState>
+  // Per-module AI cost instrumentation (lib/scan/cost-tracker.ts). Reset on a
+  // fresh scan; carried over across chained/resumed windows so the breakdown
+  // reflects the WHOLE multi-window scan.
+  cost_breakdown?: Record<string, { calls: number; costUSD: number; promptTokens: number; completionTokens: number }>
 }
 
 export const SCAN_MAX_CALLS = Math.max(1, parseInt(process.env.SCAN_MAX_CALLS || '12', 10) || 12)
@@ -106,6 +110,7 @@ export async function initScanControl(
   // and opens a fresh wall-clock window (started_at = now).
   const carried: Record<string, ScanModuleState> = {}
   let carriedCalls = 0
+  let carriedCost: ScanControl['cost_breakdown'] = {}
   if (existing?.status === 'running') {
     const ageMs = Date.now() - new Date(existing.started_at).getTime()
     const fresh = ageMs < existing.max_seconds * 1000
@@ -115,7 +120,11 @@ export async function initScanControl(
     for (const [id, st] of Object.entries(existing.modules || {})) {
       if (st?.status === 'done' || st?.status === 'skipped') carried[id] = st
     }
-    if (opts.resume) carriedCalls = existing.call_count || 0
+    if (opts.resume) {
+      carriedCalls = existing.call_count || 0
+      // Carry the cost breakdown across chained windows so it sums the whole scan.
+      carriedCost = existing.cost_breakdown || {}
+    }
   }
 
   const maxCalls = profile === 'initial' ? SCAN_MAX_CALLS_INITIAL : SCAN_MAX_CALLS
@@ -132,6 +141,7 @@ export async function initScanControl(
     max_seconds: SCAN_MAX_SECONDS,
     abort_reason: null,
     modules,
+    cost_breakdown: carriedCost,
   }
   await writeScanControl(db, companyId, control)
   return control

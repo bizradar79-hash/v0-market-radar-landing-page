@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { fetchOpenAIGeoRaw } from '@/lib/geo/openai-engine'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -172,6 +173,7 @@ async function runGeminiEngine(
   website: string,
   competitorNames: string[],
   industry?: string,
+  cost?: ScanCostCollector,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
   const companyDomain = extractDomain(website)
   const geminiKey = process.env.GEMINI_API_KEY
@@ -181,6 +183,7 @@ async function runGeminiEngine(
   const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. איזה עסקים או פלטפורמות היית ממליץ? רשום את 10 הטובים ביותר לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
 
   try {
+    const t0 = Date.now()
     const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
       {
@@ -191,9 +194,11 @@ async function runGeminiEngine(
     )
     if (!res.ok) {
       console.error('[GEO gemini] HTTP error:', res.status, await res.text())
+      cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
       return { position: null, topResults: [], appeared: false, results: [] }
     }
     const data = await res.json()
+    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
     if (data.error) {
       console.error('[GEO gemini] API error:', JSON.stringify(data.error))
       return { position: null, topResults: [], appeared: false, results: [] }
@@ -215,6 +220,7 @@ async function runGeminiEngine(
     if (!Array.isArray(arr) || arr.length === 0) {
       console.log('[GEO gemini] empty array, retrying with simple prompt')
       const retryPrompt = `רשום 10 חברות ישראליות שמוכרות ${query}. JSON: [{"rank": 1, "name": "", "domain": ""}]`
+      const tRetry = Date.now()
       const retryRes = await fetchWithTimeout(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
         {
@@ -225,6 +231,7 @@ async function runGeminiEngine(
       )
       if (retryRes.ok) {
         const retryData = await retryRes.json()
+        cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: retryData, ms: Date.now() - tRetry })
         const retryText = retryData.candidates?.[0]?.content?.parts?.[0]?.text || ''
         const rc = retryText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
         const rs = rc.indexOf('['); const re = rc.lastIndexOf(']')
@@ -255,19 +262,21 @@ async function runGeoQuestion(
   competitorNames: string[],
   engine: Engine = 'general',
   industry?: string,
+  cost?: ScanCostCollector,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, industry)
+  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, industry, cost)
 
   // OpenAI / ChatGPT engine — real Responses API + web_search.
   if (engine === 'openai') {
     const companyDomain = extractDomain(website)
-    const rawResults = await fetchOpenAIGeoRaw(query, companyName, website, competitorNames)
+    const rawResults = await fetchOpenAIGeoRaw(query, companyName, website, competitorNames, cost)
     return processResults(rawResults, companyName, companyDomain, competitorNames)
   }
 
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
   const companyDomain = extractDomain(website)
 
+  const t0 = Date.now()
   let response: Response
   try {
     response = await fetchWithTimeout('https://api.x.ai/v1/responses', {
@@ -280,12 +289,14 @@ async function runGeoQuestion(
       }),
     })
   } catch (err: any) {
+    cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
     const why = err?.name === 'AbortError' ? `timeout_${GEO_ENGINE_TIMEOUT_MS}ms` : err?.message
     console.error(`[GEO ${engine}] Grok fetch failed: ${why}`)
     return { position: null, topResults: [], appeared: false, results: [] }
   }
 
   const data = await response.json().catch(() => ({}))
+  cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
   if (!response.ok || !data.output) {
     console.error(`[GEO ${engine}] Grok error: status=${response.status}`, JSON.stringify(data).slice(0, 300))
     return { position: null, topResults: [], appeared: false, results: [] }
@@ -364,6 +375,9 @@ export async function POST(request: Request) {
     const coreActivityDesc = businessProfile?.coreActivity || industry
     const geminiIndustry = coreActivityDesc
 
+    // Cost instrumentation — one collector per route, flushed once at the end.
+    const cost = new ScanCostCollector(ctx.user.id, 'geo_ranking')
+
     // ── Build query list ────────────────────────────────────────────────────
     // 1. Reuse SEO queryVariants if fresh enough (avoids duplicate API calls)
     let queryList: string[] = []
@@ -380,6 +394,7 @@ export async function POST(request: Request) {
         try {
           const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
           const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
+          const tq = Date.now()
           const qRes = await fetchWithTimeout(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {
@@ -390,6 +405,7 @@ export async function POST(request: Request) {
           )
           if (qRes.ok) {
             const qData = await qRes.json()
+            cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: qData, ms: Date.now() - tq })
             const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
             const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
             const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
@@ -422,9 +438,9 @@ export async function POST(request: Request) {
     const queryVariantResults = await Promise.all(
       queryList.map(async (q) => {
         const [chatgptRes, geminiRes, grokRes] = await Promise.all([
-          runGeoQuestion(q, companyName, website, competitorNames, 'openai', geminiIndustry),
-          runGeoQuestion(q, companyName, website, competitorNames, 'gemini', geminiIndustry),
-          runGeoQuestion(q, companyName, website, competitorNames, 'grok'),
+          runGeoQuestion(q, companyName, website, competitorNames, 'openai', geminiIndustry, cost),
+          runGeoQuestion(q, companyName, website, competitorNames, 'gemini', geminiIndustry, cost),
+          runGeoQuestion(q, companyName, website, competitorNames, 'grok', undefined, cost),
         ])
         return { query: q, chatgpt: chatgptRes, gemini: geminiRes, grok: grokRes }
       })
@@ -457,12 +473,14 @@ export async function POST(request: Request) {
     const recsPrompt = `Write 3 specific recommendations for how ${companyName} (${industry}) can improve its presence in AI engines like ChatGPT, Grok, Gemini and Perplexity when people search for "${primaryQuery}". Return JSON only: {"recommendations": ["", "", ""]}. No markdown.`
     let recommendations: string[] = []
     try {
+      const tr = Date.now()
       const recsRes = await fetchWithTimeout('https://api.x.ai/v1/responses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
         body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
       })
       const recsData = await recsRes.json().catch(() => ({}))
+      cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', data: recsData, ms: Date.now() - tr })
       const recsText = (recsData.output || [])
         .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
         .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
@@ -497,11 +515,13 @@ export async function POST(request: Request) {
 
     if (!guard.useNew) {
       await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'geo_ranking', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      await cost.flush()
       return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
     }
 
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)
 
+    await cost.flush()
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })

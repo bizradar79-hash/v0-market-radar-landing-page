@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -9,9 +10,12 @@ export const maxDuration = 60
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export async function POST(request: Request) {
+  let cost = new ScanCostCollector(null, 'weekly_actions')
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'weekly_actions')
 
     // Force: query param takes precedence, body is checked as fallback
     const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
@@ -26,6 +30,7 @@ export async function POST(request: Request) {
       if (cached?.fetchedAt && cached.actions?.length > 0) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
         if (age < CACHE_MS) {
+          await cost.flush()
           return NextResponse.json({ success: true, ...cached, cached: true })
         }
       }
@@ -207,6 +212,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     // a soft failure. Used whenever xAI returns nothing usable so a transient
     // upstream hiccup never overwrites a good weekly-actions value with empty.
     async function keepExistingOrFail(reason: string) {
+      await cost.flush()
       const { data: prev } = await ctx!.supabase
         .from('companies').select('weekly_actions').eq('id', ctx!.user.id).single()
       const prevActions = (prev?.weekly_actions as any)?.actions
@@ -222,6 +228,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       return NextResponse.json({ error: reason }, { status: 502 })
     }
 
+    const aiT0 = Date.now()
     let response: Response
     try {
       response = await fetch('https://api.x.ai/v1/responses', {
@@ -237,6 +244,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
         }),
       })
     } catch (err: any) {
+      cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', ms: Date.now() - aiT0 })
       return keepExistingOrFail(`xAI fetch failed: ${err?.message}`)
     }
 
@@ -246,8 +254,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     try {
       data = await response.json()
     } catch {
+      cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', ms: Date.now() - aiT0 })
       return keepExistingOrFail(`non-JSON xAI body (status ${response.status})`)
     }
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', data, ms: Date.now() - aiT0 })
     if (!response.ok || !data.output) {
       return keepExistingOrFail('Grok API error')
     }
@@ -297,8 +307,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       console.error('weekly_actions save error:', saveError.code, saveError.message)
     }
 
+    await cost.flush()
     return NextResponse.json({ success: true, ...payload, saveError: saveError?.message })
   } catch (e: any) {
+    await cost.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

@@ -4,6 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { fetchSerp, findPosition, baseDomain as dfsBaseDomain } from '@/lib/seo/dataforseo'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -69,6 +70,7 @@ async function runSeoQuery(
   companyDomain: string,
   competitorWebsites: string[],
   isLocal: boolean,
+  cost?: ScanCostCollector,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
   const competitorListText = competitorWebsites.length > 0
     ? `\nאתרי מתחרים ידועים:\n${competitorWebsites.join('\n')}`
@@ -92,17 +94,25 @@ CRITICAL: דווח רק על URLs אמיתיים מהחיפוש. אל תבדה �
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-    body: JSON.stringify({
-      model: 'grok-4-fast-non-reasoning',
-      input: [{ role: 'user', content: prompt }],
-      tools: [{ type: 'web_search' }],
-    }),
-  })
+  const t0 = Date.now()
+  let response: Response
+  try {
+    response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'grok-4-fast-non-reasoning',
+        input: [{ role: 'user', content: prompt }],
+        tools: [{ type: 'web_search' }],
+      }),
+    })
+  } catch (e) {
+    cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
+    throw e
+  }
 
   const data = await response.json()
+  cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
   if (!response.ok || !data.output) return { position: null, topResults: [], appeared: false, results: [] }
 
   const text = data.output
@@ -201,21 +211,30 @@ async function runSeoQueryDFS(
 async function reorderWithGemini(
   results: any[],
   query: string,
+  cost?: ScanCostCollector,
 ): Promise<any[] | null> {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey || results.length === 0) return null
   const list = results.map(r => `${r.position}. ${r.name} (${r.url || ''})`).join('\n')
   const prompt = `בדוק את רשימת התוצאות הזו לשאילתה "${query}" בגוגל ישראל. סדר מחדש לפי דירוג גוגל האמיתי שאתה מכיר. החזר JSON בלבד: [{"rank": 1, "title": "", "domain": "", "is_sponsored": false}]\n\nהרשימה:\n${list}`
+  const t0 = Date.now()
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
-    )
+    let res: Response
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        }
+      )
+    } catch (e) {
+      cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
+      throw e
+    }
     const data = await res.json()
+    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const s = clean.indexOf('['); const e = clean.lastIndexOf(']')
@@ -245,9 +264,11 @@ async function reorderWithGemini(
 }
 
 export async function POST(request: Request) {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    cost = new ScanCostCollector(ctx.user.id, 'seo_ranking')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -316,7 +337,7 @@ export async function POST(request: Request) {
           }
         }
         if (!res) {
-          res = await runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal)
+          res = await runSeoQuery(q, companyName, website, companyDomain, competitorWebsites, isLocal, cost ?? undefined)
         }
         const resultCount = Array.isArray(res.results) ? res.results.length : 0
         const status: 'found' | 'not_found' | 'error' =
@@ -329,7 +350,7 @@ export async function POST(request: Request) {
     // Gemini reorder only meaningful for the (less reliable) Grok path; with
     // DataForSEO the ranking is already real Google order.
     if (providerUsed !== 'dataforseo' && variantResults[0]) {
-      const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0])
+      const primaryReordered = await reorderWithGemini(variantResults[0].results, queryList[0], cost ?? undefined)
       if (primaryReordered) variantResults[0].results = primaryReordered
     }
 
@@ -384,13 +405,21 @@ export async function POST(request: Request) {
     const topNamesStr = primaryVariant.results.slice(0, 5).map(r => r.name).join(', ')
     const recsPrompt = `בהתבסס על תוצאות החיפוש "${primaryQuery}" שבהן מופיעים: ${topNamesStr}, כתוב 3 המלצות ספציפיות לשיפור דירוג SEO של ${companyName}. החזר JSON בלבד: {"recommendations": ["", "", ""]}. No markdown.`
     let recommendations: string[] = []
+    const recsT0 = Date.now()
     try {
-      const recsRes = await fetch('https://api.x.ai/v1/responses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-        body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
-      })
+      let recsRes: Response
+      try {
+        recsRes = await fetch('https://api.x.ai/v1/responses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
+          body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
+        })
+      } catch (e) {
+        cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', ms: Date.now() - recsT0 })
+        throw e
+      }
       const recsData = await recsRes.json()
+      cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', data: recsData, ms: Date.now() - recsT0 })
       const recsText = (recsData.output || [])
         .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
         .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
@@ -441,5 +470,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, ...result, businessAnalysis })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
+  } finally {
+    await cost?.flush()
   }
 }

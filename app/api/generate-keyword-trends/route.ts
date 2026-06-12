@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -8,7 +9,7 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world', geoContext?: string): Promise<any[]> {
+async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world', cost: ScanCostCollector, geoContext?: string): Promise<any[]> {
   const geoText = region === 'israel'
     ? `בישראל. חפש מה אנשים מחפשים יותר בגוגל, מה עולה ברשתות חברתיות, מה מדוברים בפורומים ישראליים`
     : `בעולם (לא מוגבל לישראל). חפש מגמות גלובליות בגוגל, רשתות חברתיות, ופורומים בינלאומיים`
@@ -22,6 +23,7 @@ async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world',
 
 CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
 
+  const t0 = Date.now()
   let response: Response
   try {
     response = await fetch('https://api.x.ai/v1/responses', {
@@ -37,6 +39,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
       }),
     })
   } catch (err: any) {
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
     console.error(`[keyword-trends ${region}] xAI fetch failed:`, err?.message)
     return []
   }
@@ -49,9 +52,11 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
   try {
     data = await response.json()
   } catch (err: any) {
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
     console.error(`[keyword-trends ${region}] non-JSON xAI body (status ${response.status}):`, err?.message)
     return []
   }
+  cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
   if (!response.ok || !data.output) return []
 
   const text = data.output
@@ -74,12 +79,13 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
   }
 }
 
-async function fetchRelatedQueriesFromGemini(keyword: string): Promise<{
+async function fetchRelatedQueriesFromGemini(keyword: string, cost: ScanCostCollector): Promise<{
   trend: string; related_queries: string[]; confidence: number
 } | null> {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return null
   const prompt = `בהתבסס על ידע שלך על גוגל טרנדס, מה הטרנד של מילת המפתח "${keyword}" בישראל בשבועות האחרונים? עולה, יורד או יציב? ומה 5 ביטויי החיפוש הקשורים הכי פופולריים לה כרגע? החזר JSON: {"trend": "rising", "related_queries": ["", "", "", "", ""], "confidence": 80}`
+  const t0 = Date.now()
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
@@ -90,6 +96,7 @@ async function fetchRelatedQueriesFromGemini(keyword: string): Promise<{
       }
     )
     const data = await res.json()
+    cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
     const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
     const s = clean.indexOf('{'); const e = clean.lastIndexOf('}')
@@ -104,9 +111,12 @@ async function fetchRelatedQueriesFromGemini(keyword: string): Promise<{
 }
 
 export async function POST(request: Request) {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'keyword_trends')
 
     const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
     const body = await request.json().catch(() => ({}))
@@ -121,6 +131,7 @@ export async function POST(request: Request) {
       const suggestedKeywords = businessProfile?.primaryKeywords?.filter(
         k => !companyKeywords.includes(k)
       ).slice(0, 10) || []
+      await cost.flush()
       return NextResponse.json({
         error: 'Missing keyword',
         suggested_keywords: suggestedKeywords,
@@ -137,6 +148,7 @@ export async function POST(request: Request) {
         const age = Date.now() - new Date(kwData.fetchedAt).getTime()
         if (age < CACHE_MS) {
           console.log(`[generate-keyword-trends] cache hit for "${keyword}", age:`, Math.round(age / 3600000), 'h')
+          await cost.flush()
           return NextResponse.json({
             success: true, keyword, cached: true,
             trends: kwData.israel || kwData.trends || [],
@@ -153,9 +165,9 @@ export async function POST(request: Request) {
 
     // Run Israel, World searches and Gemini related queries in parallel
     const [israelTrends, worldTrends, geminiData] = await Promise.all([
-      fetchTrendsForRegion(keyword, 'israel', geoContext),
-      fetchTrendsForRegion(keyword, 'world', geoContext),
-      fetchRelatedQueriesFromGemini(keyword),
+      fetchTrendsForRegion(keyword, 'israel', cost, geoContext),
+      fetchTrendsForRegion(keyword, 'world', cost, geoContext),
+      fetchRelatedQueriesFromGemini(keyword, cost),
     ])
 
     // Merge with existing keyword_trends in companies table
@@ -175,6 +187,7 @@ export async function POST(request: Request) {
 
     if (existingKeyCount > 0 && newKeyCount === 0) {
       console.log(`[keyword_trends] "${keyword}" returned empty — keeping existing ${existingKeyCount} trends`)
+      await cost.flush()
       return NextResponse.json({
         success: true, keyword, kept_existing: true,
         israel: existingKey?.israel ?? existingKey?.trends ?? [],
@@ -200,6 +213,7 @@ export async function POST(request: Request) {
 
     if (saveError) {
       console.error('keyword_trends save error:', saveError.code, saveError.message)
+      await cost.flush()
       return NextResponse.json({
         success: true, keyword,
         trends: israelTrends, israel: israelTrends, world: worldTrends,
@@ -207,8 +221,10 @@ export async function POST(request: Request) {
       })
     }
 
+    await cost.flush()
     return NextResponse.json({ success: true, keyword, trends: israelTrends, israel: israelTrends, world: worldTrends, related_queries: geminiData?.related_queries ?? [], gemini_trend: geminiData?.trend ?? null })
   } catch (e: any) {
+    await cost?.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

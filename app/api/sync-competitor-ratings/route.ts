@@ -3,13 +3,17 @@ export const maxDuration = 120
 
 import { getFullContext } from '@/lib/context'
 import { getPlaceDetails } from '@/lib/google-places'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 
 // Sync Google ratings for ALL competitors missing google_rating (manual + auto)
 export async function POST() {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'competitor_ratings')
 
     // FIX 2 — only competitors that don't already have a cached rating, and
     // CAP at 7 (highest threat first) so a long competitor list can't fan out
@@ -25,13 +29,14 @@ export async function POST() {
     const comps = (allComps ?? []).slice(0, COMPETITOR_RATING_CAP)
 
     if (!comps.length) {
+      await cost.flush()
       return NextResponse.json({ success: true, updated: 0, skipped: 'all ratings present' })
     }
 
     let updated = 0
     for (const comp of comps) {
       try {
-        const result = await getPlaceDetails(comp.name, comp.website || '', comp.phone ?? undefined)
+        const result = await getPlaceDetails(comp.name, comp.website || '', comp.phone ?? undefined, cost ?? undefined)
         if (!result) continue
 
         const isManual = comp.source === 'manual'
@@ -68,8 +73,10 @@ export async function POST() {
       }
     }
 
+    await cost.flush()
     return NextResponse.json({ success: true, updated, total: comps.length, capped: (allComps?.length ?? 0) > comps.length })
   } catch (e: any) {
+    await cost?.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }

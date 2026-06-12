@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -10,11 +11,14 @@ const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export async function POST(request: Request) {
   const steps: Record<string, any> = {}
+  let cost = new ScanCostCollector(null, 'leads')
   try {
     steps.context = 'starting'
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
     steps.context = { ok: true, company: ctx.company?.name }
+
+    cost = new ScanCostCollector(ctx.user.id, 'leads')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -25,6 +29,7 @@ export async function POST(request: Request) {
         const age = Date.now() - new Date(latest.created_at).getTime()
         if (age < CACHE_MS) {
           console.log('[generate-leads] cache hit, age:', Math.round(age / 3600000), 'h')
+          await cost.flush()
           return NextResponse.json({ success: true, cached: true })
         }
       }
@@ -60,6 +65,7 @@ export async function POST(request: Request) {
 [{"name": "", "industry": "", "website": "", "reason": "", "contact_email": "", "relevance_score": 0}]`
 
     steps.ai = { status: 'starting' }
+    const t0 = Date.now()
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
@@ -73,8 +79,10 @@ export async function POST(request: Request) {
       }),
     })
     const data = await response.json()
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
     if (!response.ok || !data.output) {
       steps.ai.error = data
+      await cost.flush()
       return NextResponse.json({ error: 'xAI API error', steps }, { status: 500 })
     }
     const text = data.output
@@ -112,6 +120,7 @@ export async function POST(request: Request) {
     await ctx.supabase.from('leads').delete().eq('company_id', ctx.user.id)
 
     if (list.length === 0) {
+      await cost.flush()
       return NextResponse.json({ success: true, count: 0, steps })
     }
 
@@ -130,6 +139,7 @@ export async function POST(request: Request) {
 
     if (insertError) {
       steps.db = { ok: false, error: insertError.message, code: insertError.code }
+      await cost.flush()
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
     steps.db = { ok: true, saved: saved?.length }
@@ -143,9 +153,11 @@ export async function POST(request: Request) {
       is_read: false,
     })
 
+    await cost.flush()
     return NextResponse.json({ success: true, count: saved?.length || 0, steps })
   } catch (e: any) {
     console.error('generate-leads error:', e?.message)
+    await cost.flush()
     return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })
   }
 }

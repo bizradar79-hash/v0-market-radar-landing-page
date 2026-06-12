@@ -9,6 +9,7 @@ import {
   initScanControl, assertScanAlive, recordScanCall, setModuleStatus,
   finishScan, ScanAbortError, type ScanProfile, type ModuleStatus as BreakerModuleStatus,
 } from '@/lib/scan/breaker'
+import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -482,6 +483,28 @@ export async function POST(request: Request) {
         await finishScan(adminDb, companyId!, 'error')
       }
     } finally {
+      // Cost observability — when the scan reaches a terminal state (NOT a
+      // chained handoff, which continues in the next window), read the final
+      // accumulated cost_breakdown and log a sorted table so we can see exactly
+      // where the money went this scan: module | calls | $.
+      if (finalStatus !== 'chained') {
+        try {
+          const { data: ctrlRow } = await adminDb
+            .from('companies').select('scan_control').eq('id', companyId).single()
+          const cb = (ctrlRow as any)?.scan_control?.cost_breakdown
+          if (cb && Object.keys(cb).length > 0) {
+            const total = totalOfBreakdown(cb)
+            console.log(
+              `[sync/run] scan cost breakdown (${profile}, status=${finalStatus}):\n` +
+              `${formatBreakdownTable(cb)}\n` +
+              `[sync/run] TOTAL: ${total.calls} calls, $${total.costUSD.toFixed(4)}`
+            )
+          }
+        } catch (costErr: any) {
+          console.error('[sync/run] cost-breakdown log failed:', costErr?.message)
+        }
+      }
+
       const now = new Date().toISOString()
       const nextSync = new Date(Date.now() + SYNC_INTERVAL_MS).toISOString()
       try {

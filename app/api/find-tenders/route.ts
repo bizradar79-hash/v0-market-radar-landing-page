@@ -5,6 +5,7 @@ import { getFullContext } from '@/lib/context'
 import { scrapeMrGov } from '@/lib/tenders-scraper'
 import { getEngineTendersForCompany } from '@/lib/tenders/from-engine'
 import { validateUrl } from '@/lib/ai'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -33,11 +34,14 @@ function normUrl(s: string | null): string {
 
 export async function POST(request: Request) {
   const steps: Record<string, any> = {}
+  let cost = new ScanCostCollector(null, 'tenders')
   try {
     steps.context = 'starting'
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
     steps.context = { ok: true, company: ctx.company?.name }
+
+    cost = new ScanCostCollector(ctx.user.id, 'tenders')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -48,6 +52,7 @@ export async function POST(request: Request) {
         const age = Date.now() - new Date(latest.created_at).getTime()
         if (age < CACHE_MS) {
           console.log('[find-tenders] cache hit, age:', Math.round(age / 3600000), 'h')
+          await cost.flush()
           return NextResponse.json({ success: true, cached: true })
         }
       }
@@ -62,6 +67,7 @@ export async function POST(request: Request) {
     ).slice(0, 8)
 
     if (keywords.length === 0) {
+      await cost.flush()
       return NextResponse.json({ success: true, tenders: [], count: 0, message: 'אין מילות מפתח', steps })
     }
 
@@ -114,6 +120,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
         steps.scoring = 'starting'
         let scores: Array<{ index: number; relevance: number }> = []
 
+        const t0 = Date.now()
         try {
           const xaiRes = await fetch('https://api.x.ai/v1/responses', {
             method: 'POST',
@@ -123,6 +130,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
 
           if (xaiRes.ok) {
             const xaiData = await xaiRes.json()
+            cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', data: xaiData, ms: Date.now() - t0 })
             const xaiText = xaiData.output
               ?.filter((b: any) => b.type === 'message')
               .flatMap((b: any) => b.content)
@@ -136,7 +144,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
               if (start !== -1 && end > start) scores = JSON.parse(clean.slice(start, end + 1))
             } catch (e) { console.warn('[find-tenders] scoring parse failed:', e) }
           }
-        } catch (e: any) { console.warn('[find-tenders] xAI scoring failed:', e?.message) }
+        } catch (e: any) {
+          cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', ms: Date.now() - t0 })
+          console.warn('[find-tenders] xAI scoring failed:', e?.message)
+        }
 
         steps.scoring = { scoresReturned: scores.length }
 
@@ -222,6 +233,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
     )
 
     if (allRows.length === 0) {
+      await cost.flush()
       return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })
     }
 
@@ -232,14 +244,17 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
 
     if (insertError) {
       steps.db = { ok: false, error: insertError.message }
+      await cost.flush()
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
 
     steps.db = { ok: true, saved: saved?.length, engineCount: engineRows.length, aiCount: deduped.length }
+    await cost.flush()
     return NextResponse.json({ success: true, tenders: saved, count: saved?.length || 0, steps })
 
   } catch (e: any) {
     console.error('[find-tenders] error:', e?.message)
+    await cost.flush()
     return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })
   }
 }

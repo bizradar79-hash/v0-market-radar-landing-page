@@ -29,6 +29,7 @@ interface ScanControl {
   max_seconds: number
   abort_reason?: string | null
   modules: Record<string, ScanModuleState>
+  cost_breakdown?: Record<string, { calls: number; costUSD: number; promptTokens?: number; completionTokens?: number }>
 }
 
 // Ordered module ids + Hebrew labels (mirror sync/run MODULE_IDS).
@@ -221,6 +222,46 @@ export function ScanProgressModal({
             )
           })}
         </div>
+
+        {/* Cost breakdown — shown once the scan has a terminal status. */}
+        {!isRunning && control?.cost_breakdown && Object.keys(control.cost_breakdown).length > 0 && (() => {
+          const cb = control.cost_breakdown!
+          const rows = Object.entries(cb)
+            .filter(([k]) => k !== 'total')
+            .map(([id, v]) => ({
+              id,
+              label: MODULE_LABELS.find(m => m.id === id)?.label ?? id,
+              calls: v?.calls ?? 0,
+              costUSD: v?.costUSD ?? 0,
+            }))
+            .sort((a, b) => b.costUSD - a.costUSD)
+          const totalCalls = rows.reduce((s, r) => s + r.calls, 0)
+          const totalUSD = rows.reduce((s, r) => s + r.costUSD, 0)
+          return (
+            <div className="border-t pt-3 mt-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold">עלות סריקה</span>
+                <span className="text-xs text-muted-foreground">
+                  {totalCalls} קריאות · ${totalUSD.toFixed(4)}
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {rows.map(r => (
+                  <div key={r.id} className="flex items-center gap-2 text-xs px-1 py-0.5">
+                    <span className="flex-1 truncate">{r.label}</span>
+                    <span className="text-muted-foreground tabular-nums w-12 text-center shrink-0">{r.calls}</span>
+                    <span className="font-medium tabular-nums w-16 text-left shrink-0">${r.costUSD.toFixed(4)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 text-xs px-1 pt-1.5 mt-1 border-t font-semibold">
+                  <span className="flex-1">סה״כ</span>
+                  <span className="tabular-nums w-12 text-center shrink-0">{totalCalls}</span>
+                  <span className="tabular-nums w-16 text-left shrink-0">${totalUSD.toFixed(4)}</span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {error && (
           <p className="text-xs text-amber-600">⚠ {error}</p>

@@ -1,3 +1,5 @@
+import type { ScanCostCollector } from '@/lib/scan/cost-tracker'
+
 // Israel bounding box for location bias
 const ISRAEL_BIAS = 'rectangle:29.5,34.2|33.4,35.9'
 
@@ -145,10 +147,12 @@ function buildResult(
 async function getRatingViaGeminiSearch(
   businessName: string,
   domain: string,
+  cost?: ScanCostCollector,
 ): Promise<PlaceDetailsResult | null> {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return null
 
+  const t0 = Date.now()
   try {
     const prompt = `Find the Google Maps rating for the business "${businessName}" whose website is ${domain}. Return ONLY valid JSON: {"rating": X.X, "review_count": Y, "maps_url": "https://maps.google.com/..."} — use null values if not found.`
     const res = await fetch(
@@ -163,6 +167,7 @@ async function getRatingViaGeminiSearch(
       }
     )
     const data = await res.json()
+    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', webSearch: true, data, ms: Date.now() - t0 })
     if (data.error) {
       console.error('[google-places] gemini-search API error:', JSON.stringify(data.error))
       return null
@@ -213,6 +218,7 @@ async function getRatingViaGeminiSearch(
       google_maps_url: mapsUrl ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(businessName + ' ' + domain)}`,
     }
   } catch (err) {
+    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', webSearch: true, ms: Date.now() - t0 })
     console.error('[google-places] getRatingViaGeminiSearch error:', err)
     return null
   }
@@ -222,6 +228,7 @@ export async function getPlaceDetails(
   businessName: string,
   website: string,
   _phone?: string,
+  cost?: ScanCostCollector,
 ): Promise<PlaceDetailsResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
@@ -307,7 +314,7 @@ export async function getPlaceDetails(
 
     // ── Strategy 5: Gemini with Google Search grounding ─────────────────────
     console.log('[google-places] trying strategy 5: Gemini web search for rating')
-    const geminiResult = await getRatingViaGeminiSearch(businessName, domain)
+    const geminiResult = await getRatingViaGeminiSearch(businessName, domain, cost)
     if (geminiResult) {
       console.log(`[google-places] strategy 5 HIT: rating=${geminiResult.google_rating} count=${geminiResult.google_review_count}`)
       return geminiResult

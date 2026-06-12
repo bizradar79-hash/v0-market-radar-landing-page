@@ -2,6 +2,8 @@
 // which businesses it recommends for a query, so customers can see their real
 // standing inside ChatGPT. Uses a cheap model by default (gpt-5-mini).
 
+import type { ScanCostCollector } from '@/lib/scan/cost-tracker'
+
 const OPENAI_ENDPOINT = 'https://api.openai.com/v1/responses'
 
 // Cheap default; override via env if the account doesn't have gpt-5-mini.
@@ -40,12 +42,14 @@ export interface OpenAIGeoRaw {
 
 /**
  * Low-level call: prompt → OpenAI Responses API with web_search.
+ * Pass a ScanCostCollector to record token/web-search cost for this call.
  */
-export async function callOpenAIWebSearch(prompt: string): Promise<OpenAIGeoRaw> {
+export async function callOpenAIWebSearch(prompt: string, cost?: ScanCostCollector): Promise<OpenAIGeoRaw> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return { ok: false, text: '', error: 'missing_openai_key' }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), OPENAI_GEO_TIMEOUT_MS)
+  const t0 = Date.now()
   try {
     const res = await fetch(OPENAI_ENDPOINT, {
       method: 'POST',
@@ -58,12 +62,14 @@ export async function callOpenAIWebSearch(prompt: string): Promise<OpenAIGeoRaw>
       signal: ctrl.signal,
     })
     const data = await res.json().catch(() => ({}))
+    cost?.add({ provider: 'openai', model: OPENAI_GEO_MODEL, webSearch: true, data, ms: Date.now() - t0 })
     if (!res.ok) {
       const msg = data?.error?.message || `http_${res.status}`
       return { ok: false, text: '', error: msg }
     }
     return { ok: true, text: extractOpenAIText(data) }
   } catch (e: any) {
+    cost?.add({ provider: 'openai', model: OPENAI_GEO_MODEL, webSearch: true, ms: Date.now() - t0 })
     const msg = e?.name === 'AbortError' ? `timeout_${OPENAI_GEO_TIMEOUT_MS}ms` : (e?.message ?? 'fetch_failed')
     return { ok: false, text: '', error: msg }
   } finally {
@@ -81,6 +87,7 @@ export async function fetchOpenAIGeoRaw(
   companyName: string,
   website: string,
   competitorNames: string[],
+  cost?: ScanCostCollector,
 ): Promise<any[]> {
   const competitorLine = competitorNames.length > 0
     ? `\nמתחרים ידועים: ${competitorNames.join(', ')}`
@@ -93,7 +100,7 @@ Also indicate whether ${companyName} (website: ${website}) appears, and at what 
 Return ONLY raw JSON, no markdown:
 {"results": [{"position": 1, "name": "", "url": "", "isOwn": false}], "userMentioned": false, "userPosition": null}`
 
-  const { ok, text } = await callOpenAIWebSearch(prompt)
+  const { ok, text } = await callOpenAIWebSearch(prompt, cost)
   if (!ok || !text) return []
 
   const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()

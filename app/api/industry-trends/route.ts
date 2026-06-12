@@ -3,6 +3,7 @@ export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -36,9 +37,12 @@ function buildSearchQuery(bp: BusinessProfile | null, company: any): string {
 }
 
 export async function POST(request: Request) {
+  let cost: ScanCostCollector | null = null
   try {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    cost = new ScanCostCollector(ctx.user.id, 'industry_trends')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -47,7 +51,7 @@ export async function POST(request: Request) {
       const cached = (co as any)?.industry_trends as { fetchedAt?: string } | null
       if (cached?.fetchedAt) {
         const age = Date.now() - new Date(cached.fetchedAt).getTime()
-        if (age < CACHE_MS) return NextResponse.json({ success: true, ...cached, cached: true })
+        if (age < CACHE_MS) { await cost.flush(); return NextResponse.json({ success: true, ...cached, cached: true }) }
       }
     }
 
@@ -96,6 +100,7 @@ ${businessContext}
 
 CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
 
+    const t0 = Date.now()
     const res = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
@@ -110,7 +115,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
     })
 
     const raw = await res.json()
+    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data: raw, ms: Date.now() - t0 })
     if (!res.ok || !raw.output) {
+      await cost.flush()
       return NextResponse.json({ error: 'xAI API error' }, { status: 500 })
     }
 
@@ -123,6 +130,7 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
 
     const parsed = extractJSON(text)
     if (!parsed?.trends) {
+      await cost.flush()
       return NextResponse.json({ success: true, trends: [], date_range: today, search_query: searchQuery, fetchedAt: new Date().toISOString() })
     }
 
@@ -155,6 +163,7 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
 
     if (!guard.useNew) {
       await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'industry_trends', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      await cost.flush()
       return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
     }
 
@@ -163,8 +172,10 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       await ctx.supabase.from('companies').update({ industry_trends: result } as any).eq('id', ctx.user.id)
     } catch {}
 
+    await cost.flush()
     return NextResponse.json({ success: true, ...result })
   } catch (e: any) {
+    await cost?.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
 }
