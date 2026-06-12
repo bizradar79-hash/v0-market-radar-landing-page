@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
+import { fetchGoogleTrends, type KeywordTrend } from '@/lib/seo/dataforseo'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -9,6 +10,44 @@ export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// Default to REAL Google Trends via DataForSEO. Set KEYWORD_TRENDS_PROVIDER=grok
+// to force the legacy AI-guess path (kept as a fallback when DataForSEO fails).
+const PROVIDER = (process.env.KEYWORD_TRENDS_PROVIDER || 'dataforseo').toLowerCase()
+
+// ── Stored shape ─────────────────────────────────────────────────────────────
+// The trends UI renders one row per item in `israel` with { phrase, trend(Hebrew),
+// reason, trend_data:[{week,value}] }. DataForSEO produces exactly one row per
+// keyword (its own 12-month interest series), so each keyword card shows a single
+// trend + sparkline of real Google Trends data.
+const TREND_HE: Record<KeywordTrend['trend'], string> = {
+  rising: 'עולה', falling: 'יורד', stable: 'יציב',
+}
+
+function trendToStored(kt: KeywordTrend) {
+  const trend_data = kt.series
+    .filter(p => typeof p.value === 'number')
+    .map(p => ({ week: p.date, value: p.value as number }))
+  const sign = kt.changePct > 0 ? '+' : ''
+  const israel = [{
+    phrase: kt.keyword,
+    trend: TREND_HE[kt.trend],
+    reason: `${sign}${kt.changePct}% ב-12 החודשים האחרונים (Google Trends)`,
+    trend_data,
+  }]
+  return {
+    fetchedAt: new Date().toISOString(),
+    trends: israel,       // backward-compat alias
+    israel,
+    world: [],
+    related_queries: [],
+    gemini_trend: kt.trend, // english rising/falling/stable
+    gemini_confidence: null,
+    provider: 'dataforseo' as const,
+    changePct: kt.changePct,
+  }
+}
+
+// ── Legacy Grok/Gemini path (fallback only) ──────────────────────────────────
 async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world', cost: ScanCostCollector, geoContext?: string): Promise<any[]> {
   const geoText = region === 'israel'
     ? `בישראל. חפש מה אנשים מחפשים יותר בגוגל, מה עולה ברשתות חברתיות, מה מדוברים בפורומים ישראליים`
@@ -44,10 +83,6 @@ CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]
     return []
   }
 
-  // Guard: xAI can return a non-JSON body (502/504/empty/overload). An unguarded
-  // response.json() would throw and 500 the whole route, failing the keyword.
-  // Treat any unparseable / error response as "no trends" so the caller's
-  // keep-existing guard preserves this keyword's prior data.
   let data: any
   try {
     data = await response.json()
@@ -110,6 +145,27 @@ async function fetchRelatedQueriesFromGemini(keyword: string, cost: ScanCostColl
   } catch { return null }
 }
 
+/** Legacy per-keyword Grok+Gemini path. Returns the stored object or null. */
+async function fetchViaGrok(keyword: string, cost: ScanCostCollector, geoContext?: string) {
+  const [israelTrends, worldTrends, geminiData] = await Promise.all([
+    fetchTrendsForRegion(keyword, 'israel', cost, geoContext),
+    fetchTrendsForRegion(keyword, 'world', cost, geoContext),
+    fetchRelatedQueriesFromGemini(keyword, cost),
+  ])
+  const count = (israelTrends?.length ?? 0) + (worldTrends?.length ?? 0)
+  if (count === 0) return null
+  return {
+    fetchedAt: new Date().toISOString(),
+    trends: israelTrends,
+    israel: israelTrends,
+    world: worldTrends,
+    related_queries: geminiData?.related_queries ?? [],
+    gemini_trend: geminiData?.trend ?? null,
+    gemini_confidence: geminiData?.confidence ?? null,
+    provider: 'grok' as const,
+  }
+}
+
 export async function POST(request: Request) {
   let cost: ScanCostCollector | null = null
   try {
@@ -120,12 +176,19 @@ export async function POST(request: Request) {
 
     const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
     const body = await request.json().catch(() => ({}))
-    const keyword = body.keyword
     const force = forceQuery || body.force === true
+
+    // Accept a single `keyword` (legacy single-keyword refresh) or `keywords[]`
+    // (orchestrator batch). Either way we resolve to a deduped list (cap 5).
+    const rawKeywords: string[] = Array.isArray(body.keywords)
+      ? body.keywords
+      : (body.keyword ? [body.keyword] : [])
+    const keywords = [...new Set(rawKeywords.map((k: string) => (k || '').trim()).filter(Boolean))].slice(0, 5)
+    const singleKeyword = keywords.length === 1 ? keywords[0] : null
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
 
-    if (!keyword) {
+    if (keywords.length === 0) {
       // Return suggested keywords from business profile if user has none yet
       const companyKeywords: string[] = ctx.company?.keywords || []
       const suggestedKeywords = businessProfile?.primaryKeywords?.filter(
@@ -138,19 +201,19 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-    // Per-keyword cache check
-    if (!force) {
+    // Per-keyword cache check (only for a single, non-forced refresh).
+    if (singleKeyword && !force) {
       const { data: company } = await ctx.supabase
         .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
       const existing = company?.keyword_trends as Record<string, any> | null
-      const kwData = existing?.[keyword]
+      const kwData = existing?.[singleKeyword]
       if (kwData?.fetchedAt) {
         const age = Date.now() - new Date(kwData.fetchedAt).getTime()
         if (age < CACHE_MS) {
-          console.log(`[generate-keyword-trends] cache hit for "${keyword}", age:`, Math.round(age / 3600000), 'h')
+          console.log(`[generate-keyword-trends] cache hit for "${singleKeyword}", age:`, Math.round(age / 3600000), 'h')
           await cost.flush()
           return NextResponse.json({
-            success: true, keyword, cached: true,
+            success: true, keyword: singleKeyword, cached: true,
             trends: kwData.israel || kwData.trends || [],
             israel: kwData.israel || kwData.trends || [],
             world: kwData.world || [],
@@ -163,66 +226,97 @@ export async function POST(request: Request) {
 
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
-    // Run Israel, World searches and Gemini related queries in parallel
-    const [israelTrends, worldTrends, geminiData] = await Promise.all([
-      fetchTrendsForRegion(keyword, 'israel', cost, geoContext),
-      fetchTrendsForRegion(keyword, 'world', cost, geoContext),
-      fetchRelatedQueriesFromGemini(keyword, cost),
-    ])
+    // ── Build a stored entry per keyword ─────────────────────────────────────
+    // Default: ONE DataForSEO Google Trends call for ALL keywords (real data,
+    // ~$0.002 total, ZERO xAI calls). Fall back to the legacy Grok path only if
+    // DataForSEO fails (or KEYWORD_TRENDS_PROVIDER=grok).
+    const built: Record<string, any> = {}
 
-    // Merge with existing keyword_trends in companies table
-    const { data: company } = await ctx.supabase
-      .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
+    if (PROVIDER === 'dataforseo') {
+      const t0 = Date.now()
+      const res = await fetchGoogleTrends(keywords, { months: 12 })
+      cost.add({ provider: 'dataforseo', model: 'google_trends_explore', webSearch: true, ms: Date.now() - t0 })
 
-    const existing = (company?.keyword_trends && typeof company.keyword_trends === 'object')
-      ? company.keyword_trends
-      : {}
-
-    // Guard: if this scan produced no trends for the keyword but we already have
-    // data for it, keep the existing key untouched (don't overwrite with empties).
-    const existingKey: any = (existing as any)[keyword]
-    const existingKeyCount = Array.isArray(existingKey?.israel) ? existingKey.israel.length
-      : Array.isArray(existingKey?.trends) ? existingKey.trends.length : 0
-    const newKeyCount = (israelTrends?.length ?? 0) + (worldTrends?.length ?? 0)
-
-    if (existingKeyCount > 0 && newKeyCount === 0) {
-      console.log(`[keyword_trends] "${keyword}" returned empty — keeping existing ${existingKeyCount} trends`)
-      await cost.flush()
-      return NextResponse.json({
-        success: true, keyword, kept_existing: true,
-        israel: existingKey?.israel ?? existingKey?.trends ?? [],
-        world: existingKey?.world ?? [],
-      })
+      if (res.ok && res.keywords.length > 0) {
+        // Match each requested keyword back to its returned series (case-insensitive).
+        for (const kw of keywords) {
+          const match = res.keywords.find(k => k.keyword?.toLowerCase() === kw.toLowerCase()) ?? null
+          if (match && match.series.some(p => typeof p.value === 'number')) {
+            built[kw] = trendToStored(match)
+          }
+        }
+        console.log(`[keyword_trends] DataForSEO: ${Object.keys(built).length}/${keywords.length} keywords with real data`)
+      } else {
+        console.warn(`[keyword_trends] DataForSEO failed (${res.error ?? 'no_data'}) — falling back to Grok`)
+        for (const kw of keywords) {
+          const stored = await fetchViaGrok(kw, cost, geoContext)
+          if (stored) built[kw] = stored
+        }
+      }
+    } else {
+      // Forced legacy provider.
+      for (const kw of keywords) {
+        const stored = await fetchViaGrok(kw, cost, geoContext)
+        if (stored) built[kw] = stored
+      }
     }
 
-    const updated = {
-      ...existing,
-      [keyword]: {
-        fetchedAt: new Date().toISOString(),
-        trends: israelTrends, // backward-compat alias
-        israel: israelTrends,
-        world: worldTrends,
-        related_queries: geminiData?.related_queries ?? [],
-        gemini_trend: geminiData?.trend ?? null,
-        gemini_confidence: geminiData?.confidence ?? null,
-      },
+    // ── Merge with existing, applying the keep-existing guard per keyword ─────
+    const { data: company } = await ctx.supabase
+      .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
+    const existing = (company?.keyword_trends && typeof company.keyword_trends === 'object')
+      ? { ...(company.keyword_trends as Record<string, any>) }
+      : {} as Record<string, any>
+
+    let updatedCount = 0
+    for (const kw of keywords) {
+      const fresh = built[kw]
+      if (fresh) {
+        existing[kw] = fresh
+        updatedCount++
+        continue
+      }
+      // No fresh data for this keyword — keep prior data if any (don't blank it).
+      const prior = existing[kw]
+      const priorCount = Array.isArray(prior?.israel) ? prior.israel.length
+        : Array.isArray(prior?.trends) ? prior.trends.length : 0
+      if (priorCount > 0) {
+        console.log(`[keyword_trends] "${kw}" returned empty — keeping existing ${priorCount} trends`)
+      }
     }
 
     const { error: saveError } = await ctx.supabase
-      .from('companies').update({ keyword_trends: updated }).eq('id', ctx.user.id)
+      .from('companies').update({ keyword_trends: existing }).eq('id', ctx.user.id)
 
     if (saveError) {
       console.error('keyword_trends save error:', saveError.code, saveError.message)
-      await cost.flush()
-      return NextResponse.json({
-        success: true, keyword,
-        trends: israelTrends, israel: israelTrends, world: worldTrends,
-        saveError: saveError.message,
-      })
     }
 
     await cost.flush()
-    return NextResponse.json({ success: true, keyword, trends: israelTrends, israel: israelTrends, world: worldTrends, related_queries: geminiData?.related_queries ?? [], gemini_trend: geminiData?.trend ?? null })
+
+    // Response shape: single-keyword refresh keeps the legacy flat shape the
+    // trends page reads; a batch call returns a summary.
+    if (singleKeyword) {
+      const stored = existing[singleKeyword] ?? {}
+      return NextResponse.json({
+        success: true, keyword: singleKeyword,
+        updated: updatedCount,
+        trends: stored.israel ?? stored.trends ?? [],
+        israel: stored.israel ?? stored.trends ?? [],
+        world: stored.world ?? [],
+        related_queries: stored.related_queries ?? [],
+        gemini_trend: stored.gemini_trend ?? null,
+        ...(saveError ? { saveError: saveError.message } : {}),
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      updated: updatedCount,
+      total: keywords.length,
+      keywords,
+      ...(saveError ? { saveError: saveError.message } : {}),
+    })
   } catch (e: any) {
     await cost?.flush()
     return NextResponse.json({ error: e?.message }, { status: 500 })

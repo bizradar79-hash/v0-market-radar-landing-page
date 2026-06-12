@@ -314,10 +314,9 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 4b. Keyword trends — TIME fix: the 5 keyword fetches are independent, so run
-    // them CONCURRENTLY instead of one-by-one (cuts this module's wall-time ~5x).
-    // We honour the stop signal ONCE before firing the batch; the breaker's call
-    // counter still records this as a single module unit (one runStep).
+    // 4b. Keyword trends — REAL Google Trends via DataForSEO: all keywords go in
+    // ONE request (up to 5), so this module is a single ~$0.002 DataForSEO call
+    // instead of ~15 Grok web-search calls. Honour the stop signal once first.
     await runStep('keyword_trends', async () => {
       const keywords: string[] = ((company as any).keywords || []).slice(0, 5)
       if (keywords.length === 0) return { status: 'skipped', message: '0 keywords' }
@@ -326,24 +325,23 @@ export async function POST(request: Request) {
         'x-admin-user-id': companyId!,
         'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
       }
-      await assertScanAlive(adminDb, companyId!) // honour stop before the batch
-      const results = await Promise.all(keywords.map(async (keyword) => {
-        try {
-          const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
-            method: 'POST', headers: adminHeaders, body: JSON.stringify({ keyword, force: true }),
-          })
-          if (res.ok) { await res.json().catch(() => ({})); return { ok: true as const } }
+      await assertScanAlive(adminDb, companyId!) // honour stop before the call
+      try {
+        const res = await fetch(`${origin}/api/generate-keyword-trends?force=true`, {
+          method: 'POST', headers: adminHeaders, body: JSON.stringify({ keywords, force: true }),
+        })
+        if (!res.ok) {
           const errText = await res.text().catch(() => '')
-          return { ok: false as const, err: `"${keyword}": HTTP ${res.status} — ${errText.slice(0, 80)}` }
-        } catch (e: any) {
-          return { ok: false as const, err: `"${keyword}": ${e?.message}` }
+          return { status: 'error', message: `HTTP ${res.status} — ${errText.slice(0, 100)}` }
         }
-      }))
-      const kwUpdated = results.filter(r => r.ok).length
-      const kwErrors = results.filter(r => !r.ok).map(r => (r as any).err as string)
-      return {
-        status: kwUpdated > 0 ? 'ok' : 'error',
-        message: `${kwUpdated}/${keywords.length} keywords${kwErrors.length ? ` | ${kwErrors.slice(0, 2).join('; ')}` : ''}`,
+        const data = await res.json().catch(() => ({} as any))
+        const kwUpdated = data?.updated ?? 0
+        return {
+          status: kwUpdated > 0 ? 'ok' : 'error',
+          message: `${kwUpdated}/${keywords.length} keywords (DataForSEO)`,
+        }
+      } catch (e: any) {
+        return { status: 'error', message: e?.message ?? 'fetch failed' }
       }
     })
 

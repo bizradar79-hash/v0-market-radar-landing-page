@@ -91,6 +91,125 @@ export async function fetchSerp(keyword: string, opts?: {
   }
 }
 
+// ── Google Trends (explore/live) ─────────────────────────────────────────────
+// REAL Google Trends interest-over-time, up to 5 keywords in ONE request.
+// Replaces the old "ask Grok to guess trends" path: ~$0.002 vs ~15 Grok calls.
+
+const DFS_TRENDS_ENDPOINT = 'https://api.dataforseo.com/v3/keywords_data/google_trends/explore/live'
+
+export interface TrendPoint { date: string; value: number | null }
+export interface KeywordTrend {
+  keyword: string
+  trend: 'rising' | 'falling' | 'stable'
+  changePct: number          // recent-half avg vs earlier-half avg, %
+  series: TrendPoint[]        // interest-over-time, 0-100 (chronological)
+}
+export interface GoogleTrendsResult {
+  ok: boolean
+  keywords: KeywordTrend[]
+  error?: string
+}
+
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10) // YYYY-MM-DD
+}
+
+/** Classify a 0-100 series into rising/falling/stable by comparing halves. */
+function computeTrend(series: TrendPoint[]): { trend: 'rising' | 'falling' | 'stable'; changePct: number } {
+  const vals = series.map(p => p.value).filter((v): v is number => typeof v === 'number')
+  if (vals.length < 2) return { trend: 'stable', changePct: 0 }
+  const mid = Math.floor(vals.length / 2)
+  const earlier = vals.slice(0, mid)
+  const recent = vals.slice(mid)
+  const avg = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length
+  const earlierAvg = avg(earlier)
+  const recentAvg = avg(recent)
+  if (earlierAvg <= 0) {
+    // grew from a zero baseline → rising if any recent interest, else stable
+    return recentAvg > 0 ? { trend: 'rising', changePct: 100 } : { trend: 'stable', changePct: 0 }
+  }
+  const changePct = ((recentAvg - earlierAvg) / earlierAvg) * 100
+  const trend = changePct > 10 ? 'rising' : changePct < -10 ? 'falling' : 'stable'
+  return { trend, changePct: Math.round(changePct) }
+}
+
+/**
+ * Fetch REAL Google Trends interest-over-time for up to 5 keywords in ONE call.
+ * Israel / Hebrew, last 12 months, web search. Returns per-keyword series + a
+ * rising/falling/stable classification. Returns { ok:false, error } on failure
+ * so callers can fall back (e.g. to the legacy Grok path).
+ */
+export async function fetchGoogleTrends(keywords: string[], opts?: {
+  locationName?: string
+  languageName?: string
+  months?: number
+}): Promise<GoogleTrendsResult> {
+  const auth = authHeader()
+  if (!auth) return { ok: false, keywords: [], error: 'missing_credentials' }
+
+  const kws = [...new Set(keywords.map(k => (k || '').trim()).filter(Boolean))].slice(0, 5)
+  if (kws.length === 0) return { ok: false, keywords: [], error: 'no_keywords' }
+
+  const to = new Date()
+  const from = new Date(to.getTime() - (opts?.months ?? 12) * 30 * 24 * 60 * 60 * 1000)
+
+  const task = [{
+    keywords: kws,
+    location_name: opts?.locationName ?? 'Israel',
+    language_name: opts?.languageName ?? 'Hebrew',
+    date_from: ymd(from),
+    date_to: ymd(to),
+    type: 'web',
+    item_types: ['google_trends_graph'],
+  }]
+
+  try {
+    const res = await fetch(DFS_TRENDS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+      body: JSON.stringify(task),
+    })
+    const data = await res.json().catch(() => ({}))
+
+    const statusCode = data?.status_code
+    const taskNode = data?.tasks?.[0]
+    const taskStatus = taskNode?.status_code
+    if (!res.ok || statusCode == null) {
+      return { ok: false, keywords: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
+    }
+    if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      const msg = taskNode?.status_message ?? data?.status_message ?? `status_${taskStatus}`
+      return { ok: false, keywords: [], error: `task_${taskStatus}: ${msg}` }
+    }
+
+    const result = taskNode?.result?.[0]
+    // The result's keywords array defines the column order of each point's values[].
+    const resultKeywords: string[] = Array.isArray(result?.keywords) ? result.keywords : kws
+    const items: any[] = Array.isArray(result?.items) ? result.items : []
+    const graph = items.find((it: any) => it?.type === 'google_trends_graph')
+    const points: any[] = Array.isArray(graph?.data) ? graph.data : []
+
+    if (points.length === 0) {
+      return { ok: false, keywords: [], error: 'no_trends_data' }
+    }
+
+    const out: KeywordTrend[] = resultKeywords.map((kw, idx) => {
+      const series: TrendPoint[] = points.map((pt: any) => {
+        const v = Array.isArray(pt?.values) ? pt.values[idx] : null
+        // DataForSEO uses a date_from per bucket; fall back to a timestamp.
+        const date = pt?.date_from || (pt?.timestamp ? new Date(pt.timestamp * 1000).toISOString().slice(0, 10) : '')
+        return { date, value: typeof v === 'number' ? v : null }
+      })
+      const { trend, changePct } = computeTrend(series)
+      return { keyword: kw, trend, changePct, series }
+    })
+
+    return { ok: true, keywords: out }
+  } catch (e: any) {
+    return { ok: false, keywords: [], error: e?.message ?? 'fetch_failed' }
+  }
+}
+
 /**
  * Normalise a URL/domain down to its registrable base (handles .co.il etc).
  */

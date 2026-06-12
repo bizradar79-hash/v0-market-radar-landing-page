@@ -47,6 +47,8 @@ const DEFAULT_PRICING: Record<string, ModelPrice> = {
   // Groq (llama) — very cheap; tracked for completeness.
   'llama-3.3-70b-versatile': { inUSDPerM: 0.59, outUSDPerM: 0.79, webSearchUSD: 0 },
   'llama-3.1-8b-instant': { inUSDPerM: 0.05, outUSDPerM: 0.08, webSearchUSD: 0 },
+  // DataForSEO Google Trends explore/live — flat ~$0.002 per call, no tokens.
+  'google_trends_explore': { inUSDPerM: 0, outUSDPerM: 0, webSearchUSD: 0.002 },
 }
 
 function loadPricing(): Record<string, ModelPrice> {
@@ -73,7 +75,7 @@ function priceFor(model: string): ModelPrice {
   return key ? PRICING[key] : FALLBACK_PRICE
 }
 
-export type AiProvider = 'xai' | 'openai' | 'gemini' | 'groq'
+export type AiProvider = 'xai' | 'openai' | 'gemini' | 'groq' | 'dataforseo'
 
 export interface CostEntry {
   module: string
