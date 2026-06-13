@@ -16,64 +16,68 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-// ─── Keyword trend types (unchanged) ────────────────────────────────────────
-interface KwTrend {
-  phrase: string
-  trend: string
-  reason: string
-  trend_data: { week: string; value: number }[]
-}
-interface TrendWindow {
-  window: string          // '7d' | '30d' | '90d' | '12m'
-  label?: string          // '7 ימים' ...
-  direction: string       // 'rising' | 'falling' | 'stable'
-  directionHe?: string    // 'עולה' | 'יורד' | 'יציב'
-  changePct: number
-}
-interface RelatedQuery { query: string; value?: number | null }
+// ─── Keyword-intelligence types (Google Ads search volume) ──────────────────
+interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
 interface KwData {
+  keyword?: string
+  searchVolume: number          // avg monthly searches (absolute)
+  avgVolume12mo: number
+  changePct: number             // recent 3-mo vs prior 3-mo
+  direction: string             // 'rising' | 'falling' | 'stable'
+  directionHe?: string
+  cpc: number
+  competition: string           // LOW | MEDIUM | HIGH | UNKNOWN
+  competitionHe?: string
+  competitionIndex?: number
+  lowData?: boolean
+  monthlySeries: number[]       // chronological, for sparkline
+  related: StoredRelated[]
+  insight: string
   fetchedAt: string
-  trends?: KwTrend[]
-  israel?: KwTrend[]
-  world?: KwTrend[]
-  windows?: TrendWindow[]
-  related?: RelatedQuery[]
-  related_queries?: string[]
-  gemini_trend?: string | null
-  gemini_confidence?: number | null
+  provider?: string
 }
 interface KwTrendsMap { [keyword: string]: KwData }
 
-const WINDOW_LABEL: Record<string, string> = {
-  '7d': '7 ימים', '30d': '30 יום', '90d': '90 יום', '12m': '12 חודשים',
+function fmtVol(n: number): string {
+  if (!n || n < 1) return '—'
+  return n.toLocaleString('he-IL')
 }
 
-// Compact per-window cell: label + arrow + %change. 30d is the default highlight.
-function WindowBreakdown({ windows }: { windows: TrendWindow[] }) {
-  if (!windows || windows.length === 0) return null
-  const order = ['7d', '30d', '90d', '12m']
-  const sorted = [...windows].sort((a, b) => order.indexOf(a.window) - order.indexOf(b.window))
+// Volume sparkline over the 12-month monthly series (absolute numbers).
+function VolumeSparkline({ data, direction }: { data: number[]; direction: string }) {
+  if (!data || data.length < 2) return null
+  const W = 220, H = 44
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const range = max - min || 1
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W
+    const y = H - 4 - ((v - min) / range) * (H - 8)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  const lastX = W
+  const lastY = H - 4 - ((data[data.length - 1] - min) / range) * (H - 8)
+  const color = direction === 'rising' ? '#16a34a' : direction === 'falling' ? '#dc2626' : '#9ca3af'
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-      {sorted.map(w => {
-        const up = w.direction === 'rising' || w.directionHe === 'עולה'
-        const down = w.direction === 'falling' || w.directionHe === 'יורד'
-        const color = up ? 'text-green-700 bg-green-50 border-green-200'
-          : down ? 'text-red-700 bg-red-50 border-red-200'
-          : 'text-yellow-700 bg-yellow-50 border-yellow-200'
-        const highlight = w.window === '30d' ? 'ring-1 ring-primary/40' : ''
-        const sign = w.changePct > 0 ? '+' : ''
-        return (
-          <div key={w.window} className={`rounded-lg border px-2 py-1.5 text-center ${color} ${highlight}`}>
-            <div className="text-[10px] font-medium opacity-80">{w.label || WINDOW_LABEL[w.window] || w.window}</div>
-            <div className="flex items-center justify-center gap-0.5 mt-0.5">
-              {up ? <TrendingUp className="h-3 w-3" /> : down ? <TrendingDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-              <span className="text-xs font-semibold tabular-nums">{sign}{w.changePct}%</span>
-            </div>
-          </div>
-        )
-      })}
-    </div>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block" height={H}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={lastX.toFixed(1)} cy={lastY.toFixed(1)} r="3" fill={color} />
+    </svg>
+  )
+}
+
+// Headline trend arrow + real %, or "נתון נמוך" when the baseline is too small.
+function TrendArrow({ direction, changePct, lowData }: { direction: string; changePct: number; lowData?: boolean }) {
+  const up = direction === 'rising'
+  const down = direction === 'falling'
+  const color = up ? 'text-green-600' : down ? 'text-red-600' : 'text-yellow-600'
+  const Icon = up ? TrendingUp : down ? TrendingDown : Minus
+  const sign = changePct > 0 ? '+' : ''
+  return (
+    <span className={`inline-flex items-center gap-1 text-sm font-semibold tabular-nums ${color}`}>
+      <Icon className="h-4 w-4" />
+      {lowData || changePct === 0 ? (up || down ? '—' : '0%') : `${sign}${changePct}%`}
+    </span>
   )
 }
 
@@ -204,7 +208,6 @@ export default function TrendsPage() {
   const [showAddKw, setShowAddKw] = useState(false)
   const [newKw, setNewKw] = useState('')
   const [addingKw, setAddingKw] = useState(false)
-  const [activeTab, setActiveTab] = useState<Record<string, 'israel' | 'world'>>({})
   const [infoExpanded, setInfoExpanded] = useState(false)
 
   const [selectedTrend, setSelectedTrend] = useState<{
@@ -278,19 +281,12 @@ export default function TrendsPage() {
         body: JSON.stringify({ keyword: kw, force: true }),
       })
       const data = await res.json()
-      if (data.success) {
-        setKwTrends(prev => ({ ...prev, [kw]: {
-          fetchedAt: new Date().toISOString(),
-          trends: data.trends,
-          israel: data.israel,
-          world: data.world,
-          windows: data.windows || [],
-          related: data.related || [],
-          related_queries: data.related_queries || [],
-          gemini_trend: data.gemini_trend || null,
-        } }))
+      if (data.success && data.data) {
+        setKwTrends(prev => ({ ...prev, [kw]: data.data as KwData }))
         setExpanded(prev => new Set([...prev, kw]))
         toast({ title: `טרנדים עודכנו: ${kw}` })
+      } else if (data.success) {
+        toast({ title: `אין נתונים עבור: ${kw}` })
       }
     } catch {}
     finally { setLoadingKw(prev => ({ ...prev, [kw]: false })) }
@@ -411,8 +407,8 @@ export default function TrendsPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between border-b pb-2">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">טרנדים לפי מילות מפתח</h2>
-            <p className="text-sm text-muted-foreground">מה טרנדי השבוע עבור כל מילת מפתח ({keywords.length}/8)</p>
+            <h2 className="text-lg font-semibold text-foreground">מודיעין מילות מפתח</h2>
+            <p className="text-sm text-muted-foreground">נפח חיפוש חודשי, מגמה והזדמנויות לכל מילת מפתח ({keywords.length}/8)</p>
           </div>
           {keywords.length < 8 && !showAddKw ? (
             <Button variant="outline" size="sm" onClick={() => setShowAddKw(true)}>
@@ -431,8 +427,8 @@ export default function TrendsPage() {
             </button>
           ) : (
             <div className="space-y-1 text-blue-800 leading-relaxed">
-              <p>מבוסס על Google Trends — נתוני חיפוש אמיתיים</p>
-              <p>המגמות מחושבות מנתוני Google Trends בישראל לאורך 12 חודשים, ומפולחות לטווחים (7 ימים / 30 יום / 90 יום / 12 חודשים) כדי להראות אם הביטוי בעלייה, ירידה או יציב — בנוסף למונחי חיפוש קשורים פופולריים.</p>
+              <p>מבוסס על Google Ads · DataForSEO — נפחי חיפוש אמיתיים</p>
+              <p>לכל מילת מפתח מוצג נפח החיפוש החודשי הממוצע בישראל (מספרים אמיתיים, לא גרף יחסי), מגמה לפי 3 חודשים אחרונים מול הקודמים, עלות קליק (CPC), רמת תחרות, היסטוריית 12 חודשים, וביטויי לונג-טייל קשורים עם נפח החיפוש שלהם.</p>
               <button onClick={() => setInfoExpanded(false)} className="text-blue-700 font-medium mt-1 block">
                 הצג פחות ▲
               </button>
@@ -463,7 +459,7 @@ export default function TrendsPage() {
             <Hash className="h-10 w-10 text-muted-foreground/40" />
             <div>
               <p className="font-medium text-foreground">עדיין לא הוגדרו מילות מפתח</p>
-              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח — AI יחפש מה טרנדי עכשיו</p>
+              <p className="text-sm text-muted-foreground mt-1">הוסף מילת מפתח — נציג נפח חיפוש חודשי ומגמה אמיתיים</p>
             </div>
             <Button onClick={() => setShowAddKw(true)}>
               <Plus className="ml-2 h-4 w-4" />הוסף מילת מפתח
@@ -471,119 +467,124 @@ export default function TrendsPage() {
           </div>
         )}
 
-        {/* Per-keyword expandable cards */}
+        {/* Per-keyword actionable cards (hierarchical) */}
         {keywords.map(kw => {
           const kwData = kwTrends[kw]
           const isExpanded = expanded.has(kw)
           const isLoading = !!loadingKw[kw]
-          const israelTrends = kwData?.israel || kwData?.trends || []
-          const worldTrends = kwData?.world || []
-          const hasWorld = worldTrends.length > 0
-          const tab = activeTab[kw] || 'israel'
-          const displayTrends = tab === 'world' ? worldTrends : israelTrends
+          const isRising = kwData?.direction === 'rising' && !kwData?.lowData
+          const hasVolume = !!kwData && kwData.searchVolume > 0
 
           return (
-            <Card key={kw}>
+            <Card key={kw} className={isRising ? 'border-green-200 shadow-sm' : ''}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <button onClick={() => toggleExpanded(kw)} className="flex items-center gap-2 text-right">
-                    <Hash className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="font-medium">{kw}</span>
-                    {kwData && <span className="text-xs text-muted-foreground">{israelTrends.length} טרנדים</span>}
-                    <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                {/* HEADLINE */}
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    onClick={() => kwData && toggleExpanded(kw)}
+                    className="flex items-start gap-2 text-right min-w-0 flex-1"
+                    disabled={!kwData}
+                  >
+                    <Hash className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold truncate">{kw}</span>
+                        {kwData && (
+                          <TrendArrow direction={kwData.direction} changePct={kwData.changePct} lowData={kwData.lowData} />
+                        )}
+                        {isRising && (
+                          <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px] shrink-0">🔥 הזדמנות</Badge>
+                        )}
+                      </div>
+                      {kwData && (
+                        <div className="flex items-baseline gap-1.5 mt-1">
+                          <span className="text-2xl font-bold tabular-nums text-foreground leading-none">{fmtVol(kwData.searchVolume)}</span>
+                          <span className="text-xs text-muted-foreground">חיפושים / חודש</span>
+                        </div>
+                      )}
+                    </div>
                   </button>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                    {kwData && (
+                      <button onClick={() => toggleExpanded(kw)} className="p-1 text-muted-foreground" title={isExpanded ? 'הסתר' : 'פרטים'}>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </button>
+                    )}
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeKeyword(kw)} title="הסר מילת מפתח">
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
 
+                {/* INSIGHT line */}
+                {kwData?.insight && (
+                  <p className="mt-2 text-sm text-foreground/90 leading-relaxed">{kwData.insight}</p>
+                )}
+
                 {isLoading && (
                   <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>מחפש טרנדים בישראל ובעולם...</span>
+                    <span>טוען נפחי חיפוש מ-Google Ads...</span>
                   </div>
                 )}
 
+                {/* EXPANDABLE detail */}
                 {isExpanded && !isLoading && kwData && (
-                  <div className="mt-3">
-                    {hasWorld && (
-                      <div className="flex border-b mb-3">
-                        {(['israel', 'world'] as const).map(t => (
-                          <button
-                            key={t}
-                            onClick={() => setActiveTab(prev => ({ ...prev, [kw]: t }))}
-                            className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-                          >
-                            {t === 'israel' ? '🇮🇱 ישראל' : '🌍 עולם'}
-                          </button>
-                        ))}
+                  <div className="mt-3 pt-3 border-t space-y-3">
+                    {/* Stat row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg bg-muted/40 p-2 text-center">
+                        <div className="text-[10px] text-muted-foreground">ממוצע 12 חו׳</div>
+                        <div className="text-sm font-semibold tabular-nums">{fmtVol(kwData.avgVolume12mo)}</div>
                       </div>
-                    )}
-                    {/* Multi-window breakdown (7d / 30d / 90d / 12m) — only for
-                        the Israel tab, where DataForSEO windows apply. */}
-                    {tab === 'israel' && kwData.windows && kwData.windows.length > 0 && (
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-muted-foreground mb-1.5">מגמה לפי טווח זמן</p>
-                        <WindowBreakdown windows={kwData.windows} />
+                      <div className="rounded-lg bg-muted/40 p-2 text-center">
+                        <div className="text-[10px] text-muted-foreground">CPC (עלות קליק)</div>
+                        <div className="text-sm font-semibold tabular-nums">{kwData.cpc > 0 ? `$${kwData.cpc.toFixed(2)}` : '—'}</div>
                       </div>
-                    )}
-                    <div className="space-y-2">
-                      {displayTrends.map((t, i) => (
-                        <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
-                          <div className="flex-1 min-w-0 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-medium text-sm">{t.phrase}</span>
-                              {getMomentumBadge(t.trend)}
-                            </div>
-                            <p className="text-xs text-muted-foreground">{t.reason}</p>
-                          </div>
-                          {t.trend_data?.length >= 2 && (
-                            <button
-                              onClick={() => setSelectedTrend({ name: t.phrase, direction: t.trend, trend_data: t.trend_data })}
-                              className="cursor-pointer hover:opacity-80 transition-opacity"
-                              title="לחץ לפרטים"
-                            >
-                              <Sparkline data={t.trend_data} trend={t.trend} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                      <div className="rounded-lg bg-muted/40 p-2 text-center">
+                        <div className="text-[10px] text-muted-foreground">תחרות</div>
+                        <div className="text-sm font-semibold">{kwData.competitionHe || '—'}</div>
+                      </div>
                     </div>
-                    {/* Related sub-keywords — prefer the new related[] (with relative
-                        popularity); fall back to legacy related_queries string[]. */}
-                    {(() => {
-                      const related = (kwData.related && kwData.related.length > 0)
-                        ? kwData.related
-                        : (kwData.related_queries || []).map(q => ({ query: q, value: null as number | null }))
-                      if (related.length === 0) return null
-                      return (
-                        <div className="mt-3 pt-3 border-t space-y-1.5">
-                          <p className="text-xs font-semibold text-muted-foreground">מונחים קשורים</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {related.slice(0, 3).map((r, i) => (
-                              <span key={i} className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground border">
-                                {r.query}
-                                {typeof r.value === 'number' && (
-                                  <span className="text-[10px] text-muted-foreground tabular-nums">{r.value}</span>
-                                )}
-                              </span>
-                            ))}
-                          </div>
+
+                    {/* 12-month sparkline */}
+                    {kwData.monthlySeries && kwData.monthlySeries.length >= 2 && (
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground mb-1">היסטוריית חיפוש (12 חודשים)</p>
+                        <VolumeSparkline data={kwData.monthlySeries} direction={kwData.direction} />
+                      </div>
+                    )}
+
+                    {/* Related long-tail suggestions with real volume */}
+                    {kwData.related && kwData.related.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground">ביטויים קשורים (לונג-טייל)</p>
+                        <div className="space-y-1">
+                          {kwData.related.slice(0, 3).map((r, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs">
+                              <span className="truncate">{r.keyword}</span>
+                              <span className="text-muted-foreground tabular-nums shrink-0">{fmtVol(r.searchVolume)}/חו׳</span>
+                            </div>
+                          ))}
                         </div>
-                      )
-                    })()}
-                    <p className="text-xs text-muted-foreground pt-2">
-                      עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
+                      </div>
+                    )}
+
+                    {!hasVolume && (
+                      <p className="text-xs text-amber-600">נתוני נפח חיפוש לא זמינים עבור מילה זו (הוערך לפי AI).</p>
+                    )}
+
+                    <p className="text-xs text-muted-foreground">
+                      מקור: Google Ads · DataForSEO · עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
                     </p>
                   </div>
                 )}
 
-                {isExpanded && !isLoading && !kwData && (
-                  <div className="mt-3 text-center py-4 text-sm text-muted-foreground">
-                    <p>טרנדים עבור &quot;{kw}&quot; יטענו בסנכרון הבא</p>
+                {!isLoading && !kwData && (
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <p className="text-sm text-muted-foreground">נתונים עבור &quot;{kw}&quot; יטענו בסנכרון הבא</p>
+                    <Button variant="outline" size="sm" onClick={() => refreshKeywordTrend(kw)}>טען עכשיו</Button>
                   </div>
                 )}
               </CardContent>

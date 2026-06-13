@@ -314,11 +314,12 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.trends?.length ?? 0} trends` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 4b. Keyword trends — REAL Google Trends via DataForSEO: all keywords go in
-    // ONE request (up to 5), so this module is a single ~$0.002 DataForSEO call
-    // instead of ~15 Grok web-search calls. Honour the stop signal once first.
+    // 4b. Keyword trends — REAL Google Ads search volume via DataForSEO: all
+    // keywords go in ONE search-volume request + one suggestions call each, so
+    // this module is a handful of cheap DataForSEO calls instead of ~15 Grok
+    // web-search calls. Honour the stop signal once first.
     await runStep('keyword_trends', async () => {
-      const keywords: string[] = ((company as any).keywords || []).slice(0, 5)
+      const keywords: string[] = ((company as any).keywords || []).slice(0, 8)
       if (keywords.length === 0) return { status: 'skipped', message: '0 keywords' }
       const adminHeaders = {
         'Content-Type': 'application/json',
@@ -338,7 +339,7 @@ export async function POST(request: Request) {
         const kwUpdated = data?.updated ?? 0
         return {
           status: kwUpdated > 0 ? 'ok' : 'error',
-          message: `${kwUpdated}/${keywords.length} keywords (DataForSEO)`,
+          message: `${kwUpdated}/${keywords.length} keywords (Google Ads · DataForSEO)`,
         }
       } catch (e: any) {
         return { status: 'error', message: e?.message ?? 'fetch failed' }

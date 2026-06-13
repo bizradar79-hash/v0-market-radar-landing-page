@@ -305,6 +305,193 @@ export async function fetchRelatedQueries(keyword: string, opts?: {
   }
 }
 
+// ── Google Ads search volume (REAL monthly numbers) ──────────────────────────
+// Replaces Google Trends for keyword intelligence. Returns ABSOLUTE monthly
+// search volume per keyword (not a relative 0-100 graph), CPC, competition, and
+// a 12-month history — so low-volume Hebrew B2B terms keep real numbers instead
+// of being dropped from a normalised multi-term comparison.
+
+const DFS_ADS_VOLUME_ENDPOINT = 'https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live'
+const DFS_KW_SUGGESTIONS_ENDPOINT = 'https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_suggestions/live'
+
+export type Competition = 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN'
+export interface MonthlySearch { year: number; month: number; searchVolume: number }
+export interface SearchVolumeEntry {
+  keyword: string
+  searchVolume: number          // DataForSEO `search_volume` (avg monthly)
+  avgVolume12mo: number          // mean of monthly_searches
+  cpc: number                    // avg CPC in account currency (USD by default)
+  competition: Competition       // LOW / MEDIUM / HIGH advertiser competition
+  competitionIndex: number       // 0-100
+  changePct: number              // recent 3-mo avg vs prior 3-mo avg
+  direction: TrendDirection
+  lowData: boolean               // prior 3-mo avg < 10 → % unreliable
+  monthlySearches: MonthlySearch[] // chronological (oldest → newest)
+}
+export interface SearchVolumeResult { ok: boolean; keywords: SearchVolumeEntry[]; error?: string }
+
+function normCompetition(c: any): Competition {
+  const s = typeof c === 'string' ? c.toUpperCase() : ''
+  return s === 'LOW' || s === 'MEDIUM' || s === 'HIGH' ? s : 'UNKNOWN'
+}
+
+/** Recent 3-mo avg vs prior 3-mo avg. Guards a tiny prior baseline (<10) so we
+ *  never emit a meaningless % off near-zero volume. */
+function volumeChange(monthly: MonthlySearch[]): { changePct: number; direction: TrendDirection; lowData: boolean } {
+  const vals = monthly.map(m => m.searchVolume).filter(v => typeof v === 'number')
+  if (vals.length < 4) return { changePct: 0, direction: 'stable', lowData: vals.length === 0 }
+  const recent = vals.slice(-3)
+  const prior = vals.slice(-6, -3)
+  if (prior.length === 0) return { changePct: 0, direction: 'stable', lowData: true }
+  const recentAvg = avg(recent)
+  const priorAvg = avg(prior)
+  if (priorAvg < 10) {
+    // Too little prior volume for a reliable %; report direction by raw delta only.
+    const dir: TrendDirection = recentAvg > priorAvg + 5 ? 'rising' : recentAvg < priorAvg - 5 ? 'falling' : 'stable'
+    return { changePct: 0, direction: dir, lowData: true }
+  }
+  const changePct = Math.round(((recentAvg - priorAvg) / priorAvg) * 100)
+  const direction: TrendDirection = changePct > 10 ? 'rising' : changePct < -10 ? 'falling' : 'stable'
+  return { changePct, direction, lowData: false }
+}
+
+/**
+ * Fetch REAL monthly search volume for a batch of keywords in ONE call.
+ * Israel / Hebrew. Google Ads accepts up to 700 keywords per request. Returns
+ * { ok:false, error } on failure so the route can fall back to Grok.
+ */
+export async function fetchSearchVolume(keywords: string[], opts?: {
+  locationName?: string
+  languageName?: string
+}): Promise<SearchVolumeResult> {
+  const auth = authHeader()
+  if (!auth) return { ok: false, keywords: [], error: 'missing_credentials' }
+
+  const kws = [...new Set(keywords.map(k => (k || '').trim()).filter(Boolean))].slice(0, 700)
+  if (kws.length === 0) return { ok: false, keywords: [], error: 'no_keywords' }
+
+  const task = [{
+    keywords: kws,
+    location_name: opts?.locationName ?? 'Israel',
+    language_name: opts?.languageName ?? 'Hebrew',
+    search_partners: false,
+  }]
+
+  try {
+    const res = await fetch(DFS_ADS_VOLUME_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+      body: JSON.stringify(task),
+    })
+    const data = await res.json().catch(() => ({}))
+    const taskNode = data?.tasks?.[0]
+    const taskStatus = taskNode?.status_code
+    if (!res.ok || data?.status_code == null) {
+      return { ok: false, keywords: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
+    }
+    if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      return { ok: false, keywords: [], error: `task_${taskStatus}: ${taskNode?.status_message ?? 'err'}` }
+    }
+
+    const rows: any[] = Array.isArray(taskNode?.result) ? taskNode.result : []
+    const out: SearchVolumeEntry[] = rows
+      .filter((r: any) => r && r.keyword)
+      .map((r: any) => {
+        const monthly: MonthlySearch[] = (Array.isArray(r.monthly_searches) ? r.monthly_searches : [])
+          .map((m: any) => ({
+            year: Number(m.year) || 0,
+            month: Number(m.month) || 0,
+            searchVolume: Number(m.search_volume) || 0,
+          }))
+          .sort((a: MonthlySearch, b: MonthlySearch) => (a.year * 12 + a.month) - (b.year * 12 + b.month))
+        const avgVolume12mo = monthly.length ? Math.round(avg(monthly.map(m => m.searchVolume))) : 0
+        const { changePct, direction, lowData } = volumeChange(monthly)
+        return {
+          keyword: String(r.keyword),
+          searchVolume: Number(r.search_volume) || 0,
+          avgVolume12mo,
+          cpc: Number(r.cpc) || 0,
+          competition: normCompetition(r.competition),
+          competitionIndex: Number(r.competition_index) || 0,
+          changePct,
+          direction,
+          lowData,
+          monthlySearches: monthly,
+        }
+      })
+
+    if (out.length === 0) return { ok: false, keywords: [], error: 'no_volume_data' }
+    return { ok: true, keywords: out }
+  } catch (e: any) {
+    return { ok: false, keywords: [], error: e?.message ?? 'fetch_failed' }
+  }
+}
+
+export interface KeywordSuggestion { keyword: string; searchVolume: number; cpc: number }
+
+/**
+ * Fetch real long-tail KEYWORD SUGGESTIONS for ONE seed keyword via DataForSEO
+ * Labs. Israel / Hebrew, ordered by search volume desc. Returns the top
+ * `limit` (default 3) suggestions (excluding the seed itself) with real volume.
+ */
+export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
+  locationName?: string
+  languageName?: string
+  limit?: number
+}): Promise<{ ok: boolean; suggestions: KeywordSuggestion[]; error?: string }> {
+  const auth = authHeader()
+  if (!auth) return { ok: false, suggestions: [], error: 'missing_credentials' }
+  const seed = (seedKeyword || '').trim()
+  if (!seed) return { ok: false, suggestions: [], error: 'no_keyword' }
+  const limit = opts?.limit ?? 3
+
+  const task = [{
+    keyword: seed,
+    location_name: opts?.locationName ?? 'Israel',
+    language_name: opts?.languageName ?? 'Hebrew',
+    include_seed_keyword: false,
+    limit: 30,
+    order_by: ['keyword_info.search_volume,desc'],
+  }]
+
+  try {
+    const res = await fetch(DFS_KW_SUGGESTIONS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+      body: JSON.stringify(task),
+    })
+    const data = await res.json().catch(() => ({}))
+    const taskNode = data?.tasks?.[0]
+    const taskStatus = taskNode?.status_code
+    if (!res.ok || data?.status_code == null) {
+      return { ok: false, suggestions: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
+    }
+    if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      return { ok: false, suggestions: [], error: `task_${taskStatus}: ${taskNode?.status_message ?? 'err'}` }
+    }
+
+    const items: any[] = Array.isArray(taskNode?.result?.[0]?.items) ? taskNode.result[0].items : []
+    const seedLc = seed.toLowerCase()
+    const suggestions: KeywordSuggestion[] = items
+      .map((it: any) => {
+        const kw = String(it?.keyword ?? it?.keyword_data?.keyword ?? '').trim()
+        const info = it?.keyword_info ?? it?.keyword_data?.keyword_info ?? {}
+        return {
+          keyword: kw,
+          searchVolume: Number(info.search_volume) || 0,
+          cpc: Number(info.cpc) || 0,
+        }
+      })
+      .filter((s: KeywordSuggestion) => s.keyword && s.keyword.toLowerCase() !== seedLc)
+      .sort((a: KeywordSuggestion, b: KeywordSuggestion) => b.searchVolume - a.searchVolume)
+      .slice(0, limit)
+
+    return { ok: true, suggestions }
+  } catch (e: any) {
+    return { ok: false, suggestions: [], error: e?.message ?? 'fetch_failed' }
+  }
+}
+
 /**
  * Normalise a URL/domain down to its registrable base (handles .co.il etc).
  */

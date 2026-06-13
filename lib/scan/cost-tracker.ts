@@ -57,6 +57,11 @@ const DEFAULT_PRICING: Record<string, ModelPrice> = {
   'llama-3.1-8b-instant': { inUSDPerM: 0.05, outUSDPerM: 0.08, webSearchUSD: 0 },
   // DataForSEO Google Trends explore/live — flat ~$0.002 per call, no tokens.
   'google_trends_explore': { inUSDPerM: 0, outUSDPerM: 0, webSearchUSD: 0.002 },
+  // DataForSEO Google Ads search volume (live) — flat ~$0.003 per call (covers a
+  // whole keyword batch), no tokens.
+  'google_ads_search_volume': { inUSDPerM: 0, outUSDPerM: 0, webSearchUSD: 0.003 },
+  // DataForSEO Labs keyword suggestions (live) — flat ~$0.011 per call, no tokens.
+  'keyword_suggestions': { inUSDPerM: 0, outUSDPerM: 0, webSearchUSD: 0.011 },
 }
 
 function loadPricing(): Record<string, ModelPrice> {

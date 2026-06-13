@@ -2,147 +2,111 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
-import { fetchGoogleTrends, fetchRelatedQueries, type KeywordTrend, type RelatedQuery } from '@/lib/seo/dataforseo'
+import {
+  fetchSearchVolume, fetchKeywordSuggestions,
+  type SearchVolumeEntry, type KeywordSuggestion, type Competition,
+} from '@/lib/seo/dataforseo'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const MAX_KEYWORDS = 8
 
-// Default to REAL Google Trends via DataForSEO. Set KEYWORD_TRENDS_PROVIDER=grok
-// to force the legacy AI-guess path (kept as a fallback when DataForSEO fails).
+// Default to REAL Google Ads search volume via DataForSEO. Set
+// KEYWORD_TRENDS_PROVIDER=grok to force the legacy AI-guess fallback path.
 const PROVIDER = (process.env.KEYWORD_TRENDS_PROVIDER || 'dataforseo').toLowerCase()
 
-// ── Stored shape ─────────────────────────────────────────────────────────────
-// The trends UI renders one row per item in `israel` with { phrase, trend(Hebrew),
-// reason, trend_data:[{week,value}] }. DataForSEO produces exactly one row per
-// keyword (its own 12-month interest series), and now also a multi-window
-// breakdown (windows[]) + related sub-keywords (related[]).
-const TREND_HE: Record<KeywordTrend['trend'], string> = {
-  rising: 'עולה', falling: 'יורד', stable: 'יציב',
-}
-const WINDOW_HE: Record<string, string> = {
-  '7d': '7 ימים', '30d': '30 יום', '90d': '90 יום', '12m': '12 חודשים',
+// ── Stored shape (new keyword-intelligence model) ────────────────────────────
+// Each keyword maps to ONE actionable record built from absolute Google Ads
+// numbers — NOT a relative 0-100 Trends graph. The trends UI reads these fields
+// directly (volume headline, real %, CPC/competition, 12-mo sparkline, related
+// long-tails, and a template-generated Hebrew insight line).
+type Direction = 'rising' | 'falling' | 'stable'
+const DIRECTION_HE: Record<Direction, string> = { rising: 'עולה', falling: 'יורד', stable: 'יציב' }
+const COMPETITION_HE: Record<Competition, string> = {
+  LOW: 'נמוכה', MEDIUM: 'בינונית', HIGH: 'גבוהה', UNKNOWN: '—',
 }
 
-function trendToStored(kt: KeywordTrend, related: RelatedQuery[]) {
-  const trend_data = kt.series
-    .filter(p => typeof p.value === 'number')
-    .map(p => ({ week: p.date, value: p.value as number }))
-  const w30 = kt.windows.find(w => w.window === '30d') ?? { direction: kt.trend, changePct: kt.changePct }
-  const sign = w30.changePct > 0 ? '+' : ''
-  // Localised windows for direct UI consumption.
-  const windows = kt.windows.map(w => ({
-    window: w.window,
-    label: WINDOW_HE[w.window] ?? w.window,
-    direction: w.direction,                 // english rising/falling/stable
-    directionHe: TREND_HE[w.direction],     // עולה/יורד/יציב
-    changePct: w.changePct,
-  }))
-  const israel = [{
-    phrase: kt.keyword,
-    trend: TREND_HE[w30.direction], // default-highlight = 30d
-    reason: `שינוי ב-30 יום: ${sign}${w30.changePct}% (Google Trends)`,
-    trend_data,
-  }]
+const LOW_VOLUME = 30
+const HIGH_VOLUME = 500
+
+interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
+interface StoredKeyword {
+  keyword: string
+  searchVolume: number
+  avgVolume12mo: number
+  changePct: number
+  direction: Direction
+  directionHe: string
+  cpc: number
+  competition: Competition
+  competitionHe: string
+  competitionIndex: number
+  lowData: boolean
+  monthlySeries: number[]        // chronological, for the sparkline
+  related: StoredRelated[]
+  insight: string
+  fetchedAt: string
+  provider: 'dataforseo' | 'grok'
+}
+
+/** Template-based Hebrew insight (NO AI) — pure logic from the numbers. */
+function buildInsight(e: { keyword: string; searchVolume: number; changePct: number; direction: Direction; lowData: boolean }): string {
+  const kw = e.keyword
+  const v = e.searchVolume
+  const fmt = v.toLocaleString('he-IL')
+  const sign = e.changePct > 0 ? '+' : ''
+  if (v < LOW_VOLUME) {
+    return `ℹ️ '${kw}' נפח חיפוש נמוך (${fmt}/חודש) — נישה ממוקדת.`
+  }
+  if (e.direction === 'rising' && !e.lowData) {
+    return `📈 '${kw}' בעלייה (${sign}${e.changePct}%) עם ${fmt} חיפושים בחודש — שווה להגביר נוכחות.`
+  }
+  if (e.direction === 'falling' && !e.lowData) {
+    return `📉 '${kw}' בירידה (${e.changePct}%) — ייתכן שהביקוש נחלש.`
+  }
+  if (v >= HIGH_VOLUME) {
+    return `➡️ '${kw}' יציב עם ביקוש גבוה (${fmt}/חודש) — בסיס קבוע.`
+  }
+  return `➡️ '${kw}' יציב עם ${fmt} חיפושים בחודש.`
+}
+
+function volumeToStored(e: SearchVolumeEntry, suggestions: KeywordSuggestion[]): StoredKeyword {
   return {
+    keyword: e.keyword,
+    searchVolume: e.searchVolume,
+    avgVolume12mo: e.avgVolume12mo,
+    changePct: e.changePct,
+    direction: e.direction,
+    directionHe: DIRECTION_HE[e.direction],
+    cpc: Math.round(e.cpc * 100) / 100,
+    competition: e.competition,
+    competitionHe: COMPETITION_HE[e.competition],
+    competitionIndex: e.competitionIndex,
+    lowData: e.lowData,
+    monthlySeries: e.monthlySearches.map(m => m.searchVolume),
+    related: suggestions.map(s => ({ keyword: s.keyword, searchVolume: s.searchVolume, cpc: Math.round(s.cpc * 100) / 100 })),
+    insight: buildInsight(e),
     fetchedAt: new Date().toISOString(),
-    trends: israel,       // backward-compat alias
-    israel,
-    world: [],
-    windows,
-    related,              // [{ query, value }]
-    related_queries: related.map(r => r.query), // legacy string[] alias
-    gemini_trend: w30.direction, // english rising/falling/stable
-    gemini_confidence: null,
-    provider: 'dataforseo' as const,
-    changePct: w30.changePct,
+    provider: 'dataforseo',
   }
 }
 
-// ── Legacy Grok/Gemini path (fallback only) ──────────────────────────────────
-async function fetchTrendsForRegion(keyword: string, region: 'israel' | 'world', cost: ScanCostCollector, geoContext?: string): Promise<any[]> {
-  const geoText = region === 'israel'
-    ? `בישראל. חפש מה אנשים מחפשים יותר בגוגל, מה עולה ברשתות חברתיות, מה מדוברים בפורומים ישראליים`
-    : `בעולם (לא מוגבל לישראל). חפש מגמות גלובליות בגוגל, רשתות חברתיות, ופורומים בינלאומיים`
-
-  const prompt = `מצא את 5 הנושאים והביטויים שהיו הכי טרנדיים בשבוע האחרון וקשורים למילה: '${keyword}' ${geoText}.${geoContext ? `\nהקשר עסקי: ${geoContext}` : ''}
-
-גם תן לכל ביטוי 4 נקודות נתונים שבועיות (ערך 0-100 עוצמה) עבור 4 השבועות האחרונים מהישן לחדש.
-
-החזר JSON בלבד:
-[{"phrase": "", "trend": "עולה/יורד/יציב", "reason": "למה זה טרנדי עכשיו", "trend_data": [{"week": "W1", "value": 40}, {"week": "W2", "value": 55}, {"week": "W3", "value": 70}, {"week": "W4", "value": 85}]}]
-
-CRITICAL: Output ONLY a raw JSON array. No markdown. Start with [ and end with ]`
-
-  const t0 = Date.now()
-  let response: Response
-  try {
-    response = await fetch('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        input: [{ role: 'user', content: prompt }],
-        tools: [{ type: 'web_search' }],
-      }),
-    })
-  } catch (err: any) {
-    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
-    console.error(`[keyword-trends ${region}] xAI fetch failed:`, err?.message)
-    return []
-  }
-
-  let data: any
-  try {
-    data = await response.json()
-  } catch (err: any) {
-    cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
-    console.error(`[keyword-trends ${region}] non-JSON xAI body (status ${response.status}):`, err?.message)
-    return []
-  }
-  cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
-  if (!response.ok || !data.output) return []
-
-  const text = data.output
-    .filter((item: any) => item.type === 'message')
-    .flatMap((item: any) => item.content)
-    .filter((c: any) => c.type === 'output_text')
-    .map((c: any) => c.text)
-    .join('')
-
-  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const start = clean.indexOf('[')
-  const end = clean.lastIndexOf(']')
-  if (start === -1 || end <= start) return []
-
-  try {
-    const list = JSON.parse(clean.slice(start, end + 1))
-    return Array.isArray(list) ? list.slice(0, 5) : []
-  } catch {
-    return []
-  }
-}
-
-async function fetchRelatedQueriesFromGemini(keyword: string, cost: ScanCostCollector): Promise<{
-  trend: string; related_queries: string[]; confidence: number
-} | null> {
+// ── Legacy Grok fallback (used only when DataForSEO fails) ────────────────────
+// Produces a degraded record in the SAME stored shape: no real volume, direction
+// from Gemini's guess, related from Gemini's related_queries. The UI shows it
+// with volume omitted rather than a relative graph.
+async function fetchViaGrokFallback(keyword: string, cost: ScanCostCollector): Promise<StoredKeyword | null> {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return null
-  const prompt = `בהתבסס על ידע שלך על גוגל טרנדס, מה הטרנד של מילת המפתח "${keyword}" בישראל בשבועות האחרונים? עולה, יורד או יציב? ומה 5 ביטויי החיפוש הקשורים הכי פופולריים לה כרגע? החזר JSON: {"trend": "rising", "related_queries": ["", "", "", "", ""], "confidence": 80}`
+  const prompt = `בהתבסס על ידע שלך, מה הטרנד של מילת המפתח "${keyword}" בישראל? עולה (rising), יורד (falling) או יציב (stable)? ומה 3 ביטויי החיפוש הקשורים הפופולריים לה? החזר JSON: {"trend": "rising", "related_queries": ["", "", ""]}`
   const t0 = Date.now()
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) },
     )
     const data = await res.json()
     cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
@@ -151,32 +115,29 @@ async function fetchRelatedQueriesFromGemini(keyword: string, cost: ScanCostColl
     const s = clean.indexOf('{'); const e = clean.lastIndexOf('}')
     if (s === -1 || e <= s) return null
     const parsed = JSON.parse(clean.slice(s, e + 1))
+    const dir: Direction = parsed.trend === 'rising' || parsed.trend === 'falling' ? parsed.trend : 'stable'
+    const related: StoredRelated[] = (Array.isArray(parsed.related_queries) ? parsed.related_queries : [])
+      .slice(0, 3).map((q: any) => ({ keyword: String(q), searchVolume: 0 }))
     return {
-      trend: parsed.trend || 'stable',
-      related_queries: Array.isArray(parsed.related_queries) ? parsed.related_queries.slice(0, 5) : [],
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 70,
+      keyword,
+      searchVolume: 0,
+      avgVolume12mo: 0,
+      changePct: 0,
+      direction: dir,
+      directionHe: DIRECTION_HE[dir],
+      cpc: 0,
+      competition: 'UNKNOWN',
+      competitionHe: COMPETITION_HE.UNKNOWN,
+      competitionIndex: 0,
+      lowData: true,
+      monthlySeries: [],
+      related,
+      insight: `ℹ️ '${keyword}' — הערכת מגמה (${DIRECTION_HE[dir]}) ללא נתוני נפח חיפוש.`,
+      fetchedAt: new Date().toISOString(),
+      provider: 'grok',
     }
-  } catch { return null }
-}
-
-/** Legacy per-keyword Grok+Gemini path. Returns the stored object or null. */
-async function fetchViaGrok(keyword: string, cost: ScanCostCollector, geoContext?: string) {
-  const [israelTrends, worldTrends, geminiData] = await Promise.all([
-    fetchTrendsForRegion(keyword, 'israel', cost, geoContext),
-    fetchTrendsForRegion(keyword, 'world', cost, geoContext),
-    fetchRelatedQueriesFromGemini(keyword, cost),
-  ])
-  const count = (israelTrends?.length ?? 0) + (worldTrends?.length ?? 0)
-  if (count === 0) return null
-  return {
-    fetchedAt: new Date().toISOString(),
-    trends: israelTrends,
-    israel: israelTrends,
-    world: worldTrends,
-    related_queries: geminiData?.related_queries ?? [],
-    gemini_trend: geminiData?.trend ?? null,
-    gemini_confidence: geminiData?.confidence ?? null,
-    provider: 'grok' as const,
+  } catch {
+    return null
   }
 }
 
@@ -192,103 +153,80 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}))
     const force = forceQuery || body.force === true
 
-    // Accept a single `keyword` (legacy single-keyword refresh) or `keywords[]`
-    // (orchestrator batch). Either way we resolve to a deduped list (cap 5).
+    // Accept a single `keyword` (UI refresh) or `keywords[]` (orchestrator batch).
     const rawKeywords: string[] = Array.isArray(body.keywords)
       ? body.keywords
       : (body.keyword ? [body.keyword] : [])
-    const keywords = [...new Set(rawKeywords.map((k: string) => (k || '').trim()).filter(Boolean))].slice(0, 5)
+    const keywords = [...new Set(rawKeywords.map((k: string) => (k || '').trim()).filter(Boolean))].slice(0, MAX_KEYWORDS)
     const singleKeyword = keywords.length === 1 ? keywords[0] : null
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
 
     if (keywords.length === 0) {
-      // Return suggested keywords from business profile if user has none yet
       const companyKeywords: string[] = ctx.company?.keywords || []
       const suggestedKeywords = businessProfile?.primaryKeywords?.filter(
         k => !companyKeywords.includes(k)
       ).slice(0, 10) || []
       await cost.flush()
-      return NextResponse.json({
-        error: 'Missing keyword',
-        suggested_keywords: suggestedKeywords,
-      }, { status: 400 })
+      return NextResponse.json({ error: 'Missing keyword', suggested_keywords: suggestedKeywords }, { status: 400 })
     }
 
-    // Per-keyword cache check (only for a single, non-forced refresh).
+    // Per-keyword cache (single, non-forced refresh only).
     if (singleKeyword && !force) {
       const { data: company } = await ctx.supabase
         .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
       const existing = company?.keyword_trends as Record<string, any> | null
-      const kwData = existing?.[singleKeyword]
+      const kwData = existing?.[singleKeyword] as StoredKeyword | undefined
       if (kwData?.fetchedAt) {
         const age = Date.now() - new Date(kwData.fetchedAt).getTime()
         if (age < CACHE_MS) {
-          console.log(`[generate-keyword-trends] cache hit for "${singleKeyword}", age:`, Math.round(age / 3600000), 'h')
           await cost.flush()
-          return NextResponse.json({
-            success: true, keyword: singleKeyword, cached: true,
-            trends: kwData.israel || kwData.trends || [],
-            israel: kwData.israel || kwData.trends || [],
-            world: kwData.world || [],
-            windows: (kwData as any).windows || [],
-            related: (kwData as any).related || [],
-            related_queries: (kwData as any).related_queries || [],
-            gemini_trend: (kwData as any).gemini_trend || null,
-          })
+          return NextResponse.json({ success: true, keyword: singleKeyword, cached: true, data: kwData })
         }
       }
     }
 
-    const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
-
-    // ── Build a stored entry per keyword ─────────────────────────────────────
-    // Default: ONE DataForSEO Google Trends call for ALL keywords (real data,
-    // ~$0.002 total, ZERO xAI calls). Fall back to the legacy Grok path only if
+    // ── Build a stored record per keyword ────────────────────────────────────
+    // Default: ONE Google Ads search-volume call for ALL keywords + one keyword-
+    // suggestions call per keyword. Fall back to the Grok/Gemini guess only if
     // DataForSEO fails (or KEYWORD_TRENDS_PROVIDER=grok).
-    const built: Record<string, any> = {}
+    const built: Record<string, StoredKeyword> = {}
 
     if (PROVIDER === 'dataforseo') {
       const t0 = Date.now()
-      const res = await fetchGoogleTrends(keywords, { months: 12 })
-      cost.add({ provider: 'dataforseo', model: 'google_trends_explore', webSearch: true, ms: Date.now() - t0 })
+      const vol = await fetchSearchVolume(keywords)
+      cost.add({ provider: 'dataforseo', model: 'google_ads_search_volume', webSearch: true, ms: Date.now() - t0 })
 
-      if (res.ok && res.keywords.length > 0) {
-        // Fetch related sub-keywords — one call per keyword (queries_list accepts
-        // a single keyword). Up to 5 extra DataForSEO calls (~$0.002 each), all
-        // tagged module 'keyword_trends'. Run in parallel; each is best-effort.
-        const relatedByKw = new Map<string, RelatedQuery[]>()
+      if (vol.ok && vol.keywords.length > 0) {
+        // Real long-tail suggestions — one Labs call per keyword, in parallel.
+        const suggByKw = new Map<string, KeywordSuggestion[]>()
         await Promise.all(keywords.map(async (kw) => {
-          const rt0 = Date.now()
-          const rq = await fetchRelatedQueries(kw, { months: 12, limit: 3 })
-          cost!.add({ provider: 'dataforseo', model: 'google_trends_explore', webSearch: true, ms: Date.now() - rt0 })
-          relatedByKw.set(kw, rq.ok ? rq.related : [])
+          const st0 = Date.now()
+          const sg = await fetchKeywordSuggestions(kw, { limit: 3 })
+          cost!.add({ provider: 'dataforseo', model: 'keyword_suggestions', webSearch: true, ms: Date.now() - st0 })
+          suggByKw.set(kw, sg.ok ? sg.suggestions : [])
         }))
 
-        // Match each requested keyword back to its returned series (case-insensitive).
         for (const kw of keywords) {
-          const match = res.keywords.find(k => k.keyword?.toLowerCase() === kw.toLowerCase()) ?? null
-          if (match && match.series.some(p => typeof p.value === 'number')) {
-            built[kw] = trendToStored(match, relatedByKw.get(kw) ?? [])
-          }
+          const match = vol.keywords.find(k => k.keyword?.toLowerCase() === kw.toLowerCase()) ?? null
+          if (match) built[kw] = volumeToStored(match, suggByKw.get(kw) ?? [])
         }
-        console.log(`[keyword_trends] DataForSEO: ${Object.keys(built).length}/${keywords.length} keywords with real data + related`)
+        console.log(`[keyword_trends] DataForSEO Google Ads: ${Object.keys(built).length}/${keywords.length} keywords with real volume`)
       } else {
-        console.warn(`[keyword_trends] DataForSEO failed (${res.error ?? 'no_data'}) — falling back to Grok`)
-        for (const kw of keywords) {
-          const stored = await fetchViaGrok(kw, cost, geoContext)
+        console.warn(`[keyword_trends] DataForSEO failed (${vol.error ?? 'no_data'}) — falling back to Grok/Gemini`)
+        await Promise.all(keywords.map(async (kw) => {
+          const stored = await fetchViaGrokFallback(kw, cost!)
           if (stored) built[kw] = stored
-        }
+        }))
       }
     } else {
-      // Forced legacy provider.
-      for (const kw of keywords) {
-        const stored = await fetchViaGrok(kw, cost, geoContext)
+      await Promise.all(keywords.map(async (kw) => {
+        const stored = await fetchViaGrokFallback(kw, cost!)
         if (stored) built[kw] = stored
-      }
+      }))
     }
 
-    // ── Merge with existing, applying the keep-existing guard per keyword ─────
+    // ── Merge with existing, keep-existing guard per keyword ──────────────────
     const { data: company } = await ctx.supabase
       .from('companies').select('keyword_trends').eq('id', ctx.user.id).single()
     const existing = (company?.keyword_trends && typeof company.keyword_trends === 'object')
@@ -301,49 +239,27 @@ export async function POST(request: Request) {
       if (fresh) {
         existing[kw] = fresh
         updatedCount++
-        continue
-      }
-      // No fresh data for this keyword — keep prior data if any (don't blank it).
-      const prior = existing[kw]
-      const priorCount = Array.isArray(prior?.israel) ? prior.israel.length
-        : Array.isArray(prior?.trends) ? prior.trends.length : 0
-      if (priorCount > 0) {
-        console.log(`[keyword_trends] "${kw}" returned empty — keeping existing ${priorCount} trends`)
+      } else if (existing[kw]) {
+        console.log(`[keyword_trends] "${kw}" returned empty — keeping existing record`)
       }
     }
 
     const { error: saveError } = await ctx.supabase
       .from('companies').update({ keyword_trends: existing }).eq('id', ctx.user.id)
-
-    if (saveError) {
-      console.error('keyword_trends save error:', saveError.code, saveError.message)
-    }
+    if (saveError) console.error('keyword_trends save error:', saveError.code, saveError.message)
 
     await cost.flush()
 
-    // Response shape: single-keyword refresh keeps the legacy flat shape the
-    // trends page reads; a batch call returns a summary.
     if (singleKeyword) {
-      const stored = existing[singleKeyword] ?? {}
       return NextResponse.json({
-        success: true, keyword: singleKeyword,
-        updated: updatedCount,
-        trends: stored.israel ?? stored.trends ?? [],
-        israel: stored.israel ?? stored.trends ?? [],
-        world: stored.world ?? [],
-        windows: stored.windows ?? [],
-        related: stored.related ?? [],
-        related_queries: stored.related_queries ?? [],
-        gemini_trend: stored.gemini_trend ?? null,
+        success: true, keyword: singleKeyword, updated: updatedCount,
+        data: existing[singleKeyword] ?? null,
         ...(saveError ? { saveError: saveError.message } : {}),
       })
     }
 
     return NextResponse.json({
-      success: true,
-      updated: updatedCount,
-      total: keywords.length,
-      keywords,
+      success: true, updated: updatedCount, total: keywords.length, keywords,
       ...(saveError ? { saveError: saveError.message } : {}),
     })
   } catch (e: any) {
