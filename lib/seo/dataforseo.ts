@@ -98,10 +98,19 @@ export async function fetchSerp(keyword: string, opts?: {
 const DFS_TRENDS_ENDPOINT = 'https://api.dataforseo.com/v3/keywords_data/google_trends/explore/live'
 
 export interface TrendPoint { date: string; value: number | null }
+export type TrendDirection = 'rising' | 'falling' | 'stable'
+export type TrendWindowKey = '7d' | '30d' | '90d' | '12m'
+export interface TrendWindow {
+  window: TrendWindowKey
+  direction: TrendDirection
+  changePct: number
+}
+export interface RelatedQuery { query: string; value: number | null }
 export interface KeywordTrend {
   keyword: string
-  trend: 'rising' | 'falling' | 'stable'
-  changePct: number          // recent-half avg vs earlier-half avg, %
+  trend: TrendDirection      // default-highlight window (30d) direction
+  changePct: number          // default-highlight window (30d) %change
+  windows: TrendWindow[]      // 7d / 30d / 90d / 12m breakdown
   series: TrendPoint[]        // interest-over-time, 0-100 (chronological)
 }
 export interface GoogleTrendsResult {
@@ -114,30 +123,52 @@ function ymd(d: Date): string {
   return d.toISOString().slice(0, 10) // YYYY-MM-DD
 }
 
-/** Classify a 0-100 series into rising/falling/stable by comparing halves. */
-function computeTrend(series: TrendPoint[]): { trend: 'rising' | 'falling' | 'stable'; changePct: number } {
-  const vals = series.map(p => p.value).filter((v): v is number => typeof v === 'number')
-  if (vals.length < 2) return { trend: 'stable', changePct: 0 }
-  const mid = Math.floor(vals.length / 2)
-  const earlier = vals.slice(0, mid)
-  const recent = vals.slice(mid)
-  const avg = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length
-  const earlierAvg = avg(earlier)
-  const recentAvg = avg(recent)
+const avg = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length
+
+/**
+ * Classify the change over a window of the last `days` of the series.
+ * Slices the (weekly) 12-month series client-side — no extra API call. Splits
+ * the window's points into earlier/recent halves and compares averages. If the
+ * window is too short to hold ≥2 points (e.g. 7d on weekly data), it widens to
+ * the last 2 valid points so short windows still yield a direction.
+ */
+function windowChange(series: TrendPoint[], days: number): { direction: TrendDirection; changePct: number } {
+  const allValid = series.filter((p): p is { date: string; value: number } => typeof p.value === 'number')
+  if (allValid.length < 2) return { direction: 'stable', changePct: 0 }
+
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  let pts = allValid.filter(p => p.date && new Date(p.date).getTime() >= cutoff)
+  if (pts.length < 2) pts = allValid.slice(-2) // widen so short windows still compare
+
+  const vals = pts.map(p => p.value)
+  const mid = Math.max(1, Math.floor(vals.length / 2))
+  const earlierAvg = avg(vals.slice(0, mid))
+  const recentAvg = avg(vals.slice(mid))
   if (earlierAvg <= 0) {
-    // grew from a zero baseline → rising if any recent interest, else stable
-    return recentAvg > 0 ? { trend: 'rising', changePct: 100 } : { trend: 'stable', changePct: 0 }
+    return recentAvg > 0 ? { direction: 'rising', changePct: 100 } : { direction: 'stable', changePct: 0 }
   }
-  const changePct = ((recentAvg - earlierAvg) / earlierAvg) * 100
-  const trend = changePct > 10 ? 'rising' : changePct < -10 ? 'falling' : 'stable'
-  return { trend, changePct: Math.round(changePct) }
+  const changePct = Math.round(((recentAvg - earlierAvg) / earlierAvg) * 100)
+  const direction: TrendDirection = changePct > 10 ? 'rising' : changePct < -10 ? 'falling' : 'stable'
+  return { direction, changePct }
+}
+
+const WINDOW_DEFS: Array<{ key: TrendWindowKey; days: number }> = [
+  { key: '7d', days: 7 },
+  { key: '30d', days: 30 },
+  { key: '90d', days: 90 },
+  { key: '12m', days: 365 },
+]
+
+function computeWindows(series: TrendPoint[]): TrendWindow[] {
+  return WINDOW_DEFS.map(({ key, days }) => ({ window: key, ...windowChange(series, days) }))
 }
 
 /**
  * Fetch REAL Google Trends interest-over-time for up to 5 keywords in ONE call.
- * Israel / Hebrew, last 12 months, web search. Returns per-keyword series + a
- * rising/falling/stable classification. Returns { ok:false, error } on failure
- * so callers can fall back (e.g. to the legacy Grok path).
+ * Israel / Hebrew, last 12 months, web search. For each keyword returns a 0-100
+ * series PLUS a multi-window breakdown (7d/30d/90d/12m), all sliced client-side
+ * from the single response. Returns { ok:false, error } on failure so callers
+ * can fall back (e.g. to the legacy Grok path).
  */
 export async function fetchGoogleTrends(keywords: string[], opts?: {
   locationName?: string
@@ -200,13 +231,77 @@ export async function fetchGoogleTrends(keywords: string[], opts?: {
         const date = pt?.date_from || (pt?.timestamp ? new Date(pt.timestamp * 1000).toISOString().slice(0, 10) : '')
         return { date, value: typeof v === 'number' ? v : null }
       })
-      const { trend, changePct } = computeTrend(series)
-      return { keyword: kw, trend, changePct, series }
+      const windows = computeWindows(series)
+      const w30 = windows.find(w => w.window === '30d')! // default highlight
+      return { keyword: kw, trend: w30.direction, changePct: w30.changePct, windows, series }
     })
 
     return { ok: true, keywords: out }
   } catch (e: any) {
     return { ok: false, keywords: [], error: e?.message ?? 'fetch_failed' }
+  }
+}
+
+/**
+ * Fetch the top RELATED QUERIES for ONE keyword via Google Trends
+ * (google_trends_queries_list). One call per keyword (the queries list endpoint
+ * accepts a single keyword). Israel / Hebrew, last 12 months. Returns the top
+ * related sub-keywords with their relative popularity (0-100) when available.
+ */
+export async function fetchRelatedQueries(keyword: string, opts?: {
+  locationName?: string
+  languageName?: string
+  months?: number
+  limit?: number
+}): Promise<{ ok: boolean; related: RelatedQuery[]; error?: string }> {
+  const auth = authHeader()
+  if (!auth) return { ok: false, related: [], error: 'missing_credentials' }
+  const kw = (keyword || '').trim()
+  if (!kw) return { ok: false, related: [], error: 'no_keyword' }
+
+  const to = new Date()
+  const from = new Date(to.getTime() - (opts?.months ?? 12) * 30 * 24 * 60 * 60 * 1000)
+  const limit = opts?.limit ?? 3
+
+  const task = [{
+    keywords: [kw],
+    location_name: opts?.locationName ?? 'Israel',
+    language_name: opts?.languageName ?? 'Hebrew',
+    date_from: ymd(from),
+    date_to: ymd(to),
+    type: 'web',
+    item_types: ['google_trends_queries_list'],
+  }]
+
+  try {
+    const res = await fetch(DFS_TRENDS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': auth },
+      body: JSON.stringify(task),
+    })
+    const data = await res.json().catch(() => ({}))
+    const taskNode = data?.tasks?.[0]
+    const taskStatus = taskNode?.status_code
+    if (!res.ok || data?.status_code == null) {
+      return { ok: false, related: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
+    }
+    if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      return { ok: false, related: [], error: `task_${taskStatus}: ${taskNode?.status_message ?? 'err'}` }
+    }
+
+    const items: any[] = Array.isArray(taskNode?.result?.[0]?.items) ? taskNode.result[0].items : []
+    const ql = items.find((it: any) => it?.type === 'google_trends_queries_list')
+    const top: any[] = Array.isArray(ql?.data?.top) ? ql.data.top : []
+    const rising: any[] = Array.isArray(ql?.data?.rising) ? ql.data.rising : []
+    const src = top.length ? top : rising
+    const related: RelatedQuery[] = src
+      .filter((r: any) => r && (r.query || r.keyword))
+      .slice(0, limit)
+      .map((r: any) => ({ query: String(r.query ?? r.keyword), value: typeof r.value === 'number' ? r.value : null }))
+
+    return { ok: true, related }
+  } catch (e: any) {
+    return { ok: false, related: [], error: e?.message ?? 'fetch_failed' }
   }
 }
 

@@ -23,16 +23,59 @@ interface KwTrend {
   reason: string
   trend_data: { week: string; value: number }[]
 }
+interface TrendWindow {
+  window: string          // '7d' | '30d' | '90d' | '12m'
+  label?: string          // '7 ימים' ...
+  direction: string       // 'rising' | 'falling' | 'stable'
+  directionHe?: string    // 'עולה' | 'יורד' | 'יציב'
+  changePct: number
+}
+interface RelatedQuery { query: string; value?: number | null }
 interface KwData {
   fetchedAt: string
   trends?: KwTrend[]
   israel?: KwTrend[]
   world?: KwTrend[]
+  windows?: TrendWindow[]
+  related?: RelatedQuery[]
   related_queries?: string[]
   gemini_trend?: string | null
   gemini_confidence?: number | null
 }
 interface KwTrendsMap { [keyword: string]: KwData }
+
+const WINDOW_LABEL: Record<string, string> = {
+  '7d': '7 ימים', '30d': '30 יום', '90d': '90 יום', '12m': '12 חודשים',
+}
+
+// Compact per-window cell: label + arrow + %change. 30d is the default highlight.
+function WindowBreakdown({ windows }: { windows: TrendWindow[] }) {
+  if (!windows || windows.length === 0) return null
+  const order = ['7d', '30d', '90d', '12m']
+  const sorted = [...windows].sort((a, b) => order.indexOf(a.window) - order.indexOf(b.window))
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+      {sorted.map(w => {
+        const up = w.direction === 'rising' || w.directionHe === 'עולה'
+        const down = w.direction === 'falling' || w.directionHe === 'יורד'
+        const color = up ? 'text-green-700 bg-green-50 border-green-200'
+          : down ? 'text-red-700 bg-red-50 border-red-200'
+          : 'text-yellow-700 bg-yellow-50 border-yellow-200'
+        const highlight = w.window === '30d' ? 'ring-1 ring-primary/40' : ''
+        const sign = w.changePct > 0 ? '+' : ''
+        return (
+          <div key={w.window} className={`rounded-lg border px-2 py-1.5 text-center ${color} ${highlight}`}>
+            <div className="text-[10px] font-medium opacity-80">{w.label || WINDOW_LABEL[w.window] || w.window}</div>
+            <div className="flex items-center justify-center gap-0.5 mt-0.5">
+              {up ? <TrendingUp className="h-3 w-3" /> : down ? <TrendingDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+              <span className="text-xs font-semibold tabular-nums">{sign}{w.changePct}%</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 // ─── Industry trends types ───────────────────────────────────────────────────
 interface IndustryTrend {
@@ -241,6 +284,8 @@ export default function TrendsPage() {
           trends: data.trends,
           israel: data.israel,
           world: data.world,
+          windows: data.windows || [],
+          related: data.related || [],
           related_queries: data.related_queries || [],
           gemini_trend: data.gemini_trend || null,
         } }))
@@ -386,8 +431,8 @@ export default function TrendsPage() {
             </button>
           ) : (
             <div className="space-y-1 text-blue-800 leading-relaxed">
-              <p>מבוסס על Gemini AI — ניתוח גוגל טרנדס</p>
-              <p>הטרנדים מחושבים על ידי AI שסורק בזמן אמת חיפושים, פורומים, רשתות חברתיות וחדשות בישראל — ומזהה אילו ביטויים נמצאים בעלייה, ירידה או יציבים השבוע.</p>
+              <p>מבוסס על Google Trends — נתוני חיפוש אמיתיים</p>
+              <p>המגמות מחושבות מנתוני Google Trends בישראל לאורך 12 חודשים, ומפולחות לטווחים (7 ימים / 30 יום / 90 יום / 12 חודשים) כדי להראות אם הביטוי בעלייה, ירידה או יציב — בנוסף למונחי חיפוש קשורים פופולריים.</p>
               <button onClick={() => setInfoExpanded(false)} className="text-blue-700 font-medium mt-1 block">
                 הצג פחות ▲
               </button>
@@ -477,6 +522,14 @@ export default function TrendsPage() {
                         ))}
                       </div>
                     )}
+                    {/* Multi-window breakdown (7d / 30d / 90d / 12m) — only for
+                        the Israel tab, where DataForSEO windows apply. */}
+                    {tab === 'israel' && kwData.windows && kwData.windows.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs font-semibold text-muted-foreground mb-1.5">מגמה לפי טווח זמן</p>
+                        <WindowBreakdown windows={kwData.windows} />
+                      </div>
+                    )}
                     <div className="space-y-2">
                       {displayTrends.map((t, i) => (
                         <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
@@ -486,13 +539,6 @@ export default function TrendsPage() {
                               {getMomentumBadge(t.trend)}
                             </div>
                             <p className="text-xs text-muted-foreground">{t.reason}</p>
-                            {i === 0 && kwData.related_queries && kwData.related_queries.length > 0 && (
-                              <div className="flex flex-wrap gap-1 pt-1">
-                                {kwData.related_queries.map((q, qi) => (
-                                  <span key={qi} className="text-xs bg-muted text-muted-foreground rounded px-2 py-0.5 border">{q}</span>
-                                ))}
-                              </div>
-                            )}
                           </div>
                           {t.trend_data?.length >= 2 && (
                             <button
@@ -506,18 +552,29 @@ export default function TrendsPage() {
                         </div>
                       ))}
                     </div>
-                    {kwData.related_queries && kwData.related_queries.length > 0 && (
-                      <div className="mt-3 pt-3 border-t space-y-1.5">
-                        <p className="text-xs font-semibold text-muted-foreground">חיפושים קשורים — Gemini AI</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {kwData.related_queries.map((q, i) => (
-                            <span key={i} className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground border">
-                              {q}
-                            </span>
-                          ))}
+                    {/* Related sub-keywords — prefer the new related[] (with relative
+                        popularity); fall back to legacy related_queries string[]. */}
+                    {(() => {
+                      const related = (kwData.related && kwData.related.length > 0)
+                        ? kwData.related
+                        : (kwData.related_queries || []).map(q => ({ query: q, value: null as number | null }))
+                      if (related.length === 0) return null
+                      return (
+                        <div className="mt-3 pt-3 border-t space-y-1.5">
+                          <p className="text-xs font-semibold text-muted-foreground">מונחים קשורים</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {related.slice(0, 3).map((r, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground border">
+                                {r.query}
+                                {typeof r.value === 'number' && (
+                                  <span className="text-[10px] text-muted-foreground tabular-nums">{r.value}</span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )
+                    })()}
                     <p className="text-xs text-muted-foreground pt-2">
                       עודכן: {new Date(kwData.fetchedAt).toLocaleDateString('he-IL')}
                     </p>

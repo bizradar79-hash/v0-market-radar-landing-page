@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
-import { fetchGoogleTrends, type KeywordTrend } from '@/lib/seo/dataforseo'
+import { fetchGoogleTrends, fetchRelatedQueries, type KeywordTrend, type RelatedQuery } from '@/lib/seo/dataforseo'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -17,21 +17,33 @@ const PROVIDER = (process.env.KEYWORD_TRENDS_PROVIDER || 'dataforseo').toLowerCa
 // ── Stored shape ─────────────────────────────────────────────────────────────
 // The trends UI renders one row per item in `israel` with { phrase, trend(Hebrew),
 // reason, trend_data:[{week,value}] }. DataForSEO produces exactly one row per
-// keyword (its own 12-month interest series), so each keyword card shows a single
-// trend + sparkline of real Google Trends data.
+// keyword (its own 12-month interest series), and now also a multi-window
+// breakdown (windows[]) + related sub-keywords (related[]).
 const TREND_HE: Record<KeywordTrend['trend'], string> = {
   rising: 'עולה', falling: 'יורד', stable: 'יציב',
 }
+const WINDOW_HE: Record<string, string> = {
+  '7d': '7 ימים', '30d': '30 יום', '90d': '90 יום', '12m': '12 חודשים',
+}
 
-function trendToStored(kt: KeywordTrend) {
+function trendToStored(kt: KeywordTrend, related: RelatedQuery[]) {
   const trend_data = kt.series
     .filter(p => typeof p.value === 'number')
     .map(p => ({ week: p.date, value: p.value as number }))
-  const sign = kt.changePct > 0 ? '+' : ''
+  const w30 = kt.windows.find(w => w.window === '30d') ?? { direction: kt.trend, changePct: kt.changePct }
+  const sign = w30.changePct > 0 ? '+' : ''
+  // Localised windows for direct UI consumption.
+  const windows = kt.windows.map(w => ({
+    window: w.window,
+    label: WINDOW_HE[w.window] ?? w.window,
+    direction: w.direction,                 // english rising/falling/stable
+    directionHe: TREND_HE[w.direction],     // עולה/יורד/יציב
+    changePct: w.changePct,
+  }))
   const israel = [{
     phrase: kt.keyword,
-    trend: TREND_HE[kt.trend],
-    reason: `${sign}${kt.changePct}% ב-12 החודשים האחרונים (Google Trends)`,
+    trend: TREND_HE[w30.direction], // default-highlight = 30d
+    reason: `שינוי ב-30 יום: ${sign}${w30.changePct}% (Google Trends)`,
     trend_data,
   }]
   return {
@@ -39,11 +51,13 @@ function trendToStored(kt: KeywordTrend) {
     trends: israel,       // backward-compat alias
     israel,
     world: [],
-    related_queries: [],
-    gemini_trend: kt.trend, // english rising/falling/stable
+    windows,
+    related,              // [{ query, value }]
+    related_queries: related.map(r => r.query), // legacy string[] alias
+    gemini_trend: w30.direction, // english rising/falling/stable
     gemini_confidence: null,
     provider: 'dataforseo' as const,
-    changePct: kt.changePct,
+    changePct: w30.changePct,
   }
 }
 
@@ -217,6 +231,8 @@ export async function POST(request: Request) {
             trends: kwData.israel || kwData.trends || [],
             israel: kwData.israel || kwData.trends || [],
             world: kwData.world || [],
+            windows: (kwData as any).windows || [],
+            related: (kwData as any).related || [],
             related_queries: (kwData as any).related_queries || [],
             gemini_trend: (kwData as any).gemini_trend || null,
           })
@@ -238,14 +254,25 @@ export async function POST(request: Request) {
       cost.add({ provider: 'dataforseo', model: 'google_trends_explore', webSearch: true, ms: Date.now() - t0 })
 
       if (res.ok && res.keywords.length > 0) {
+        // Fetch related sub-keywords — one call per keyword (queries_list accepts
+        // a single keyword). Up to 5 extra DataForSEO calls (~$0.002 each), all
+        // tagged module 'keyword_trends'. Run in parallel; each is best-effort.
+        const relatedByKw = new Map<string, RelatedQuery[]>()
+        await Promise.all(keywords.map(async (kw) => {
+          const rt0 = Date.now()
+          const rq = await fetchRelatedQueries(kw, { months: 12, limit: 3 })
+          cost!.add({ provider: 'dataforseo', model: 'google_trends_explore', webSearch: true, ms: Date.now() - rt0 })
+          relatedByKw.set(kw, rq.ok ? rq.related : [])
+        }))
+
         // Match each requested keyword back to its returned series (case-insensitive).
         for (const kw of keywords) {
           const match = res.keywords.find(k => k.keyword?.toLowerCase() === kw.toLowerCase()) ?? null
           if (match && match.series.some(p => typeof p.value === 'number')) {
-            built[kw] = trendToStored(match)
+            built[kw] = trendToStored(match, relatedByKw.get(kw) ?? [])
           }
         }
-        console.log(`[keyword_trends] DataForSEO: ${Object.keys(built).length}/${keywords.length} keywords with real data`)
+        console.log(`[keyword_trends] DataForSEO: ${Object.keys(built).length}/${keywords.length} keywords with real data + related`)
       } else {
         console.warn(`[keyword_trends] DataForSEO failed (${res.error ?? 'no_data'}) — falling back to Grok`)
         for (const kw of keywords) {
@@ -304,6 +331,8 @@ export async function POST(request: Request) {
         trends: stored.israel ?? stored.trends ?? [],
         israel: stored.israel ?? stored.trends ?? [],
         world: stored.world ?? [],
+        windows: stored.windows ?? [],
+        related: stored.related ?? [],
         related_queries: stored.related_queries ?? [],
         gemini_trend: stored.gemini_trend ?? null,
         ...(saveError ? { saveError: saveError.message } : {}),
