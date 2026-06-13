@@ -35,9 +35,17 @@ export interface ModelPrice {
 }
 
 const DEFAULT_PRICING: Record<string, ModelPrice> = {
-  // xAI Grok — grok-4-fast-non-reasoning. Live Search ≈ $0.025 / source.
-  'grok-4-fast-non-reasoning': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.025 },
-  'grok-4-fast': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.025 },
+  // xAI Grok — grok-4-fast-non-reasoning.
+  // CALIBRATION (web_search surcharge): xAI bills Live Search at ~$0.025/SOURCE
+  // and a typical agentic web_search call consumes many sources, but the
+  // Responses API usually omits `num_sources_used`, so the tracker defaulted to
+  // 1 source/call and under-reported the search portion. A measured weekly scan
+  // came in at ~$0.86 real xAI vs ~$0.37 tracked (~2.3x under), with the entire
+  // gap on Grok web_search calls. Raising the per-call surcharge 0.025 → 0.065
+  // (~10 sources × $0.025, the dominant real cost) brings the tracker total in
+  // line. Tunable without redeploy via COST_PRICING_JSON.
+  'grok-4-fast-non-reasoning': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.065 },
+  'grok-4-fast': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.065 },
   // OpenAI — gpt-5-mini (GEO engine). web_search tool ≈ $0.01 / call.
   'gpt-5-mini': { inUSDPerM: 0.25, outUSDPerM: 2.00, webSearchUSD: 0.01 },
   'gpt-4o-mini': { inUSDPerM: 0.15, outUSDPerM: 0.60, webSearchUSD: 0.01 },

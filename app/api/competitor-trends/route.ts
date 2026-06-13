@@ -119,10 +119,16 @@ export async function POST(request: Request) {
     const companyActivity = (ctx.company?.business_profile as any)?.coreActivity || ctx.company?.description || ''
     const companyIndustry = ctx.company?.industry || ''
 
-    // Analyze up to 5 competitors in parallel
-    const top5 = competitors.slice(0, 5)
+    // COST: one web_search Grok call per competitor, so cap the count. Pick the
+    // highest-threat competitors first (each call keeps full per-competitor
+    // depth). Default 3 (was 5); tune via COMPETITOR_TRENDS_LIMIT without redeploy.
+    const limit = Math.max(1, Number(process.env.COMPETITOR_TRENDS_LIMIT) || 3)
+    const ranked = [...competitors].sort(
+      (a, b) => (Number(b?.threat_score) || 0) - (Number(a?.threat_score) || 0)
+    )
+    const topN = ranked.slice(0, limit)
     const results = await Promise.all(
-      top5.map(async (c) => {
+      topN.map(async (c) => {
         const analysis = await analyzeCompetitor(c.name, c.website || '', companyIndustry, companyActivity, cost!)
         return {
           competitor_name: c.name,
