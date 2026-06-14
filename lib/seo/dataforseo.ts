@@ -414,7 +414,7 @@ function volumeChange(monthly: MonthlySearch[]): { changePct: number; direction:
  */
 export async function fetchSearchVolume(keywords: string[], opts?: {
   locationName?: string
-  languageName?: string
+  languageCode?: string
 }): Promise<SearchVolumeResult> {
   const auth = authHeader()
   if (!auth) return { ok: false, keywords: [], error: 'missing_credentials' }
@@ -422,10 +422,13 @@ export async function fetchSearchVolume(keywords: string[], opts?: {
   const kws = [...new Set(keywords.map(k => (k || '').trim()).filter(Boolean))].slice(0, 700)
   if (kws.length === 0) return { ok: false, keywords: [], error: 'no_keywords' }
 
+  // NOTE: google_ads/search_volume/live REJECTS `language_name` with
+  // "task_40501: Invalid Field: 'language_name'". It only accepts `language_code`
+  // (e.g. 'he'). location_name 'Israel' IS accepted. Language is optional here.
   const task = [{
     keywords: kws,
     location_name: opts?.locationName ?? 'Israel',
-    language_name: opts?.languageName ?? 'Hebrew',
+    language_code: opts?.languageCode ?? 'he',
     search_partners: false,
   }]
 
@@ -500,7 +503,7 @@ export interface KeywordSuggestion { keyword: string; searchVolume: number; cpc:
  */
 export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   locationName?: string
-  languageName?: string
+  languageCode?: string
   limit?: number
 }): Promise<{ ok: boolean; suggestions: KeywordSuggestion[]; error?: string }> {
   const auth = authHeader()
@@ -509,10 +512,12 @@ export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   if (!seed) return { ok: false, suggestions: [], error: 'no_keyword' }
   const limit = opts?.limit ?? 3
 
+  // Align with fetchSearchVolume: use `language_code` ('he') rather than
+  // `language_name`. Labs accepts both, but language_code is the safe form.
   const task = [{
     keyword: seed,
     location_name: opts?.locationName ?? 'Israel',
-    language_name: opts?.languageName ?? 'Hebrew',
+    language_code: opts?.languageCode ?? 'he',
     include_seed_keyword: false,
     limit: 30,
     order_by: ['keyword_info.search_volume,desc'],
