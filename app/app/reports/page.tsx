@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react"
 import {
-  Download, RefreshCw, TrendingUp, Users, Search, Globe,
+  Download, RefreshCw, TrendingUp, TrendingDown, Minus, Users, Search, Globe,
   Zap, FileText, Calendar, Target, AlertTriangle, CheckCircle,
-  Star, Newspaper, ChevronRight, Loader2, BarChart3, Mail,
+  Star, Newspaper, ChevronRight, Loader2, BarChart3, Mail, Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,26 @@ interface CompetitorThreat { name: string; threat_score: number; threat: string 
 interface NewsItem { title: string; summary: string }
 interface TenderItem { title: string; deadline: string; organization: string }
 interface ConferenceItem { name: string; date: string }
+interface KeywordIntelRow {
+  keyword: string
+  searchVolume: number
+  direction?: string
+  directionHe?: string
+  changePct?: number
+  competition?: string
+  competitionHe?: string
+  cpc?: number
+  insight?: string
+}
+interface KeywordOpportunityRow {
+  keyword: string
+  searchVolume: number
+  direction?: string
+  directionHe?: string
+  changePct?: number
+  opportunityLevel?: "hot" | "good" | null
+  seedKeyword?: string
+}
 
 interface WeeklyReport {
   executive_summary: string
@@ -34,6 +54,8 @@ interface WeeklyReport {
     hot_keywords: string[]
     competitor_moves: string[]
     market_insights: string[]
+    keyword_intel?: KeywordIntelRow[]
+    keyword_opportunities?: KeywordOpportunityRow[]
   }
   opportunities: {
     new_niches: string[]
@@ -99,6 +121,39 @@ function BulletList({ items }: { items: string[] }) {
   )
 }
 
+function KeywordIntelCard({ k }: { k: KeywordIntelRow }) {
+  const dir = k.direction
+  const DirIcon = dir === "rising" ? TrendingUp : dir === "falling" ? TrendingDown : Minus
+  const dirColor = dir === "rising" ? "text-emerald-600" : dir === "falling" ? "text-red-500" : "text-gray-400"
+  const dirHe = k.directionHe || (dir === "rising" ? "עולה" : dir === "falling" ? "יורד" : "יציב")
+  const pct = typeof k.changePct === "number" ? k.changePct : 0
+  const vol = typeof k.searchVolume === "number" ? k.searchVolume : 0
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <DirIcon className={`w-4 h-4 shrink-0 ${dirColor}`} />
+          <span className="font-semibold text-sm text-gray-900 truncate">{k.keyword}</span>
+          {dir === "rising" && <span className="text-xs">🔥</span>}
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-bold text-gray-800">{vol.toLocaleString("he-IL")}</span>
+          <span className="text-gray-400">חיפושים/חו׳</span>
+          <Badge className={`border-0 text-white ${pct > 0 ? "bg-emerald-500" : pct < 0 ? "bg-red-500" : "bg-gray-400"}`}>
+            {pct > 0 ? "+" : ""}{pct}%
+          </Badge>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500 flex-wrap">
+        <span>מגמה: {dirHe}</span>
+        {k.competitionHe && k.competitionHe !== "—" && <span>· תחרות פרסומית: {k.competitionHe}</span>}
+        {typeof k.cpc === "number" && k.cpc > 0 && <span>· CPC ${k.cpc}</span>}
+      </div>
+      {k.insight && <p className="text-xs text-gray-600 mt-1.5 leading-snug">{k.insight}</p>}
+    </div>
+  )
+}
+
 function ActionCard({ text, variant }: { text: string; variant: "immediate" | "short_term" }) {
   const styles = variant === "immediate"
     ? "bg-red-50 border-red-200 text-red-900"
@@ -161,44 +216,93 @@ export default function ReportsPage() {
     }
   }
 
-  const loadReport = useCallback(async (force = false) => {
-    if (force) setGenerating(true)
-    else setLoading(true)
+  // On mount: DISPLAY the saved report only — never auto-generate.
+  const loadCached = useCallback(async () => {
+    setLoading(true)
     setError(null)
     try {
-      const url = `/api/generate-weekly-report${force ? "?force=true" : ""}`
-      const res = await fetch(url, { method: "POST" })
+      const res = await fetch("/api/generate-weekly-report?cachedOnly=true", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "שגיאה בטעינת הדוח")
+      setReport(data.report || null)
+      setCompanyName(data.company_name || "")
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Explicit, user-triggered generation (button) — also used by scans/admin elsewhere.
+  const generateReport = useCallback(async () => {
+    setGenerating(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/generate-weekly-report?force=true", { method: "POST" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה ביצירת הדוח")
       setReport(data.report)
       setCompanyName(data.company_name || "")
+      toast({ title: "הדוח עודכן", description: "נוצר דוח חדש עם הנתונים העדכניים" })
     } catch (e: any) {
       setError(e.message)
       toast({ title: "שגיאה ביצירת דוח", description: e.message, variant: "destructive" })
     } finally {
-      setLoading(false)
       setGenerating(false)
     }
   }, [toast])
 
-  useEffect(() => { loadReport() }, [loadReport])
+  useEffect(() => { loadCached() }, [loadCached])
 
-  if (loading) return <LoadingSkeleton companyName={companyName} />
+  // Initial cached read — light spinner, NOT the "מייצר דוח" generation skeleton.
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8" dir="rtl">
+        <div className="flex flex-col items-center gap-3 text-gray-500">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="text-sm">טוען דוח...</p>
+        </div>
+      </div>
+    )
+  }
 
-  if (error) {
+  // Active generation (only via button) — show the generation skeleton.
+  if (generating && !report) return <LoadingSkeleton companyName={companyName} />
+
+  // No saved report yet — empty state + explicit generate button (no auto-fire).
+  if (!report) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8" dir="rtl">
+        <div className="bg-white rounded-2xl shadow-lg p-10 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FileText className="w-8 h-8 text-blue-600" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">עדיין אין דוח שבועי</h2>
+          <p className="text-gray-500 text-sm mb-6">
+            הדוח נוצר אוטומטית בכל סריקה שבועית. אפשר גם ליצור דוח מעודכן עכשיו לפי הנתונים האחרונים.
+          </p>
+          {error && <p className="text-red-500 text-xs mb-4">{error}</p>}
+          <Button onClick={generateReport} disabled={generating} className="gap-2">
+            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {generating ? "מייצר דוח..." : "צור דוח עכשיו"}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (error && !report) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8" dir="rtl">
         <div className="bg-white rounded-2xl shadow-lg p-10 max-w-md w-full text-center">
           <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-900 mb-2">לא ניתן ליצור דוח</h2>
           <p className="text-gray-500 text-sm mb-6">{error}</p>
-          <Button onClick={() => loadReport(true)}>נסה שוב</Button>
+          <Button onClick={generateReport} disabled={generating}>נסה שוב</Button>
         </div>
       </div>
     )
   }
-
-  if (!report) return null
 
   return (
     <div className="min-h-screen bg-gray-100" dir="rtl">
@@ -229,7 +333,7 @@ export default function ReportsPage() {
             size="sm"
             variant="ghost"
             className="text-slate-300 hover:text-white hover:bg-slate-700"
-            onClick={() => loadReport(true)}
+            onClick={generateReport}
             disabled={generating}
           >
             {generating ? (
@@ -237,7 +341,7 @@ export default function ReportsPage() {
             ) : (
               <RefreshCw className="w-4 h-4 ml-2" />
             )}
-            {generating ? "מייצר..." : "רענן"}
+            {generating ? "מייצר..." : "צור דוח מעודכן"}
           </Button>
           <Button
             size="sm"
@@ -354,24 +458,47 @@ export default function ReportsPage() {
           )}
         </div>
 
-        {/* ── Trends ────────────────────────────────────────────────────── */}
+        {/* ── Keywords & Trends ─────────────────────────────────────────── */}
         <div className="report-section bg-white rounded-2xl p-6 shadow-sm border border-emerald-100">
-          <SectionHeader icon={TrendingUp} title="טרנדים ותובנות שוק" color="border-emerald-400 text-emerald-700" />
+          <SectionHeader icon={TrendingUp} title="מילות מפתח ומגמות" color="border-emerald-400 text-emerald-700" />
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {(report.trends?.hot_keywords?.length ?? 0) > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-emerald-600 uppercase mb-2">מילות מפתח חמות</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {report.trends.hot_keywords.map((kw, i) => (
-                    <span key={i} className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs rounded-full px-2.5 py-1 font-medium">
-                      {kw}
-                    </span>
-                  ))}
-                </div>
+          {/* REAL keyword intelligence (DataForSEO) — client's actual keywords + numbers */}
+          {(report.trends?.keyword_intel?.length ?? 0) > 0 ? (
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-emerald-600 uppercase mb-2">מילות המפתח שלך</p>
+              <div className="space-y-2">
+                {report.trends!.keyword_intel!.map((k, i) => <KeywordIntelCard key={i} k={k} />)}
               </div>
-            )}
 
+              {(report.trends?.keyword_opportunities?.length ?? 0) > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-amber-600 uppercase mb-2">הזדמנויות long-tail</p>
+                  <div className="flex flex-wrap gap-2">
+                    {report.trends!.keyword_opportunities!.map((o, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 text-xs rounded-lg px-2.5 py-1.5 font-medium">
+                        {o.opportunityLevel === "hot" ? "🔥" : "💎"} {o.keyword}
+                        <span className="text-amber-600">· {(o.searchVolume || 0).toLocaleString("he-IL")}/חו׳ · {o.directionHe || "—"}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (report.trends?.hot_keywords?.length ?? 0) > 0 ? (
+            // Fallback only when no real keyword_intel exists.
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-emerald-600 uppercase mb-2">מילות מפתח חמות</p>
+              <div className="flex flex-wrap gap-1.5">
+                {report.trends.hot_keywords.map((kw, i) => (
+                  <span key={i} className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs rounded-full px-2.5 py-1 font-medium">
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {(report.trends?.competitor_moves?.length ?? 0) > 0 && (
               <div>
                 <p className="text-xs font-semibold text-blue-600 uppercase mb-2">מהלכי מתחרים</p>

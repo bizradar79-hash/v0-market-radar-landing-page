@@ -14,11 +14,27 @@ export async function POST(request: Request) {
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const force = new URL(request.url).searchParams.get('force') === 'true'
+    const params = new URL(request.url).searchParams
+    const force = params.get('force') === 'true'
+    const cachedOnly = params.get('cachedOnly') === 'true'
     const userId = ctx.user.id
     cost = new ScanCostCollector(userId, 'weekly_report')
     const companyName = ctx.company?.name || ''
     const industry = ctx.company?.industry || ''
+
+    // Cached-only mode: DISPLAY the saved report, never generate (page load uses this).
+    if (cachedOnly) {
+      const { data: companyRow } = await ctx.supabase
+        .from('companies').select('last_report').eq('id', userId).single()
+      const saved = companyRow?.last_report as { generated_at?: string } | null
+      await cost.flush()
+      return NextResponse.json({
+        success: true,
+        report: saved?.generated_at ? saved : null,
+        company_name: companyName,
+        cached: true,
+      })
+    }
 
     // Cache check
     if (!force) {
