@@ -15,15 +15,22 @@ function getAdminSupabase() {
 
 // Map module id → API path(s) to call
 const MODULE_ROUTES: Record<string, string[]> = {
-  news:        ['/api/generate-news'],
-  conferences: ['/api/generate-conferences'],
-  tenders:     ['/api/find-tenders'],
-  competitors: ['/api/find-competitors'],
-  seo:         ['/api/generate-seo-ranking'],
-  geo:         ['/api/generate-geo-ranking'],
-  trends:      ['/api/industry-trends', '/api/competitor-trends'],
-  reviews:     ['/api/sync-competitor-ratings', '/api/analyze-company-reviews'],
-  report:      ['/api/generate-weekly-report'],
+  news:           ['/api/generate-news'],
+  conferences:    ['/api/generate-conferences'],
+  tenders:        ['/api/find-tenders'],
+  competitors:    ['/api/find-competitors'],
+  seo:            ['/api/generate-seo-ranking'],
+  geo:            ['/api/generate-geo-ranking'],
+  // `trends` runs the industry + competitor trend modules. keyword_trends is a
+  // SEPARATE, independently-runnable module so the DataForSEO Google Ads path
+  // (generate-keyword-trends) actually gets invoked from admin — it was missing
+  // here, which is why keyword_trends always showed "—"/"AI estimated".
+  trends:         ['/api/industry-trends', '/api/competitor-trends'],
+  industry_trends:   ['/api/industry-trends'],
+  competitor_trends: ['/api/competitor-trends'],
+  keyword_trends:    ['/api/generate-keyword-trends'],
+  reviews:        ['/api/sync-competitor-ratings', '/api/analyze-company-reviews'],
+  report:         ['/api/generate-weekly-report'],
 }
 
 // Tables to clear before regenerating (cache bust)
@@ -55,10 +62,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Unknown module: ${module}` }, { status: 400 })
   }
 
-  // Verify company exists
+  // Verify company exists (also pull keywords — generate-keyword-trends needs
+  // them passed explicitly in the body, it does NOT read them from the company).
   const adminDb = getAdminSupabase()
   const { data: company } = await adminDb
-    .from('companies').select('id, name').eq('id', company_id).single()
+    .from('companies').select('id, name, keywords').eq('id', company_id).single()
   if (!company) {
     return NextResponse.json({ error: 'Company not found' }, { status: 404 })
   }
@@ -82,11 +90,16 @@ export async function POST(request: Request) {
   for (const route of routes) {
     const sep = route.includes('?') ? '&' : '?'
     const url = `${origin}${route}${sep}force=true`
+    // generate-keyword-trends needs the keyword list in the body (empty body →
+    // 400 "Missing keyword"); every other module reads context from the company.
+    const reqBody = route.includes('/api/generate-keyword-trends')
+      ? { keywords: ((company as any).keywords || []).slice(0, 8), force: true }
+      : {}
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: adminHeaders,
-        body: JSON.stringify({}),
+        body: JSON.stringify(reqBody),
       })
       let resBody: any
       try { resBody = await res.json() } catch { resBody = {} }

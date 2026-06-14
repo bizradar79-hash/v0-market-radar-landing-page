@@ -56,6 +56,7 @@ const SYNC_MODULES = [
   { id: 'seo',         label: 'SEO',         emoji: '📈' },
   { id: 'geo',         label: 'GEO',         emoji: '🌐' },
   { id: 'trends',      label: 'טרנדים',     emoji: '📊' },
+  { id: 'keyword_trends', label: 'טרנדים לפי מילות מפתח', emoji: '🔑' },
   { id: 'reviews',     label: 'ביקורות',    emoji: '⭐' },
   { id: 'report',      label: 'דוח שבועי',  emoji: '📄' },
 ]
