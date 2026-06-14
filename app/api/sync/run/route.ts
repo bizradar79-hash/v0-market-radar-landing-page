@@ -337,9 +337,12 @@ export async function POST(request: Request) {
         }
         const data = await res.json().catch(() => ({} as any))
         const kwUpdated = data?.updated ?? 0
+        // Surface the keyword-match diagnostic into the sync_log so it's visible
+        // in the scan modal without needing Vercel console access.
+        const dbg = data?.debug ? ` — ${String(data.debug).slice(0, 220)}` : ''
         return {
           status: kwUpdated > 0 ? 'ok' : 'error',
-          message: `${kwUpdated}/${keywords.length} keywords (Google Ads · DataForSEO)`,
+          message: `${kwUpdated}/${keywords.length} keywords (Google Ads · DataForSEO)${dbg}`,
         }
       } catch (e: any) {
         return { status: 'error', message: e?.message ?? 'fetch failed' }

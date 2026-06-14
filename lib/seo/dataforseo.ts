@@ -330,6 +330,58 @@ export interface SearchVolumeEntry {
 }
 export interface SearchVolumeResult { ok: boolean; keywords: SearchVolumeEntry[]; error?: string }
 
+/** Tolerant Hebrew keyword normalization for matching requested ↔ returned keys:
+ *  NFC, strip niqqud/cantillation (U+0591–U+05C7), geresh/gershayim/quotes,
+ *  punctuation, collapse whitespace, lowercase. Shared so every caller matches
+ *  identically and the logic can never diverge between code paths. */
+export function normKw(s: string): string {
+  return (s || '')
+    .normalize('NFC')
+    .replace(/[֑-ׇ]/g, '')          // Hebrew niqqud + cantillation
+    .replace(/[׳״'"]/g, '')          // geresh / gershayim / quotes
+    .replace(/[.,!?;:()[\]{}–—_/\\|-]/g, '')  // punctuation (incl. – —)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+/** Resolve DataForSEO-returned rows back to the requested keywords. Hebrew echoes
+ *  can differ in niqqud / geresh / whitespace / plural form, so we use a tolerant
+ *  two-pass match: (1) normalized-exact so each row claims its true owner first,
+ *  then (2) leftovers via bidirectional substring, then index pairing when row
+ *  count == request count (DataForSEO preserves request order). Returns a map of
+ *  requested keyword → row index. Generic over the row type (only `keyword` read). */
+export function matchKeywordsToRows<T extends { keyword: string }>(
+  keywords: string[],
+  rows: T[],
+): Record<string, number> {
+  const used = new Set<number>()
+  const matchIdx: Record<string, number> = {}
+
+  // Pass 1 — normalized-exact, so each row goes to its true owner.
+  for (const kw of keywords) {
+    const nkw = normKw(kw)
+    const idx = rows.findIndex((r, i) => !used.has(i) && normKw(r.keyword) === nkw)
+    if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
+  }
+  // Pass 2 — leftovers: tolerant substring, then index pairing.
+  for (const kw of keywords) {
+    if (matchIdx[kw] != null) continue
+    const nkw = normKw(kw)
+    let idx = rows.findIndex((r, i) => {
+      if (used.has(i)) return false
+      const nr = normKw(r.keyword)
+      return !!nr && !!nkw && (nr.includes(nkw) || nkw.includes(nr))
+    })
+    if (idx === -1 && rows.length === keywords.length) {
+      const byOrder = keywords.indexOf(kw)
+      if (byOrder >= 0 && !used.has(byOrder)) idx = byOrder
+    }
+    if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
+  }
+  return matchIdx
+}
+
 function normCompetition(c: any): Competition {
   const s = typeof c === 'string' ? c.toUpperCase() : ''
   return s === 'LOW' || s === 'MEDIUM' || s === 'HIGH' ? s : 'UNKNOWN'

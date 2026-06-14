@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import {
-  fetchSearchVolume, fetchKeywordSuggestions,
+  fetchSearchVolume, fetchKeywordSuggestions, matchKeywordsToRows,
   type SearchVolumeEntry, type KeywordSuggestion, type Competition,
 } from '@/lib/seo/dataforseo'
 import { NextResponse } from 'next/server'
@@ -31,20 +31,6 @@ const COMPETITION_HE: Record<Competition, string> = {
 
 const LOW_VOLUME = 30
 const HIGH_VOLUME = 500
-
-/** Tolerant Hebrew keyword normalization for matching requested ↔ returned keys:
- *  NFC, strip niqqud/cantillation (U+0591–U+05C7), geresh/gershayim/quotes,
- *  punctuation, collapse whitespace, lowercase. */
-function normKw(s: string): string {
-  return (s || '')
-    .normalize('NFC')
-    .replace(/[֑-ׇ]/g, '')                    // Hebrew niqqud + cantillation
-    .replace(/[׳״'"]/g, '')                   // geresh / gershayim / quotes
-    .replace(/[.,!?;:()[\]{}–—_/\\|-]/g, '')  // punctuation (incl. – —)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-}
 
 interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
 interface StoredKeyword {
@@ -205,6 +191,9 @@ export async function POST(request: Request) {
     // suggestions call per keyword. Fall back to the Grok/Gemini guess only if
     // DataForSEO fails (or KEYWORD_TRENDS_PROVIDER=grok).
     const built: Record<string, StoredKeyword> = {}
+    // Diagnostic surfaced in the API response (and the scan's sync_log message)
+    // so we can see requested-vs-returned-vs-matched WITHOUT Vercel console access.
+    let debug = ''
 
     if (PROVIDER === 'dataforseo') {
       const t0 = Date.now()
@@ -221,38 +210,12 @@ export async function POST(request: Request) {
           suggByKw.set(kw, sg.ok ? sg.suggestions : [])
         }))
 
-        // Match returned rows back to requested keywords. Hebrew echoes from
-        // DataForSEO can differ in niqqud / geresh / whitespace / plural form, so
-        // exact compare is too strict. Tolerant match: normalized-equal OR
-        // substring either way; then INDEX-based pairing (DataForSEO returns rows
-        // in request order); only leave a keyword unmatched if nothing lines up.
+        // Match returned rows back to requested keywords via the SHARED tolerant
+        // matcher (normalized-exact → substring → index pairing). Using the same
+        // exported function everywhere guarantees the logic can't diverge.
         const rows = vol.keywords
         const returnedKeys = rows.map(r => r.keyword)
-        const used = new Set<number>()
-        const matchIdx: Record<string, number> = {}
-
-        // Pass 1 — exact (normalized) match, so each row goes to its true owner.
-        for (const kw of keywords) {
-          const nkw = normKw(kw)
-          const idx = rows.findIndex((r, i) => !used.has(i) && normKw(r.keyword) === nkw)
-          if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
-        }
-        // Pass 2 — leftovers: tolerant substring, then index pairing (DataForSEO
-        // returns rows in request order when counts line up).
-        for (const kw of keywords) {
-          if (matchIdx[kw] != null) continue
-          const nkw = normKw(kw)
-          let idx = rows.findIndex((r, i) => {
-            if (used.has(i)) return false
-            const nr = normKw(r.keyword)
-            return !!nr && !!nkw && (nr.includes(nkw) || nkw.includes(nr))
-          })
-          if (idx === -1 && rows.length === keywords.length) {
-            const byOrder = keywords.indexOf(kw)
-            if (byOrder >= 0 && !used.has(byOrder)) idx = byOrder
-          }
-          if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
-        }
+        const matchIdx = matchKeywordsToRows(keywords, rows)
 
         for (const kw of keywords) {
           const idx = matchIdx[kw]
@@ -260,8 +223,11 @@ export async function POST(request: Request) {
           console.log('[kw-match]', 'requested=', JSON.stringify(kw), 'returnedKeys=', JSON.stringify(returnedKeys), 'matched=', !!match)
           if (match) built[kw] = volumeToStored(match, suggByKw.get(kw) ?? [])
         }
-        console.log(`[keyword_trends] DataForSEO Google Ads: ${Object.keys(built).length}/${keywords.length} keywords with real volume`)
+        const matched = Object.keys(built).length
+        debug = `df.ok rows=${rows.length} req=[${keywords.join(',')}] ret=[${returnedKeys.join(',')}] matched=${matched}/${keywords.length}`
+        console.log(`[keyword_trends] DataForSEO Google Ads: ${matched}/${keywords.length} keywords with real volume`)
       } else {
+        debug = `df.fail(${vol.error ?? 'no_data'}) req=[${keywords.join(',')}] → grok fallback`
         console.warn(`[keyword_trends] DataForSEO failed (${vol.error ?? 'no_data'}) — falling back to Grok/Gemini`)
         await Promise.all(keywords.map(async (kw) => {
           const stored = await fetchViaGrokFallback(kw, cost!)
@@ -269,6 +235,7 @@ export async function POST(request: Request) {
         }))
       }
     } else {
+      debug = `provider=${PROVIDER} (grok) req=[${keywords.join(',')}]`
       await Promise.all(keywords.map(async (kw) => {
         const stored = await fetchViaGrokFallback(kw, cost!)
         if (stored) built[kw] = stored
@@ -302,13 +269,13 @@ export async function POST(request: Request) {
     if (singleKeyword) {
       return NextResponse.json({
         success: true, keyword: singleKeyword, updated: updatedCount,
-        data: existing[singleKeyword] ?? null,
+        data: existing[singleKeyword] ?? null, debug,
         ...(saveError ? { saveError: saveError.message } : {}),
       })
     }
 
     return NextResponse.json({
-      success: true, updated: updatedCount, total: keywords.length, keywords,
+      success: true, updated: updatedCount, total: keywords.length, keywords, debug,
       ...(saveError ? { saveError: saveError.message } : {}),
     })
   } catch (e: any) {
