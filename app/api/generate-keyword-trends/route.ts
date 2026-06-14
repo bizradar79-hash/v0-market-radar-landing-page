@@ -32,7 +32,26 @@ const COMPETITION_HE: Record<Competition, string> = {
 const LOW_VOLUME = 30
 const HIGH_VOLUME = 500
 
-interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
+// Opportunity volume gate for long-tails: drop noise (<MIN) AND the hyper-
+// competitive giants (>MAX). Tunable via env without a redeploy.
+const KW_OPP_MIN = Number(process.env.KW_OPP_MIN) || 50
+const KW_OPP_MAX = Number(process.env.KW_OPP_MAX) || 5000
+
+type OpportunityLevel = 'hot' | 'good' | null
+
+interface StoredRelated {
+  keyword: string
+  searchVolume: number
+  cpc?: number
+  changePct?: number
+  direction?: Direction
+  directionHe?: string
+  competition?: Competition
+  competitionHe?: string
+  opportunityScore?: number
+  opportunityLevel?: OpportunityLevel
+  action?: string
+}
 interface StoredKeyword {
   keyword: string
   searchVolume: number
@@ -73,6 +92,84 @@ function buildInsight(e: { keyword: string; searchVolume: number; changePct: num
   return `➡️ '${kw}' יציב עם ${fmt} חיפושים בחודש.`
 }
 
+// Competition rank for comparisons: lower = easier to enter.
+const COMP_RANK: Record<Competition, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, UNKNOWN: 2 }
+
+/** Pure-math opportunity score for ONE long-tail vs the seed keyword (NO AI).
+ *  Rewards LOW competition, beating the seed's competition, and a rising trend;
+ *  volume is a gate, not the driver, with a small mid-volume sweet-spot bonus. */
+function scoreOpportunity(s: KeywordSuggestion, seed: SearchVolumeEntry): number {
+  let score = 0
+  score += s.competition === 'LOW' ? 3 : s.competition === 'MEDIUM' ? 1 : 0
+  if (COMP_RANK[s.competition] < COMP_RANK[seed.competition]) score += 2
+  const rising = s.direction === 'rising' && !s.lowData
+  score += rising ? 3 : s.direction === 'stable' ? 1 : 0
+  if (s.searchVolume >= KW_OPP_MIN && s.searchVolume <= KW_OPP_MAX) score += 1
+  return score
+}
+
+function levelFor(score: number): OpportunityLevel {
+  if (score >= 6) return 'hot'
+  if (score >= 3) return 'good'
+  return null
+}
+
+/** Hebrew action one-liner for a long-tail, from its numbers (NO AI). */
+function buildRelatedAction(r: {
+  keyword: string; searchVolume: number; changePct: number; direction: Direction;
+  lowData: boolean; competition: Competition; competitionHe: string; level: OpportunityLevel;
+}, seedKeyword: string): string {
+  const fmt = r.searchVolume.toLocaleString('he-IL')
+  const sign = r.changePct > 0 ? '+' : ''
+  const rising = r.direction === 'rising' && !r.lowData
+  const isHigh = r.competition === 'HIGH'
+  if (r.level === 'hot' && rising) {
+    return `🔥 '${r.keyword}' — ${fmt} חיפושים/חודש, עולה ${sign}${r.changePct}%, תחרות נמוכה מ'${seedKeyword}'. כניסה קלה ומשתלמת עכשיו.`
+  }
+  if (rising && isHigh) {
+    return `📈 '${r.keyword}' — עולה ${sign}${r.changePct}%, אך תחרות גבוהה — שווה מעקב.`
+  }
+  if (r.level === 'good' || r.level === 'hot') {
+    return `💎 '${r.keyword}' — ${fmt} חיפושים/חודש בתחרות ${r.competitionHe}. הזדמנות כניסה טובה.`
+  }
+  return `'${r.keyword}' — ${fmt} חיפושים/חודש, תחרות ${r.competitionHe}.`
+}
+
+/** Re-rank the wide suggestion pool by OPPORTUNITY (not raw volume) and keep 3.
+ *  Volume-gated, scored, then enriched with a quarterly trend, badge + action. */
+function selectOpportunities(seed: SearchVolumeEntry, pool: KeywordSuggestion[]): StoredRelated[] {
+  if (pool.length === 0) return []
+  // Volume gate — drop noise and giants; relax upward if too few survive.
+  let gated = pool.filter(s => s.searchVolume >= KW_OPP_MIN && s.searchVolume <= KW_OPP_MAX)
+  if (gated.length < 3) gated = pool.filter(s => s.searchVolume >= KW_OPP_MIN)   // relax MAX
+  if (gated.length < 3) gated = pool.slice()                                      // relax MIN too
+  const scored = gated
+    .map(s => ({ s, score: scoreOpportunity(s, seed) }))
+    .sort((a, b) => b.score - a.score || b.s.searchVolume - a.s.searchVolume)
+    .slice(0, 3)
+  return scored.map(({ s, score }) => {
+    const level = levelFor(score)
+    const competitionHe = COMPETITION_HE[s.competition]
+    const direction = s.direction as Direction
+    return {
+      keyword: s.keyword,
+      searchVolume: s.searchVolume,
+      cpc: Math.round(s.cpc * 100) / 100,
+      changePct: s.changePct,
+      direction,
+      directionHe: DIRECTION_HE[direction],
+      competition: s.competition,
+      competitionHe,
+      opportunityScore: score,
+      opportunityLevel: level,
+      action: buildRelatedAction({
+        keyword: s.keyword, searchVolume: s.searchVolume, changePct: s.changePct,
+        direction, lowData: s.lowData, competition: s.competition, competitionHe, level,
+      }, seed.keyword),
+    }
+  })
+}
+
 function volumeToStored(e: SearchVolumeEntry, suggestions: KeywordSuggestion[]): StoredKeyword {
   return {
     keyword: e.keyword,
@@ -87,7 +184,7 @@ function volumeToStored(e: SearchVolumeEntry, suggestions: KeywordSuggestion[]):
     competitionIndex: e.competitionIndex,
     lowData: e.lowData,
     monthlySeries: e.monthlySearches.map(m => m.searchVolume),
-    related: suggestions.map(s => ({ keyword: s.keyword, searchVolume: s.searchVolume, cpc: Math.round(s.cpc * 100) / 100 })),
+    related: selectOpportunities(e, suggestions),
     insight: buildInsight(e),
     fetchedAt: new Date().toISOString(),
     provider: 'dataforseo',
@@ -205,7 +302,7 @@ export async function POST(request: Request) {
         const suggByKw = new Map<string, KeywordSuggestion[]>()
         await Promise.all(keywords.map(async (kw) => {
           const st0 = Date.now()
-          const sg = await fetchKeywordSuggestions(kw, { limit: 3 })
+          const sg = await fetchKeywordSuggestions(kw, { limit: 30 })
           cost!.add({ provider: 'dataforseo', model: 'keyword_suggestions', webSearch: true, ms: Date.now() - st0 })
           suggByKw.set(kw, sg.ok ? sg.suggestions : [])
         }))

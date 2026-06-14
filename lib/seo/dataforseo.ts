@@ -493,12 +493,25 @@ export async function fetchSearchVolume(keywords: string[], opts?: {
   }
 }
 
-export interface KeywordSuggestion { keyword: string; searchVolume: number; cpc: number }
+export interface KeywordSuggestion {
+  keyword: string
+  searchVolume: number
+  cpc: number
+  competition: Competition       // LOW / MEDIUM / HIGH advertiser competition
+  competitionIndex: number       // 0-100
+  monthlySearches: MonthlySearch[] // chronological (oldest → newest)
+  changePct: number              // recent 3-mo avg vs prior 3-mo avg (quarterly)
+  direction: TrendDirection
+  lowData: boolean               // prior 3-mo avg < 10 → % unreliable
+}
 
 /**
  * Fetch real long-tail KEYWORD SUGGESTIONS for ONE seed keyword via DataForSEO
- * Labs. Israel / Hebrew, ordered by search volume desc. Returns the top
- * `limit` (default 3) suggestions (excluding the seed itself) with real volume.
+ * Labs. Israel / Hebrew, ordered by search volume desc. Returns a WIDE pool (up
+ * to `limit`, default 30) so callers can re-rank by OPPORTUNITY rather than raw
+ * volume. Each suggestion carries real volume, competition, CPC, monthly series
+ * and a quarterly trend (same recent-3mo vs prior-3mo math as the main keyword).
+ * Same endpoint / same per-call cost regardless of how many rows we keep.
  */
 export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   locationName?: string
@@ -509,7 +522,7 @@ export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   if (!auth) return { ok: false, suggestions: [], error: 'missing_credentials' }
   const seed = (seedKeyword || '').trim()
   if (!seed) return { ok: false, suggestions: [], error: 'no_keyword' }
-  const limit = opts?.limit ?? 3
+  const limit = opts?.limit ?? 30
 
   // DIFFERENT endpoint from search_volume: the Labs keyword_suggestions endpoint
   // DOES require a language field and previously accepted `language_name`
@@ -551,12 +564,29 @@ export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
     const suggestions: KeywordSuggestion[] = items
       .map((it: any) => {
         const kw = String(it?.keyword ?? it?.keyword_data?.keyword ?? '').trim()
-        // search_volume may sit at item.keyword_info.* or be nested under keyword_data.
+        // search_volume / competition / monthly_searches sit at item.keyword_info.*
+        // (or nested under keyword_data.keyword_info for the alternate envelope).
         const info = it?.keyword_info ?? it?.keyword_data?.keyword_info ?? {}
+        const monthly: MonthlySearch[] = (Array.isArray(info.monthly_searches) ? info.monthly_searches : [])
+          .map((m: any) => ({
+            year: Number(m.year) || 0,
+            month: Number(m.month) || 0,
+            searchVolume: Number(m.search_volume) || 0,
+          }))
+          .sort((a: MonthlySearch, b: MonthlySearch) => (a.year * 12 + a.month) - (b.year * 12 + b.month))
+        const { changePct, direction, lowData } = volumeChange(monthly)
         return {
           keyword: kw,
           searchVolume: Number(info.search_volume ?? it?.search_volume) || 0,
           cpc: Number(info.cpc ?? it?.cpc) || 0,
+          // Labs gives the LOW/MEDIUM/HIGH string under `competition_level`
+          // (`competition` there is a 0-1 float, not the bucket name).
+          competition: normCompetition(info.competition_level ?? info.competition),
+          competitionIndex: Number(info.competition_index) || 0,
+          monthlySearches: monthly,
+          changePct,
+          direction,
+          lowData,
         }
       })
       .filter((s: KeywordSuggestion) => s.keyword && s.keyword.toLowerCase() !== seedLc)

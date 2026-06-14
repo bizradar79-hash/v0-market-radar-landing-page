@@ -17,7 +17,19 @@ import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 // ─── Keyword-intelligence types (Google Ads search volume) ──────────────────
-interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
+interface StoredRelated {
+  keyword: string
+  searchVolume: number
+  cpc?: number
+  changePct?: number
+  direction?: string            // 'rising' | 'falling' | 'stable'
+  directionHe?: string
+  competition?: string
+  competitionHe?: string
+  opportunityScore?: number
+  opportunityLevel?: 'hot' | 'good' | null
+  action?: string
+}
 interface KwData {
   keyword?: string
   searchVolume: number          // avg monthly searches (absolute)
@@ -556,17 +568,34 @@ export default function TrendsPage() {
                       </div>
                     )}
 
-                    {/* Related long-tail suggestions with real volume */}
+                    {/* Related long-tails — ranked by OPPORTUNITY, not raw volume */}
                     {kwData.related && kwData.related.length > 0 && (
                       <div className="space-y-1.5">
-                        <p className="text-xs font-semibold text-muted-foreground">ביטויים קשורים (לונג-טייל)</p>
-                        <div className="space-y-1">
-                          {kwData.related.slice(0, 3).map((r, i) => (
-                            <div key={i} className="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs">
-                              <span className="truncate">{r.keyword}</span>
-                              <span className="text-muted-foreground tabular-nums shrink-0">{fmtVol(r.searchVolume)}/חו׳</span>
-                            </div>
-                          ))}
+                        <p className="text-xs font-semibold text-muted-foreground">הזדמנויות לונג-טייל (לפי פוטנציאל כניסה)</p>
+                        <div className="space-y-1.5">
+                          {[...kwData.related]
+                            .sort((a, b) => (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0))
+                            .slice(0, 3)
+                            .map((r, i) => (
+                              <div key={i} className="rounded-lg border px-2.5 py-1.5 text-xs">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 min-w-0">
+                                    {r.opportunityLevel === 'hot' && <span className="shrink-0" title="הזדמנות חמה">🔥</span>}
+                                    {r.opportunityLevel === 'good' && <span className="shrink-0" title="הזדמנות טובה">💎</span>}
+                                    <span className="truncate font-medium">{r.keyword}</span>
+                                  </span>
+                                  <span className="flex items-center gap-2 shrink-0">
+                                    <span className="text-muted-foreground tabular-nums">{fmtVol(r.searchVolume)}/חו׳</span>
+                                    {typeof r.changePct === 'number' && r.direction && (
+                                      <TrendArrow direction={r.direction} changePct={r.changePct} />
+                                    )}
+                                  </span>
+                                </div>
+                                {r.action && (
+                                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{r.action}</p>
+                                )}
+                              </div>
+                            ))}
                         </div>
                       </div>
                     )}
