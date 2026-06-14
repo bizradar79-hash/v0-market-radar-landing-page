@@ -32,6 +32,20 @@ const COMPETITION_HE: Record<Competition, string> = {
 const LOW_VOLUME = 30
 const HIGH_VOLUME = 500
 
+/** Tolerant Hebrew keyword normalization for matching requested ↔ returned keys:
+ *  NFC, strip niqqud/cantillation (U+0591–U+05C7), geresh/gershayim/quotes,
+ *  punctuation, collapse whitespace, lowercase. */
+function normKw(s: string): string {
+  return (s || '')
+    .normalize('NFC')
+    .replace(/[֑-ׇ]/g, '')                    // Hebrew niqqud + cantillation
+    .replace(/[׳״'"]/g, '')                   // geresh / gershayim / quotes
+    .replace(/[.,!?;:()[\]{}–—_/\\|-]/g, '')  // punctuation (incl. – —)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
 interface StoredRelated { keyword: string; searchVolume: number; cpc?: number }
 interface StoredKeyword {
   keyword: string
@@ -207,16 +221,44 @@ export async function POST(request: Request) {
           suggByKw.set(kw, sg.ok ? sg.suggestions : [])
         }))
 
-        // Match returned rows back to requested keywords. Normalize with NFC +
-        // trim so Hebrew echoes from DataForSEO never miss (a failed match would
-        // silently leave stale AI-estimated data via the keep-existing guard).
-        const norm = (s: string) => (s || '').trim().normalize('NFC').toLowerCase()
-        const byKw = new Map(vol.keywords.map(k => [norm(k.keyword), k]))
+        // Match returned rows back to requested keywords. Hebrew echoes from
+        // DataForSEO can differ in niqqud / geresh / whitespace / plural form, so
+        // exact compare is too strict. Tolerant match: normalized-equal OR
+        // substring either way; then INDEX-based pairing (DataForSEO returns rows
+        // in request order); only leave a keyword unmatched if nothing lines up.
+        const rows = vol.keywords
+        const returnedKeys = rows.map(r => r.keyword)
+        const used = new Set<number>()
+        const matchIdx: Record<string, number> = {}
+
+        // Pass 1 — exact (normalized) match, so each row goes to its true owner.
         for (const kw of keywords) {
-          const match = byKw.get(norm(kw))
-            ?? (vol.keywords.length === keywords.length ? vol.keywords[keywords.indexOf(kw)] : undefined)
+          const nkw = normKw(kw)
+          const idx = rows.findIndex((r, i) => !used.has(i) && normKw(r.keyword) === nkw)
+          if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
+        }
+        // Pass 2 — leftovers: tolerant substring, then index pairing (DataForSEO
+        // returns rows in request order when counts line up).
+        for (const kw of keywords) {
+          if (matchIdx[kw] != null) continue
+          const nkw = normKw(kw)
+          let idx = rows.findIndex((r, i) => {
+            if (used.has(i)) return false
+            const nr = normKw(r.keyword)
+            return !!nr && !!nkw && (nr.includes(nkw) || nkw.includes(nr))
+          })
+          if (idx === -1 && rows.length === keywords.length) {
+            const byOrder = keywords.indexOf(kw)
+            if (byOrder >= 0 && !used.has(byOrder)) idx = byOrder
+          }
+          if (idx >= 0) { used.add(idx); matchIdx[kw] = idx }
+        }
+
+        for (const kw of keywords) {
+          const idx = matchIdx[kw]
+          const match = idx != null ? rows[idx] : null
+          console.log('[kw-match]', 'requested=', JSON.stringify(kw), 'returnedKeys=', JSON.stringify(returnedKeys), 'matched=', !!match)
           if (match) built[kw] = volumeToStored(match, suggByKw.get(kw) ?? [])
-          else console.warn(`[keyword_trends] no volume row matched "${kw}" (got: ${vol.keywords.map(k => k.keyword).join(', ')})`)
         }
         console.log(`[keyword_trends] DataForSEO Google Ads: ${Object.keys(built).length}/${keywords.length} keywords with real volume`)
       } else {
