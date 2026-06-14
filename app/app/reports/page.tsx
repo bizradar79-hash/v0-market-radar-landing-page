@@ -217,17 +217,23 @@ export default function ReportsPage() {
   }
 
   // On mount: DISPLAY the saved report only — never auto-generate.
+  // Hard timeout so the spinner can NEVER hang — always resolve to a usable state.
   const loadCached = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/generate-weekly-report?cachedOnly=true", { method: "POST" })
+      const res = await fetch("/api/generate-weekly-report?cachedOnly=true", {
+        method: "POST",
+        signal: AbortSignal.timeout(15000),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה בטעינת הדוח")
       setReport(data.report || null)
       setCompanyName(data.company_name || "")
     } catch (e: any) {
-      setError(e.message)
+      // Fall through to the empty state (which has the generate button), never a stuck spinner.
+      setError(e?.name === "TimeoutError" ? "טעינת הדוח ארכה זמן רב מדי" : e.message)
+      setReport(null)
     } finally {
       setLoading(false)
     }
@@ -370,6 +376,30 @@ export default function ReportsPage() {
 
       {/* ── Report container ─────────────────────────────────────────────── */}
       <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5 pb-12">
+
+        {/* Stale-report banner — cached report predates the keyword_intel upgrade. */}
+        {!(report.trends?.keyword_intel?.length) && (
+          <div className="no-print bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">דוח זה נוצר לפני העדכון של מילות המפתח</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  צור דוח מעודכן כדי לראות את מילות המפתח האמיתיות שלך עם נפחי חיפוש, מגמות ו-CPC.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-500 text-white gap-2 shrink-0"
+              onClick={generateReport}
+              disabled={generating}
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {generating ? "מייצר דוח..." : "צור דוח מעודכן"}
+            </Button>
+          </div>
+        )}
 
         {/* Print header (hidden on screen) */}
         <div className="hidden print:block border-b-4 border-slate-900 pb-4 mb-6">
