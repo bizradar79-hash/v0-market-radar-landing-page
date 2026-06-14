@@ -53,7 +53,7 @@ interface DashboardData {
   topCompetitors: Array<{ name: string; threat_score: number; services: string }>
   upcomingTenders: Array<{ title: string; organization: string; deadline: string }>
   upcomingConferences: Array<{ name: string; date: string; location: string }>
-  topTrends: Array<{ name: string; direction: string; category: string; score: number }>
+  hotKeywords: Array<{ keyword: string; searchVolume: number; direction: string; directionHe: string; changePct: number }>
   recentNews: Array<{ title: string; source: string; published_at: string; url: string }>
   topChannels: string[]
   weeklyActions: Array<{ id: string; title: string; category: string; priority: string }>
@@ -92,7 +92,6 @@ export default function AppDashboardPage() {
       { data: topCompetitors },
       { data: upcomingTendersRaw },
       { data: upcomingConferences },
-      { data: topTrendsRows },
       { data: recentNewsRows },
       { data: companyData },
       { data: dcTableRows },
@@ -107,10 +106,9 @@ export default function AppDashboardPage() {
       // Tenders: show any stored tenders — no deadline filter (null deadlines still shown)
       supabase.from("tenders").select("id, title, organization, deadline, link").eq("company_id", userId).order("deadline", { ascending: true }).limit(3),
       supabase.from("conferences").select("name, date, location").eq("company_id", userId).gte("date", today).order("date", { ascending: true }).limit(3),
-      supabase.from("trends").select("name, score, direction, category").eq("company_id", userId).order("score", { ascending: false }).limit(5),
       supabase.from("news").select("title, source, published_at, url").eq("company_id", userId).order("published_at", { ascending: false }).limit(3),
       supabase.from("companies").select(
-        "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, niche_opportunities, business_profile"
+        "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, niche_opportunities, business_profile, keyword_trends"
       ).eq("id", userId).single(),
       // Distribution channels table (may not exist — errors silently return null data)
       supabase.from("distribution_channels").select("name, channel_type, description, potential_score").eq("company_id", userId).eq("status", "potential").order("potential_score", { ascending: false }).limit(3),
@@ -280,28 +278,30 @@ export default function AppDashboardPage() {
       }
     }
 
-    // ── Hot trends — trends table first, fallback to industry_trends JSONB ───
-    let topTrends = (topTrendsRows || []).map((t: any) => ({
-      name: t.name || '',
-      direction: t.direction || 'stable',
-      category: t.category || '',
-      score: t.score ?? 0,
-    }))
-
-    if (topTrends.length === 0) {
-      // Fallback: read from industry_trends JSONB on companies row
-      const itRaw = (companyData as any)?.industry_trends as any
-      // Handle: { trends: [{ keyword/name, direction, score }] }
-      // or:     [{ keyword, direction, score }]
-      const itArr: any[] = itRaw?.trends || itRaw?.items || (Array.isArray(itRaw) ? itRaw : [])
-      topTrends = itArr.slice(0, 5).map((t: any) => ({
-        name: t.keyword || t.name || '',
-        direction: t.direction || t.trend || 'stable',
-        category: t.category || '',
-        score: t.score ?? t.trend_score ?? 0,
-      })).filter(t => t.name)
-      if (topTrends.length > 0) console.log('[dashboard] topTrends from industry_trends JSONB:', topTrends.length)
+    // ── Hot keywords — REAL DataForSEO keyword_trends (volume + trend) ───────
+    // keyword_trends is a Record<keyword, StoredKeyword> on the companies row.
+    // Ranked by OPPORTUNITY: rising direction first, then higher search volume —
+    // the same ordering the weekly-actions/niche summarizer uses.
+    const ktRaw = (companyData as any)?.keyword_trends
+    const ktValues: any[] = (ktRaw && typeof ktRaw === 'object')
+      ? Object.values(ktRaw).filter((v: any) => v && typeof v === 'object' && typeof v.keyword === 'string')
+      : []
+    const kwPriority = (k: any) => {
+      const vol = typeof k.searchVolume === 'number' ? k.searchVolume : 0
+      const dirBonus = k.direction === 'rising' ? 1_000_000 : k.direction === 'stable' ? 0 : -1_000_000
+      return dirBonus + vol
     }
+    const hotKeywords = [...ktValues]
+      .sort((a, b) => kwPriority(b) - kwPriority(a))
+      .slice(0, 5)
+      .map((k: any) => ({
+        keyword: k.keyword || '',
+        searchVolume: typeof k.searchVolume === 'number' ? k.searchVolume : 0,
+        direction: k.direction || 'stable',
+        directionHe: k.directionHe || '',
+        changePct: typeof k.changePct === 'number' ? k.changePct : 0,
+      }))
+      .filter(k => k.keyword)
 
     // Normalize tenders: map organization/publisher field
     const upcomingTenders = (upcomingTendersRaw || []).map((t: any) => ({
@@ -320,7 +320,7 @@ export default function AppDashboardPage() {
       topCompetitors: topCompetitors || [],
       upcomingTenders,
       upcomingConferences: upcomingConferences || [],
-      topTrends,
+      hotKeywords,
       recentNews: recentNewsRows || [],
       topChannels,
       weeklyActions,
@@ -340,7 +340,7 @@ export default function AppDashboardPage() {
       } : null,
     })
     if (companyData) setSyncDates({ last_sync_at: (companyData as any).last_sync_at ?? null, next_sync_at: (companyData as any).next_sync_at ?? null })
-    console.log('[dashboard] result — topTrends:', topTrends.length, 'competitorTrends:', competitorTrendItems.length, 'weeklyActions:', weeklyActions.length, 'topChannels:', topChannels.length, 'channelsLabel:', channelsLabel, 'seoGeo:', !!seoGeo)
+    console.log('[dashboard] result — hotKeywords:', hotKeywords.length, 'competitorTrends:', competitorTrendItems.length, 'weeklyActions:', weeklyActions.length, 'topChannels:', topChannels.length, 'channelsLabel:', channelsLabel, 'seoGeo:', !!seoGeo)
     setLoading(false)
   }
 
@@ -360,29 +360,6 @@ export default function AppDashboardPage() {
   function getDaysUntil(deadline: string): number {
     const diff = new Date(deadline).getTime() - new Date().getTime()
     return Math.ceil(diff / (1000 * 60 * 60 * 24))
-  }
-
-  function DirectionIcon({ direction }: { direction: string }) {
-    const up = direction === 'rising' || direction === 'עולה' || direction === 'up'
-    const down = direction === 'declining' || direction === 'יורד' || direction === 'down'
-    if (up) return <TrendingUp className="h-3.5 w-3.5 text-green-600" />
-    if (down) return <TrendingDown className="h-3.5 w-3.5 text-red-600" />
-    return <Minus className="h-3.5 w-3.5 text-yellow-600" />
-  }
-
-  function directionLabel(direction: string) {
-    if (direction === 'rising' || direction === 'up') return 'עולה'
-    if (direction === 'declining' || direction === 'down') return 'יורד'
-    if (direction === 'עולה' || direction === 'יורד' || direction === 'יציב') return direction
-    return 'יציב'
-  }
-
-  function directionClass(direction: string) {
-    const up = direction === 'rising' || direction === 'עולה' || direction === 'up'
-    const down = direction === 'declining' || direction === 'יורד' || direction === 'down'
-    if (up) return "border-green-200 text-green-600"
-    if (down) return "border-red-200 text-red-600"
-    return "border-yellow-200 text-yellow-600"
   }
 
   const kpiCards = [
@@ -636,42 +613,54 @@ export default function AppDashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* טרנדים חמים */}
+              {/* מילות מפתח חמות — real DataForSEO keyword_trends */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4 text-blue-600" />
-                    טרנדים חמים
+                    <TrendingUp className="h-4 w-4 text-blue-600" />
+                    מילות מפתח חמות
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {data!.topTrends.length > 0 ? (
+                  {data!.hotKeywords.length > 0 ? (
                     <div className="space-y-2">
-                      {data!.topTrends.map((trend, idx) => (
-                        <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                          <div className="min-w-0 flex items-center gap-2">
-                            <DirectionIcon direction={trend.direction} />
-                            <p className="text-sm font-medium truncate">{trend.name}</p>
+                      {data!.hotKeywords.map((kw, idx) => {
+                        const rising = kw.direction === 'rising'
+                        const falling = kw.direction === 'falling'
+                        const sign = kw.changePct > 0 ? '+' : ''
+                        return (
+                          <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                            <div className="min-w-0 flex items-center gap-2">
+                              {rising ? <TrendingUp className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                : falling ? <TrendingDown className="h-3.5 w-3.5 text-red-600 shrink-0" />
+                                : <Minus className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{kw.keyword}</p>
+                                <p className="text-xs text-muted-foreground">{kw.searchVolume.toLocaleString('he-IL')}/חו׳</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {rising && <span className="text-xs">🔥</span>}
+                              <Badge variant="outline" className={
+                                rising ? "border-green-200 text-green-600" :
+                                falling ? "border-red-200 text-red-600" :
+                                "border-gray-200 text-gray-500"
+                              }>
+                                {sign}{kw.changePct}%
+                              </Badge>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {trend.score > 0 && (
-                              <span className="text-xs text-muted-foreground">{trend.score}</span>
-                            )}
-                            <Badge variant="outline" className={directionClass(trend.direction)}>
-                              {directionLabel(trend.direction)}
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="py-4 text-center text-sm text-muted-foreground">
-                      <p>אין טרנדים עדיין</p>
-                      <Link href="/app/trends" className="text-primary text-xs hover:underline">בצע סנכרון טרנדים →</Link>
+                      <p>עדיין אין נתוני מילות מפתח — יתעדכן בסריקה הבאה</p>
+                      <Link href="/app/trends" className="text-primary text-xs hover:underline">עבור למילות מפתח →</Link>
                     </div>
                   )}
                   <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                    כל מילות המפתח <ArrowLeft className="h-3.5 w-3.5" />
                   </Link>
                 </CardContent>
               </Card>
