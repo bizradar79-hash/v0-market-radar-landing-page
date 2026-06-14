@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -65,11 +64,19 @@ export default function TendersPage() {
     const { data, error } = await supabase
       .from("tenders")
       .select("*")
-      .order("deadline", { ascending: true })
 
     if (!error && data) {
-      // Only show tenders with a real, working link
-      setTenders(data.filter((t: Tender) => /^https?:\/\//i.test((t.link || '').trim())))
+      // Only show tenders with a real, working link; rank high-to-low by
+      // relevance (tiebreak nearest deadline) so the best matches lead.
+      const rows = data.filter((t: Tender) => /^https?:\/\//i.test((t.link || '').trim()))
+      rows.sort((a: Tender, b: Tender) => {
+        if ((b.relevance_score ?? 0) !== (a.relevance_score ?? 0)) return (b.relevance_score ?? 0) - (a.relevance_score ?? 0)
+        if (!a.deadline && !b.deadline) return 0
+        if (!a.deadline) return 1
+        if (!b.deadline) return -1
+        return a.deadline.localeCompare(b.deadline)
+      })
+      setTenders(rows)
     }
     setLoading(false)
   }
@@ -143,6 +150,13 @@ export default function TendersPage() {
   const getTenderSource = (description: string | null): 'engine' | 'ai' => {
     if (description?.startsWith('[src:engine]')) return 'engine'
     return 'ai'
+  }
+
+  // Transparent match-quality band from the relevance %.
+  const getMatchBand = (score: number) => {
+    if (score >= 70) return { label: 'התאמה גבוהה', bar: 'bg-green-500', text: 'text-green-700', chip: 'bg-green-100 text-green-700' }
+    if (score >= 40) return { label: 'התאמה בינונית', bar: 'bg-yellow-500', text: 'text-yellow-700', chip: 'bg-yellow-100 text-yellow-700' }
+    return { label: 'התאמה נמוכה — ייתכן שרלוונטי', bar: 'bg-gray-400', text: 'text-gray-500', chip: 'bg-gray-100 text-gray-500' }
   }
 
   const cleanDesc = (text: string | null) => {
@@ -241,17 +255,27 @@ export default function TendersPage() {
                   </div>
                 )}
 
-                {/* Relevance Score */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1 text-muted-foreground">
-                      <Target className="h-3.5 w-3.5" />
-                      ציון רלוונטיות
-                    </span>
-                    <span className="font-semibold text-primary">{tender.relevance_score}%</span>
-                  </div>
-                  <Progress value={tender.relevance_score} className="h-2" />
-                </div>
+                {/* Relevance Score — honest %, colored by match band */}
+                {(() => {
+                  const band = getMatchBand(tender.relevance_score)
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Target className="h-3.5 w-3.5" />
+                          ציון רלוונטיות
+                        </span>
+                        <span className={`font-semibold ${band.text}`}>{tender.relevance_score}%</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div className={`h-full rounded-full ${band.bar}`} style={{ width: `${tender.relevance_score}%` }} />
+                      </div>
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${band.chip}`}>
+                        {band.label}
+                      </span>
+                    </div>
+                  )
+                })()}
 
                 {/* Deadline */}
                 <div className={`flex items-center justify-between rounded-lg p-3 ${
@@ -300,7 +324,7 @@ export default function TendersPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FileText className="h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-4 text-muted-foreground">לא נמצאו מכרזים פעילים</p>
+            <p className="mt-4 text-muted-foreground">לא נמצאו מכרזים רלוונטיים השבוע</p>
             <p className="mt-1 text-xs text-muted-foreground">המכרזים יתעדכנו אוטומטית בסנכרון השבועי</p>
           </CardContent>
         </Card>
@@ -333,7 +357,8 @@ export default function TendersPage() {
                   )}
                   <div className="rounded-lg bg-muted/50 p-3">
                     <p className="text-xs text-muted-foreground">ציון רלוונטיות</p>
-                    <p className="font-semibold text-lg text-primary">{selectedTender.relevance_score}%</p>
+                    <p className={`font-semibold text-lg ${getMatchBand(selectedTender.relevance_score).text}`}>{selectedTender.relevance_score}%</p>
+                    <p className={`text-xs ${getMatchBand(selectedTender.relevance_score).text}`}>{getMatchBand(selectedTender.relevance_score).label}</p>
                   </div>
                 </div>
 

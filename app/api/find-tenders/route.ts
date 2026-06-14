@@ -10,7 +10,9 @@ import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-const TARGET = 12
+// Cap the number of tenders we keep per client. Ranked high-to-low by relevance,
+// so this keeps the best 6 rather than padding with weak matches. Env-tunable.
+const TARGET = Number(process.env.TENDERS_MAX) || 6
 
 function isValidDate(d: string | null | undefined): boolean {
   return !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d))
@@ -222,7 +224,18 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
     )
 
     // Hard guard: never persist a tender without a real http(s) link.
-    const allRows = [...engineRows, ...deduped].filter(r => /^https?:\/\//i.test((r.link || '').trim()))
+    // Then rank high-to-low by relevance (tiebreak nearest deadline) and cap at
+    // TARGET so the best matches surface first and weak ones never pad the list.
+    const allRows = [...engineRows, ...deduped]
+      .filter(r => /^https?:\/\//i.test((r.link || '').trim()))
+      .sort((a, b) => {
+        if ((b.relevance_score ?? 0) !== (a.relevance_score ?? 0)) return (b.relevance_score ?? 0) - (a.relevance_score ?? 0)
+        if (!a.deadline && !b.deadline) return 0
+        if (!a.deadline) return 1
+        if (!b.deadline) return -1
+        return a.deadline.localeCompare(b.deadline)
+      })
+      .slice(0, TARGET)
 
     console.log(
       '[tenders] pool_total=', engineResult.poolTotal,
