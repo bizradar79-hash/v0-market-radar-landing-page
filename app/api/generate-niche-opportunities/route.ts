@@ -1,5 +1,6 @@
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
+import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -65,17 +66,11 @@ export async function POST(request: Request) {
         .eq('company_id', ctx.user.id).limit(10),
     ])
 
-    // Flatten keyword trends
+    // Keyword trends — NEW DataForSEO shape (Record<keyword, StoredKeyword>) via
+    // the shared summarizer so weekly-actions + niche-opportunities can't diverge.
     const kwTrends = companyRow?.keyword_trends as Record<string, any> | null
-    const trendLines: string[] = []
-    if (kwTrends) {
-      for (const [kw, kwData] of Object.entries(kwTrends)) {
-        const phrases: any[] = kwData?.israel || kwData?.trends || []
-        for (const p of phrases.slice(0, 3)) {
-          if (p.phrase) trendLines.push(`"${p.phrase}" (${p.trend || ''}) — ${p.reason || ''} [keyword: ${kw}]`)
-        }
-      }
-    }
+    const kwSummary = summarizeKeywordTrends(kwTrends)
+    const trendLines = kwSummary[0] === 'אין נתוני מילות מפתח' ? [] : kwSummary
 
     // Extract already-used signal labels from weekly_actions to avoid exact duplicates
     const weeklyActions = companyRow?.weekly_actions as { actions: any[] } | null

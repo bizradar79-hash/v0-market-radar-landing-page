@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
+import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -51,17 +52,11 @@ export async function POST(request: Request) {
       ctx.supabase.from('conferences').select('name, date, location, url, description').eq('company_id', ctx.user.id).order('date', { ascending: true }).limit(5),
     ])
 
-    // Flatten keyword trends into a readable list
+    // Keyword trends — NEW DataForSEO shape (Record<keyword, StoredKeyword>) via
+    // the shared summarizer so weekly-actions + niche-opportunities can't diverge.
     const kwTrends = companyRow?.keyword_trends as Record<string, any> | null
-    const trendLines: string[] = []
-    if (kwTrends) {
-      for (const [kw, kwData] of Object.entries(kwTrends)) {
-        const phrases: any[] = kwData?.israel || kwData?.trends || []
-        for (const p of phrases.slice(0, 3)) {
-          if (p.phrase) trendLines.push(`"${p.phrase}" (${p.trend || ''}) — ${p.reason || ''}`)
-        }
-      }
-    }
+    const kwSummary = summarizeKeywordTrends(kwTrends)
+    const trendLines = kwSummary[0] === 'אין נתוני מילות מפתח' ? [] : kwSummary
 
     // Industry trends from new module
     const industryTrendsData = companyRow?.industry_trends as { trends?: any[] } | null

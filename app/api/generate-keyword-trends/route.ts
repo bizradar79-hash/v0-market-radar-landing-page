@@ -71,25 +71,30 @@ interface StoredKeyword {
   provider: 'dataforseo' | 'grok'
 }
 
-/** Template-based Hebrew insight (NO AI) — pure logic from the numbers. */
-function buildInsight(e: { keyword: string; searchVolume: number; changePct: number; direction: Direction; lowData: boolean }): string {
+/** Template-based Hebrew insight (NO AI) — pure logic from the numbers.
+ *  ORGANIC demand (volume + direction) and PAID signal (advertiser competition +
+ *  CPC) are kept SEPARATE: DataForSEO `competition`/`cpc` describe the paid-ads
+ *  auction, NOT organic SEO difficulty, so we never phrase one as the other. */
+function buildInsight(e: { keyword: string; searchVolume: number; changePct: number; direction: Direction; lowData: boolean; competition: Competition; cpc: number }): string {
   const kw = e.keyword
   const v = e.searchVolume
   const fmt = v.toLocaleString('he-IL')
   const sign = e.changePct > 0 ? '+' : ''
+  const cpc = Math.round((e.cpc || 0) * 100) / 100
+  const paid = `ממומן: תחרות פרסומית ${COMPETITION_HE[e.competition]}, CPC $${cpc}`
   if (v < LOW_VOLUME) {
-    return `ℹ️ '${kw}' נפח חיפוש נמוך (${fmt}/חודש) — נישה ממוקדת.`
+    return `ℹ️ '${kw}' נפח חיפוש נמוך (${fmt}/חודש) — נישה ממוקדת. ${paid}.`
   }
   if (e.direction === 'rising' && !e.lowData) {
-    return `📈 '${kw}' בעלייה (${sign}${e.changePct}%) עם ${fmt} חיפושים בחודש — שווה להגביר נוכחות.`
+    return `📈 '${kw}' — ${fmt} חיפושים/חודש, ביקוש עולה (${sign}${e.changePct}%). אורגני: שווה תוכן אורגני. ${paid}.`
   }
   if (e.direction === 'falling' && !e.lowData) {
-    return `📉 '${kw}' בירידה (${e.changePct}%) — ייתכן שהביקוש נחלש.`
+    return `📉 '${kw}' — ${fmt} חיפושים/חודש, ביקוש בירידה (${e.changePct}%). ${paid}.`
   }
   if (v >= HIGH_VOLUME) {
-    return `➡️ '${kw}' יציב עם ביקוש גבוה (${fmt}/חודש) — בסיס קבוע.`
+    return `➡️ '${kw}' ביקוש גבוה ויציב (${fmt}/חודש) — בסיס קבוע. ${paid}.`
   }
-  return `➡️ '${kw}' יציב עם ${fmt} חיפושים בחודש.`
+  return `➡️ '${kw}' יציב עם ${fmt} חיפושים/חודש. ${paid}.`
 }
 
 // Competition rank for comparisons: lower = easier to enter.
@@ -114,60 +119,86 @@ function levelFor(score: number): OpportunityLevel {
   return null
 }
 
-/** Hebrew action one-liner for a long-tail, from its numbers (NO AI). */
+/** Hebrew action one-liner for a long-tail, from its numbers (NO AI).
+ *  ORGANIC (demand: volume + trend) and PAID (תחרות פרסומית + CPC) are surfaced
+ *  as two SEPARATE clauses — a term can be cheap to rank organically yet
+ *  expensive in paid, or vice versa, so we never conflate them. Only floor-
+ *  clearing terms carry a 🔥/💎 badge (level !== null). */
 function buildRelatedAction(r: {
   keyword: string; searchVolume: number; changePct: number; direction: Direction;
-  lowData: boolean; competition: Competition; competitionHe: string; level: OpportunityLevel;
+  lowData: boolean; competition: Competition; competitionHe: string; cpc: number; level: OpportunityLevel;
 }, seedKeyword: string): string {
   const fmt = r.searchVolume.toLocaleString('he-IL')
   const sign = r.changePct > 0 ? '+' : ''
   const rising = r.direction === 'rising' && !r.lowData
-  const isHigh = r.competition === 'HIGH'
-  if (r.level === 'hot' && rising) {
-    return `🔥 '${r.keyword}' — ${fmt} חיפושים/חודש, עולה ${sign}${r.changePct}%, תחרות נמוכה מ'${seedKeyword}'. כניסה קלה ומשתלמת עכשיו.`
+  const falling = r.direction === 'falling' && !r.lowData
+  const dirHe = DIRECTION_HE[r.direction]
+  const cpc = Math.round((r.cpc || 0) * 100) / 100
+  const paid = `ממומן: תחרות ${r.competitionHe}, CPC $${cpc}`
+  const organic = rising
+    ? 'אורגני: ביקוש עולה — שווה תוכן אורגני'
+    : falling
+    ? 'אורגני: ביקוש נחלש'
+    : 'אורגני: ביקוש יציב'
+  const badge = r.level === 'hot' ? '🔥 ' : r.level === 'good' ? '💎 ' : ''
+  return `${badge}'${r.keyword}' — ${fmt} חיפושים/חודש, ${dirHe} ${sign}${r.changePct}%. ${organic}. ${paid}.`
+}
+
+/** Build ONE StoredRelated row. `level` null ⇒ a plain related term with NO
+ *  opportunity badge (used for below-floor fillers). */
+function toStoredRelated(
+  s: KeywordSuggestion, level: OpportunityLevel, score: number, seedKeyword: string,
+): StoredRelated {
+  const competitionHe = COMPETITION_HE[s.competition]
+  const direction = s.direction as Direction
+  const cpc = Math.round(s.cpc * 100) / 100
+  return {
+    keyword: s.keyword,
+    searchVolume: s.searchVolume,
+    cpc,
+    changePct: s.changePct,
+    direction,
+    directionHe: DIRECTION_HE[direction],
+    competition: s.competition,
+    competitionHe,
+    opportunityScore: score,
+    opportunityLevel: level,
+    action: buildRelatedAction({
+      keyword: s.keyword, searchVolume: s.searchVolume, changePct: s.changePct,
+      direction, lowData: s.lowData, competition: s.competition, competitionHe, cpc, level,
+    }, seedKeyword),
   }
-  if (rising && isHigh) {
-    return `📈 '${r.keyword}' — עולה ${sign}${r.changePct}%, אך תחרות גבוהה — שווה מעקב.`
-  }
-  if (r.level === 'good' || r.level === 'hot') {
-    return `💎 '${r.keyword}' — ${fmt} חיפושים/חודש בתחרות ${r.competitionHe}. הזדמנות כניסה טובה.`
-  }
-  return `'${r.keyword}' — ${fmt} חיפושים/חודש, תחרות ${r.competitionHe}.`
 }
 
 /** Re-rank the wide suggestion pool by OPPORTUNITY (not raw volume) and keep 3.
- *  Volume-gated, scored, then enriched with a quarterly trend, badge + action. */
+ *  HARD volume floor: a long-tail under KW_OPP_MIN is NEVER an opportunity — we
+ *  relax the upper cap if too few survive, but never drop below the floor (that
+ *  was the bug that badged 0-volume terms with a 💎). If fewer than 3 clear the
+ *  floor we fill the remaining slots with the highest-volume below-floor terms as
+ *  PLAIN related rows (opportunityLevel = null, no badge), rather than relaxing. */
 function selectOpportunities(seed: SearchVolumeEntry, pool: KeywordSuggestion[]): StoredRelated[] {
   if (pool.length === 0) return []
-  // Volume gate — drop noise and giants; relax upward if too few survive.
+  // Floor enforced on the lower bound; only the UPPER cap may relax.
   let gated = pool.filter(s => s.searchVolume >= KW_OPP_MIN && s.searchVolume <= KW_OPP_MAX)
-  if (gated.length < 3) gated = pool.filter(s => s.searchVolume >= KW_OPP_MIN)   // relax MAX
-  if (gated.length < 3) gated = pool.slice()                                      // relax MIN too
-  const scored = gated
+  if (gated.length < 3) gated = pool.filter(s => s.searchVolume >= KW_OPP_MIN)   // relax MAX only
+
+  const opportunities = gated
     .map(s => ({ s, score: scoreOpportunity(s, seed) }))
     .sort((a, b) => b.score - a.score || b.s.searchVolume - a.s.searchVolume)
     .slice(0, 3)
-  return scored.map(({ s, score }) => {
-    const level = levelFor(score)
-    const competitionHe = COMPETITION_HE[s.competition]
-    const direction = s.direction as Direction
-    return {
-      keyword: s.keyword,
-      searchVolume: s.searchVolume,
-      cpc: Math.round(s.cpc * 100) / 100,
-      changePct: s.changePct,
-      direction,
-      directionHe: DIRECTION_HE[direction],
-      competition: s.competition,
-      competitionHe,
-      opportunityScore: score,
-      opportunityLevel: level,
-      action: buildRelatedAction({
-        keyword: s.keyword, searchVolume: s.searchVolume, changePct: s.changePct,
-        direction, lowData: s.lowData, competition: s.competition, competitionHe, level,
-      }, seed.keyword),
-    }
-  })
+    .map(({ s, score }) => toStoredRelated(s, levelFor(score), score, seed.keyword))
+
+  // Pad with below-floor terms as un-badged related rows (never as opportunities).
+  if (opportunities.length < 3) {
+    const used = new Set(opportunities.map(o => o.keyword))
+    const fillers = pool
+      .filter(s => s.searchVolume < KW_OPP_MIN && !used.has(s.keyword))
+      .sort((a, b) => b.searchVolume - a.searchVolume)
+      .slice(0, 3 - opportunities.length)
+      .map(s => toStoredRelated(s, null, 0, seed.keyword))
+    opportunities.push(...fillers)
+  }
+  return opportunities
 }
 
 function volumeToStored(e: SearchVolumeEntry, suggestions: KeywordSuggestion[]): StoredKeyword {
