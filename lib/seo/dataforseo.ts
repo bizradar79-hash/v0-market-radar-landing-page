@@ -414,7 +414,6 @@ function volumeChange(monthly: MonthlySearch[]): { changePct: number; direction:
  */
 export async function fetchSearchVolume(keywords: string[], opts?: {
   locationName?: string
-  languageCode?: string
 }): Promise<SearchVolumeResult> {
   const auth = authHeader()
   if (!auth) return { ok: false, keywords: [], error: 'missing_credentials' }
@@ -422,13 +421,13 @@ export async function fetchSearchVolume(keywords: string[], opts?: {
   const kws = [...new Set(keywords.map(k => (k || '').trim()).filter(Boolean))].slice(0, 700)
   if (kws.length === 0) return { ok: false, keywords: [], error: 'no_keywords' }
 
-  // NOTE: google_ads/search_volume/live REJECTS `language_name` with
-  // "task_40501: Invalid Field: 'language_name'". It only accepts `language_code`
-  // (e.g. 'he'). location_name 'Israel' IS accepted. Language is optional here.
+  // NOTE: google_ads/search_volume/live REJECTS BOTH `language_name` AND
+  // `language_code` with "task_40501: Invalid Field: ...". This endpoint accepts
+  // NO language field — send location_name only (the manual raw test returned
+  // valid data, e.g. שטיחים → 18100, with no language field at all).
   const task = [{
     keywords: kws,
     location_name: opts?.locationName ?? 'Israel',
-    language_code: opts?.languageCode ?? 'he',
     search_partners: false,
   }]
 
@@ -503,7 +502,7 @@ export interface KeywordSuggestion { keyword: string; searchVolume: number; cpc:
  */
 export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   locationName?: string
-  languageCode?: string
+  languageName?: string
   limit?: number
 }): Promise<{ ok: boolean; suggestions: KeywordSuggestion[]; error?: string }> {
   const auth = authHeader()
@@ -512,12 +511,13 @@ export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
   if (!seed) return { ok: false, suggestions: [], error: 'no_keyword' }
   const limit = opts?.limit ?? 3
 
-  // Align with fetchSearchVolume: use `language_code` ('he') rather than
-  // `language_name`. Labs accepts both, but language_code is the safe form.
+  // DIFFERENT endpoint from search_volume: the Labs keyword_suggestions endpoint
+  // DOES require a language field and previously accepted `language_name`
+  // ('Hebrew') fine. Keep it independent — do NOT remove language here.
   const task = [{
     keyword: seed,
     location_name: opts?.locationName ?? 'Israel',
-    language_code: opts?.languageCode ?? 'he',
+    language_name: opts?.languageName ?? 'Hebrew',
     include_seed_keyword: false,
     limit: 30,
     order_by: ['keyword_info.search_volume,desc'],
