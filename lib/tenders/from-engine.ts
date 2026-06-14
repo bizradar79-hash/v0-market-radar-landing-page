@@ -48,6 +48,28 @@ function sigTokens(kw: string): string[] {
   return norm(kw).split(' ').filter(t => t.length >= 3 && !STOP_TOKENS.has(t))
 }
 
+// Hebrew GENERIC descriptors — room/location/surface words that qualify a
+// product VARIANT but never DEFINE the client's domain. A match on one of these
+// alone must NOT qualify a tender. This is what killed the carpet client's
+// false positives: "שטיח לחדר ילדים" → "חדר ניתוח", "שטיח סף לכניסה" → "בקרת כניסה".
+// Stored already norm()'d (deSofit + lowercase) so they line up with sigTokens.
+const GENERIC_TOKENS = new Set([
+  'חדר', 'חדרי', 'בית', 'כניסה', 'סף', 'פינה', 'פינת', 'קיר', 'רצפה', 'רצפת',
+  'שינה', 'ילד', 'ילדים', 'ילדה', 'סלון', 'מבואה', 'מטבח', 'אמבטיה', 'גן',
+  'משרד', 'מרפסת', 'מדרגות', 'עבודה', 'חוץ', 'פנים', 'קומה', 'דירה', 'מבנה',
+  'אזור', 'שטח', 'מקום', 'אתר',
+].map(norm))
+
+// Hebrew one-letter prefix particles. "לסלון"/"לחדר"/"לכניסה" must be recognized
+// as the generic words "סלון"/"חדר"/"כניסה", not treated as fresh defining tokens.
+const PARTICLES = new Set(['ב', 'ל', 'מ', 'ה', 'ו', 'ש', 'כ'])
+function deParticle(t: string): string {
+  return t.length >= 4 && PARTICLES.has(t[0]) ? t.slice(1) : t
+}
+function isGeneric(t: string): boolean {
+  return GENERIC_TOKENS.has(t) || GENERIC_TOKENS.has(deParticle(t))
+}
+
 // Split text into a Set of whole WORDS (Hebrew word boundaries already handled
 // by norm → whitespace). Word-to-word comparison is what kills substring
 // false-positives like "טיח" ∈ "שטיח".
@@ -147,12 +169,44 @@ export async function getEngineTendersForCompany(
     ...(bp?.primaryKeywords?.slice(0, 3) || []),
   ].filter(Boolean).map(norm)
 
-  // Precompute significant tokens per keyword once; flag multi-word phrases.
-  const kwInfo = keywords.map(kw => ({
-    norm: norm(kw),
-    tokens: sigTokens(kw),
-    multi: norm(kw).includes(' '),
-  }))
+  // ── Identify DEFINING (core) tokens vs GENERIC side-tokens ───────────────
+  // A multi-word keyword like "שטיח לחדר ילדים" carries ONE defining noun (שטיח)
+  // plus generic descriptors (חדר/ילדים). Only the defining token may qualify a
+  // tender; a generic descriptor matching an unrelated domain ("חדר ניתוח") was
+  // the false-positive bug. A generic token is promoted to "core" only when it
+  // DOMINATES this client's keyword set (≥ half the keywords) — so a client whose
+  // domain genuinely is e.g. "ריהוט חדר ילדים" still works.
+  const freq = new Map<string, number>()
+  for (const kw of keywords) {
+    for (const t of new Set(sigTokens(kw))) freq.set(t, (freq.get(t) || 0) + 1)
+  }
+  const freqThreshold = Math.max(2, Math.ceil(keywords.length * 0.5))
+  const coreSet = new Set<string>()
+  for (const [t, f] of freq) {
+    if (!isGeneric(t)) coreSet.add(t)          // non-generic = defining
+    else if (f >= freqThreshold) coreSet.add(t) // generic but dominant for THIS client
+  }
+  // Never over-filter into nothing: if every token read as generic, fall back to
+  // the single most-frequent token(s) as the core domain term.
+  if (coreSet.size === 0) {
+    let maxF = 0
+    for (const f of freq.values()) if (f > maxF) maxF = f
+    for (const [t, f] of freq) if (f === maxF) coreSet.add(t)
+  }
+
+  // Precompute per keyword: normalized phrase, all tokens, the CORE subset, and
+  // a multi-word flag. coreTokens is the ONLY set allowed to qualify a tender.
+  const kwInfo = keywords.map(kw => {
+    const tokens = sigTokens(kw)
+    return {
+      norm: norm(kw),
+      tokens,
+      coreTokens: tokens.filter(t => coreSet.has(t)),
+      multi: norm(kw).includes(' '),
+    }
+  })
+
+  console.log('[tenders] core terms:', [...coreSet].join(', ') || '(none)')
 
   // Honest scoring (deterministic, no AI):
   //   title phrase +5 · title word(root) +3 · desc phrase +2 · desc word +1 · category +3
@@ -168,18 +222,30 @@ export async function getEngineTendersForCompany(
     const descNorm = norm(tender.description || '')
     const catWords = wordsOf(tender.category || '')
 
+    // QUALIFY (hard gate): a tender counts ONLY if it matches a DEFINING (core)
+    // token as a whole word, or a full multi-word keyword phrase. Generic
+    // side-tokens (חדר/כניסה/ילדים…) can never qualify a tender on their own, and
+    // a category/publisher match alone can't either — that was the source of the
+    // "חדר ניתוח" (60%) and "בקרת כניסה" (30%) false matches for the carpet client.
+    const coreMatched = kwInfo.some(k =>
+      (k.multi && (titleNorm.includes(k.norm) || descNorm.includes(k.norm))) ||
+      wordHit(titleWords, k.coreTokens) ||
+      wordHit(descWords, k.coreTokens)
+    )
+    if (!coreMatched) return { tender, raw: 0, relevance: 10 }
+
     let raw = 0
     for (const k of kwInfo) {
-      if (k.tokens.length === 0) continue
-      // Title
+      if (k.coreTokens.length === 0 && !k.multi) continue
+      // Title — full phrase is strongest; else a CORE whole-word hit.
       if (k.multi && titleNorm.includes(k.norm)) raw += 5
-      else if (wordHit(titleWords, k.tokens)) raw += 3
+      else if (wordHit(titleWords, k.coreTokens)) raw += 3
       // Description
       if (k.multi && descNorm.includes(k.norm)) raw += 2
-      else if (wordHit(descWords, k.tokens)) raw += 1
+      else if (wordHit(descWords, k.coreTokens)) raw += 1
     }
 
-    // Category — root-aware word match against the company's profile terms.
+    // Category — additive only (the tender already core-matched above).
     if (profileTerms.some(t => t && wordHit(catWords, sigTokens(t)))) raw += 3
 
     const relevance = Math.max(10, Math.min(99, Math.round((raw / MAX_REASONABLE) * 100)))
