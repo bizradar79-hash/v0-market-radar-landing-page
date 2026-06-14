@@ -21,11 +21,12 @@ const MODULE_ROUTES: Record<string, string[]> = {
   competitors:    ['/api/find-competitors'],
   seo:            ['/api/generate-seo-ranking'],
   geo:            ['/api/generate-geo-ranking'],
-  // `trends` runs the industry + competitor trend modules. keyword_trends is a
-  // SEPARATE, independently-runnable module so the DataForSEO Google Ads path
-  // (generate-keyword-trends) actually gets invoked from admin — it was missing
-  // here, which is why keyword_trends always showed "—"/"AI estimated".
-  trends:         ['/api/industry-trends', '/api/competitor-trends'],
+  // The grouped `trends` button fans out to ALL THREE trend modules — including
+  // keyword_trends (DataForSEO Google Ads). It was previously missing from this
+  // fan-out, so clicking "trends" never invoked generate-keyword-trends and the
+  // data always showed "—"/"AI estimated". The three keys below also expose each
+  // trend module as an independently-runnable button.
+  trends:         ['/api/industry-trends', '/api/competitor-trends', '/api/generate-keyword-trends'],
   industry_trends:   ['/api/industry-trends'],
   competitor_trends: ['/api/competitor-trends'],
   keyword_trends:    ['/api/generate-keyword-trends'],
