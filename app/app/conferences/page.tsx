@@ -6,7 +6,6 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -20,6 +19,21 @@ import {
 
 function getHostname(url: string): string | null {
   try { return new URL(url).hostname } catch { return null }
+}
+
+// Conference relevance is encoded into `description` by the API:
+//   `[rel:<score>]<reason>␟<real description>`
+function parseRelevance(description: string): { score: number | null; reason: string; text: string } {
+  const m = (description || '').match(/^\[rel:(\d+)\]([\s\S]*?)␟([\s\S]*)$/)
+  if (!m) return { score: null, reason: '', text: description || '' }
+  return { score: parseInt(m[1], 10), reason: m[2].trim(), text: m[3] }
+}
+
+// Transparent match-quality band from the relevance % — mirrors the tenders page.
+function getMatchBand(score: number) {
+  if (score >= 70) return { label: 'התאמה גבוהה', text: 'text-green-700', chip: 'bg-green-100 text-green-700', bar: 'bg-green-500' }
+  if (score >= 40) return { label: 'רלוונטי לתחום', text: 'text-yellow-700', chip: 'bg-yellow-100 text-yellow-700', bar: 'bg-yellow-500' }
+  return { label: 'עסקי כללי', text: 'text-gray-500', chip: 'bg-gray-100 text-gray-500', bar: 'bg-gray-400' }
 }
 
 interface Conference {
@@ -59,10 +73,20 @@ export default function ConferencesPage() {
     const { data, error } = await supabase
       .from("conferences")
       .select("*")
-      .order("date", { ascending: true })
 
     if (!error && data) {
-      setConferences(data)
+      // Rank high-to-low by relevance (tiebreak nearest date) so the best
+      // matches lead — exactly like the tenders page.
+      const rows = [...data].sort((a: Conference, b: Conference) => {
+        const sa = parseRelevance(a.description).score ?? -1
+        const sb = parseRelevance(b.description).score ?? -1
+        if (sb !== sa) return sb - sa
+        if (!a.date && !b.date) return 0
+        if (!a.date) return 1
+        if (!b.date) return -1
+        return a.date.localeCompare(b.date)
+      })
+      setConferences(rows)
     }
     setLoading(false)
   }
@@ -119,17 +143,6 @@ export default function ConferencesPage() {
     }
   }
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      "טכנולוגיה": "bg-blue-100 text-blue-800",
-      "עסקים": "bg-green-100 text-green-800",
-      "סטארטאפים": "bg-purple-100 text-purple-800",
-      "פיננסים": "bg-yellow-100 text-yellow-800",
-      "חדשנות": "bg-pink-100 text-pink-800",
-    }
-    return colors[category] || "bg-gray-100 text-gray-800"
-  }
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -184,7 +197,7 @@ export default function ConferencesPage() {
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mb-4">
               <Calendar className="h-8 w-8 text-primary" />
             </div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">אין כנסים להצגה</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-2">לא נמצאו כנסים רלוונטיים</h3>
             <p className="text-muted-foreground max-w-md mb-4">
               לחץ על הכפתור למעלה כדי למצוא כנסים רלוונטיים לתחום שלך
             </p>
@@ -192,23 +205,34 @@ export default function ConferencesPage() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {conferences.map((conference) => (
+          {conferences.map((conference) => {
+            const rel = parseRelevance(conference.description)
+            const band = rel.score != null ? getMatchBand(rel.score) : null
+            return (
             <Card key={conference.id} className="border-border bg-card hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-2">
                   <CardTitle className="text-lg font-semibold text-foreground leading-tight">
                     {conference.name}
                   </CardTitle>
-                  <Badge className={getCategoryColor(conference.category)}>
-                    {conference.category}
-                  </Badge>
+                  {band && (
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${band.chip}`}>
+                      {rel.score}% · {band.label}
+                    </span>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground line-clamp-2">
-                  {conference.description}
+                  {rel.text}
                 </p>
-                
+
+                {rel.reason && (
+                  <p className={`text-xs ${band ? band.text : 'text-muted-foreground'}`}>
+                    ✓ {rel.reason}
+                  </p>
+                )}
+
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Calendar className="h-4 w-4" />
@@ -260,7 +284,8 @@ export default function ConferencesPage() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
