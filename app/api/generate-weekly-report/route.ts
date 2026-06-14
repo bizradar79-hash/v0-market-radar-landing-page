@@ -3,6 +3,7 @@ export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
+import { summarizeKeywordTrends, buildKeywordIntel } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     // Fetch all JSONB data from companies row
     const { data: companyData } = await ctx.supabase
       .from('companies')
-      .select('business_profile, seo_ranking, geo_ranking, industry_trends, competitor_trends, niche_opportunities, weekly_actions')
+      .select('business_profile, seo_ranking, geo_ranking, industry_trends, competitor_trends, niche_opportunities, weekly_actions, keyword_trends')
       .eq('id', userId)
       .single()
 
@@ -85,6 +86,14 @@ export async function POST(request: Request) {
       .order('score', { ascending: false })
       .limit(10)
 
+    // Real keyword intelligence (DataForSEO) — authoritative, never AI-invented.
+    // Include ALL client keywords (clients have only ~5-8), so the report reflects
+    // every real keyword rather than a top-N slice.
+    const kwTrends = (companyData as any)?.keyword_trends as Record<string, any> | null
+    const kwSummary = summarizeKeywordTrends(kwTrends, { maxLines: 100, maxOpportunities: 20 })
+    const kwLines = kwSummary[0] === 'אין נתוני מילות מפתח' ? [] : kwSummary
+    const keywordIntel = buildKeywordIntel(kwTrends)
+
     const allData = {
       company: { name: companyName, industry, website: ctx.company?.website, business_profile: companyData?.business_profile },
       seo_ranking: companyData?.seo_ranking,
@@ -98,6 +107,7 @@ export async function POST(request: Request) {
       tenders: tenders || [],
       conferences: conferences || [],
       trends: trends || [],
+      keyword_intel_real: kwLines,
     }
 
     const geminiKey = process.env.GEMINI_API_KEY
@@ -107,9 +117,14 @@ export async function POST(request: Request) {
     }
 
     const nowIso = new Date().toISOString()
+    const kwBlock = kwLines.length > 0
+      ? `\n\nנתוני מילות מפתח אמיתיים (DataForSEO — מקור סמכותי, השתמש במספרים האלה בלבד, אל תמציא מספרים):\n${kwLines.join('\n')}`
+      : ''
+
     const prompt = `אתה יועץ עסקי בכיר. צור דוח שבועי מקצועי בעברית לבעל עסק בתחום ${industry}.
 הדוח צריך לכלול תובנות אמיתיות, מספרים ספציפיים, והמלצות פעולה ברורות.
-המידע: ${JSON.stringify(allData)}
+המידע: ${JSON.stringify(allData)}${kwBlock}
+חשוב: בשדה trends.hot_keywords השתמש אך ורק במילות המפתח האמיתיות מהרשימה לעיל (אם קיימת). אל תמציא מילות מפתח או מספרי חיפוש.
 
 החזר JSON בלבד (ללא markdown, ללא הסברים):
 {
@@ -190,6 +205,15 @@ export async function POST(request: Request) {
     }
 
     report.generated_at = nowIso
+
+    // Deterministically attach REAL keyword intelligence (never AI-invented).
+    if (!report.trends || typeof report.trends !== 'object') report.trends = {}
+    if (keywordIntel.keywords.length > 0) {
+      report.trends.keyword_intel = keywordIntel.keywords
+      report.trends.keyword_opportunities = keywordIntel.opportunities
+      // Ensure hot_keywords reflects the real top movers (override any model guess).
+      report.trends.hot_keywords = keywordIntel.keywords.slice(0, 6).map((k) => k.keyword)
+    }
 
     const { error: dbError } = await ctx.supabase
       .from('companies').update({ last_report: report } as any).eq('id', userId)

@@ -40,9 +40,18 @@ export async function POST() {
 
     if (report?.executive_summary) {
       // Full report cached — extract highlights from it
+      // Prefer real keyword movers for the trends highlight when available.
+      const kwIntel = report.trends?.keyword_intel as any[] | undefined
+      const kwHighlight = Array.isArray(kwIntel) && kwIntel.length
+        ? kwIntel.slice(0, 3).map((k: any) => {
+            const dirHe = k.directionHe || (k.direction === 'rising' ? 'עולה' : k.direction === 'falling' ? 'יורד' : 'יציב')
+            const vol = (typeof k.searchVolume === 'number' ? k.searchVolume : 0).toLocaleString('he-IL')
+            return `${k.keyword} (${vol} חיפושים, ${dirHe})`
+          }).join(', ')
+        : null
       highlights = {
         competitors: report.competitors?.summary || 'אין מידע זמין',
-        trends: report.trends?.market_insights?.[0] || report.trends?.hot_keywords?.join(', ') || 'אין מידע זמין',
+        trends: kwHighlight || report.trends?.market_insights?.[0] || report.trends?.hot_keywords?.join(', ') || 'אין מידע זמין',
         news: report.news_tenders?.relevant_news?.[0]?.title || 'אין מידע זמין',
         conferences: report.news_tenders?.upcoming_conferences?.[0]?.name || 'אין מידע זמין',
         tenders: report.news_tenders?.active_tenders?.length
@@ -86,6 +95,7 @@ export async function POST() {
       companyName,
       weekDate,
       highlights,
+      report,
     })
 
     // 5. Generate PDF

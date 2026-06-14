@@ -44,8 +44,40 @@ function sectionRow(icon: string, title: string, content: string): string {
     </tr>`
 }
 
+function buildKeywordHtml(report?: { trends?: any }): string {
+  const intel = report?.trends?.keyword_intel
+  if (!Array.isArray(intel) || intel.length === 0) return ''
+  const fmtPct = (v?: number) => {
+    const n = typeof v === 'number' ? v : 0
+    return `${n > 0 ? '+' : ''}${n}%`
+  }
+  const fmtVol = (v?: number) => (typeof v === 'number' ? v : 0).toLocaleString('he-IL')
+  const arrow = (dir?: string) => (dir === 'rising' ? '&#9650;' : dir === 'falling' ? '&#9660;' : '&#9644;')
+  const color = (dir?: string) => (dir === 'rising' ? '#16a34a' : dir === 'falling' ? '#dc2626' : '#6b7280')
+
+  const rows = intel.slice(0, 6).map((k: any) => {
+    const dirHe = k.directionHe || (k.direction === 'rising' ? 'עולה' : k.direction === 'falling' ? 'יורד' : 'יציב')
+    let meta = `${fmtVol(k.searchVolume)} חיפושים/חודש`
+    if (k.competitionHe && k.competitionHe !== '—') meta += ` &middot; תחרות פרסומית ${k.competitionHe}`
+    if (typeof k.cpc === 'number' && k.cpc > 0) meta += ` &middot; CPC $${k.cpc}`
+    return `<div style="padding: 6px 0; border-bottom: 1px solid #eef2f7;">
+      <span style="font-weight: 700; color: #111827;">${k.keyword}</span>
+      <span style="color: ${color(k.direction)}; font-weight: 700; margin: 0 6px;">${arrow(k.direction)} ${dirHe} ${fmtPct(k.changePct)}</span>
+      <br><span style="font-size: 12px; color: #6b7280;">${meta}</span>
+    </div>`
+  }).join('')
+
+  const opps = (report?.trends?.keyword_opportunities || []).slice(0, 3).map((o: any) => {
+    const dirHe = o.directionHe || (o.direction === 'rising' ? 'עולה' : o.direction === 'falling' ? 'יורד' : 'יציב')
+    return `<div style="padding: 4px 0; font-size: 13px; color: #374151;">&#128161; הזדמנות: <b>${o.keyword}</b> — ${fmtVol(o.searchVolume)} חיפושים/חודש, ${dirHe}</div>`
+  }).join('')
+
+  return rows + (opps ? `<div style="margin-top: 10px;">${opps}</div>` : '')
+}
+
 export function renderWeeklyReportEmail(data: WeeklyReportEmailData): string {
   const { companyName, weekDate, highlights, report } = data
+  const keywordHtml = buildKeywordHtml(report)
 
   const executiveSummary = report?.executive_summary
     ? `<tr>
@@ -119,6 +151,7 @@ export function renderWeeklyReportEmail(data: WeeklyReportEmailData): string {
 
                 <!-- Sections -->
                 ${sectionRow('&#128202;', 'מודיעין מתחרים', highlights.competitors || 'אין מידע זמין')}
+                ${keywordHtml ? sectionRow('&#128270;', 'מילות מפתח ומגמות', keywordHtml) : ''}
                 ${sectionRow('&#128200;', 'טרנדים בשוק', highlights.trends || 'אין מידע זמין')}
                 ${sectionRow('&#128240;', 'חדשות מהענף', highlights.news || 'אין מידע זמין')}
                 ${sectionRow('&#127914;', 'כנסים קרובים', highlights.conferences || 'אין מידע זמין')}

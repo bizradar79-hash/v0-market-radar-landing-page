@@ -31,7 +31,13 @@ export interface WeeklyReportPdfData {
     executive_summary?: string
     seo_geo?: { summary?: string; opportunities?: string[] }
     competitors?: { summary?: string; threats?: { name: string; threat_score: number; threat: string }[]; opportunities?: string[] }
-    trends?: { hot_keywords?: string[]; competitor_moves?: string[]; market_insights?: string[] }
+    trends?: {
+      hot_keywords?: string[]
+      competitor_moves?: string[]
+      market_insights?: string[]
+      keyword_intel?: { keyword: string; searchVolume: number; direction?: string; directionHe?: string; changePct?: number; competition?: string; competitionHe?: string; cpc?: number; insight?: string }[]
+      keyword_opportunities?: { keyword: string; searchVolume: number; direction?: string; directionHe?: string; changePct?: number; opportunityLevel?: 'hot' | 'good' | null; seedKeyword?: string }[]
+    }
     opportunities?: { new_niches?: string[]; distribution_channels?: string[]; actions?: string[] }
     news_tenders?: {
       relevant_news?: { title: string; summary?: string }[]
@@ -194,12 +200,38 @@ export async function generateWeeklyReportPdf(data: WeeklyReportPdfData): Promis
         ], pageWidth, margin)
       }
 
-      if (report.trends?.hot_keywords?.length || report.trends?.market_insights?.length) {
-        addSection(doc, 'טרנדים ותובנות שוק', [
-          ...(report.trends?.hot_keywords || []).map((k: string) => `מילת מפתח: ${k}`),
-          ...(report.trends?.competitor_moves || []),
-          ...(report.trends?.market_insights || []),
-        ], pageWidth, margin)
+      // Dedicated keyword section — REAL DataForSEO numbers (no emoji, Heebo-safe).
+      if (report.trends?.keyword_intel?.length) {
+        const fmtPct = (v?: number) => {
+          const n = typeof v === 'number' ? v : 0
+          return `${n > 0 ? '+' : ''}${n}%`
+        }
+        const fmtVol = (v?: number) => (typeof v === 'number' ? v : 0).toLocaleString('he-IL')
+        const kwLines: string[] = []
+        for (const k of report.trends.keyword_intel) {
+          const dirHe = k.directionHe || (k.direction === 'rising' ? 'עולה' : k.direction === 'falling' ? 'יורד' : 'יציב')
+          let line = `"${k.keyword}" — ${fmtVol(k.searchVolume)} חיפושים/חודש, ${dirHe} ${fmtPct(k.changePct)}`
+          if (k.competitionHe && k.competitionHe !== '—') line += `, תחרות פרסומית ${k.competitionHe}`
+          if (typeof k.cpc === 'number' && k.cpc > 0) line += `, CPC $${k.cpc}`
+          kwLines.push(line)
+          if (k.insight) kwLines.push(`   ${k.insight}`)
+        }
+        for (const o of report.trends.keyword_opportunities || []) {
+          const dirHe = o.directionHe || (o.direction === 'rising' ? 'עולה' : o.direction === 'falling' ? 'יורד' : 'יציב')
+          kwLines.push(`הזדמנות long-tail: "${o.keyword}" — ${fmtVol(o.searchVolume)} חיפושים/חודש, ${dirHe} ${fmtPct(o.changePct)}`)
+        }
+        addSection(doc, 'מילות מפתח ומגמות', kwLines, pageWidth, margin)
+      }
+
+      const hasKwIntel = !!report.trends?.keyword_intel?.length
+      const trendsExtra = [
+        // Only fall back to AI hot_keywords when we have no real keyword intel.
+        ...(hasKwIntel ? [] : (report.trends?.hot_keywords || []).map((k: string) => `מילת מפתח: ${k}`)),
+        ...(report.trends?.competitor_moves || []),
+        ...(report.trends?.market_insights || []),
+      ]
+      if (trendsExtra.length) {
+        addSection(doc, 'טרנדים ותובנות שוק', trendsExtra, pageWidth, margin)
       }
 
       if (report.opportunities?.new_niches?.length || report.opportunities?.actions?.length) {
