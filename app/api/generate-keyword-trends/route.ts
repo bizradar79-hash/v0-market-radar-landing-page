@@ -207,9 +207,16 @@ export async function POST(request: Request) {
           suggByKw.set(kw, sg.ok ? sg.suggestions : [])
         }))
 
+        // Match returned rows back to requested keywords. Normalize with NFC +
+        // trim so Hebrew echoes from DataForSEO never miss (a failed match would
+        // silently leave stale AI-estimated data via the keep-existing guard).
+        const norm = (s: string) => (s || '').trim().normalize('NFC').toLowerCase()
+        const byKw = new Map(vol.keywords.map(k => [norm(k.keyword), k]))
         for (const kw of keywords) {
-          const match = vol.keywords.find(k => k.keyword?.toLowerCase() === kw.toLowerCase()) ?? null
+          const match = byKw.get(norm(kw))
+            ?? (vol.keywords.length === keywords.length ? vol.keywords[keywords.indexOf(kw)] : undefined)
           if (match) built[kw] = volumeToStored(match, suggByKw.get(kw) ?? [])
+          else console.warn(`[keyword_trends] no volume row matched "${kw}" (got: ${vol.keywords.map(k => k.keyword).join(', ')})`)
         }
         console.log(`[keyword_trends] DataForSEO Google Ads: ${Object.keys(built).length}/${keywords.length} keywords with real volume`)
       } else {

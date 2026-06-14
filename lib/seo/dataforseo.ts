@@ -384,16 +384,28 @@ export async function fetchSearchVolume(keywords: string[], opts?: {
       body: JSON.stringify(task),
     })
     const data = await res.json().catch(() => ({}))
+    // Envelope: { status_code, tasks: [ { status_code, status_message, result: [...] } ] }
     const taskNode = data?.tasks?.[0]
     const taskStatus = taskNode?.status_code
     if (!res.ok || data?.status_code == null) {
+      console.warn(`[search_volume] http_${res.status}: ${data?.status_message ?? 'no body'}`)
       return { ok: false, keywords: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
     }
     if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      console.warn(`[search_volume] task_${taskStatus}: ${taskNode?.status_message ?? 'err'}`)
       return { ok: false, keywords: [], error: `task_${taskStatus}: ${taskNode?.status_message ?? 'err'}` }
     }
 
-    const rows: any[] = Array.isArray(taskNode?.result) ? taskNode.result : []
+    // Keyword objects live at tasks[0].result[]. Some Keywords-Data responses
+    // wrap them one level deeper under result[].items[] — handle BOTH shapes so a
+    // valid response is never mis-read as empty.
+    const resultArr: any[] = Array.isArray(taskNode?.result) ? taskNode.result : []
+    const rows: any[] = resultArr.some((r: any) => r && r.keyword != null)
+      ? resultArr
+      : resultArr.flatMap((r: any) => Array.isArray(r?.items) ? r.items : [])
+    if (rows.length === 0) {
+      console.warn(`[search_volume] task ok but no rows (result len ${resultArr.length}) for ${kws.length} kw`)
+    }
     const out: SearchVolumeEntry[] = rows
       .filter((r: any) => r && r.keyword)
       .map((r: any) => {
@@ -464,22 +476,30 @@ export async function fetchKeywordSuggestions(seedKeyword: string, opts?: {
     const taskNode = data?.tasks?.[0]
     const taskStatus = taskNode?.status_code
     if (!res.ok || data?.status_code == null) {
+      console.warn(`[kw_suggestions] http_${res.status}: ${data?.status_message ?? 'no body'}`)
       return { ok: false, suggestions: [], error: `http_${res.status}: ${data?.status_message ?? 'no body'}` }
     }
     if (taskStatus && taskStatus !== 20000 && taskStatus !== 20100) {
+      console.warn(`[kw_suggestions] task_${taskStatus}: ${taskNode?.status_message ?? 'err'}`)
       return { ok: false, suggestions: [], error: `task_${taskStatus}: ${taskNode?.status_message ?? 'err'}` }
     }
 
-    const items: any[] = Array.isArray(taskNode?.result?.[0]?.items) ? taskNode.result[0].items : []
+    // Suggestion items live at tasks[0].result[0].items[]. Fall back to scanning
+    // every result[] node's items (and to result[] itself) so volume is never
+    // dropped due to a slightly different envelope nesting.
+    const resultArr: any[] = Array.isArray(taskNode?.result) ? taskNode.result : []
+    let items: any[] = resultArr.flatMap((r: any) => Array.isArray(r?.items) ? r.items : [])
+    if (items.length === 0) items = resultArr.filter((r: any) => r && (r.keyword || r.keyword_data))
     const seedLc = seed.toLowerCase()
     const suggestions: KeywordSuggestion[] = items
       .map((it: any) => {
         const kw = String(it?.keyword ?? it?.keyword_data?.keyword ?? '').trim()
+        // search_volume may sit at item.keyword_info.* or be nested under keyword_data.
         const info = it?.keyword_info ?? it?.keyword_data?.keyword_info ?? {}
         return {
           keyword: kw,
-          searchVolume: Number(info.search_volume) || 0,
-          cpc: Number(info.cpc) || 0,
+          searchVolume: Number(info.search_volume ?? it?.search_volume) || 0,
+          cpc: Number(info.cpc ?? it?.cpc) || 0,
         }
       })
       .filter((s: KeywordSuggestion) => s.keyword && s.keyword.toLowerCase() !== seedLc)
