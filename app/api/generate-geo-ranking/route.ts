@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
-import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { logKeptExisting } from '@/lib/scan/guard'
 import { fetchOpenAIGeoRaw } from '@/lib/geo/openai-engine'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
@@ -33,22 +33,102 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = GEO_
 }
 
 function extractDomain(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return '' }
+  try {
+    const u = url.includes('://') ? url : `https://${url}`
+    return new URL(u).hostname.replace(/^www\./, '')
+  } catch { return (url || '').toLowerCase().replace(/^www\./, '').split('/')[0] }
 }
 
-function isOwnResult(r: any, companyName: string, companyDomain: string): boolean {
-  const domain = companyDomain.toLowerCase().trim()
+// Normalize free text for fuzzy name comparison: lowercase, strip punctuation
+// and common legal suffixes (Hebrew "בע"מ"/"ב.ש", Latin ltd/inc/llc), collapse
+// whitespace.
+function normalizeText(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/["'’`״׳.,()|\[\]{}<>!?:;/\\_=+*&^%$#@~-]+/g, ' ')
+    .replace(/\b(בע"?מ|בעמ|בע״מ|ב\.?ש|ltd|inc|llc|co|company)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Compact form for token containment: normalized text with ALL whitespace
+// removed, so "Buy Carpet" and "buycarpet" and "buycarpet.co.il" all collapse
+// to a comparable token ("buycarpet"...).
+function compactText(s: string): string {
+  return normalizeText(s).replace(/\s+/g, '')
+}
+
+// Brand token from a domain: first label, letters/digits only.
+// "buycarpet.co.il" → "buycarpet".
+function brandTokenFromDomain(domain: string): string {
+  const first = (domain || '').split('.')[0] || ''
+  return first.replace(/[^a-z0-9֐-׿]/gi, '').toLowerCase()
+}
+
+interface ClientIdentity {
+  domain: string          // buycarpet.co.il
+  brandTokens: string[]   // compacted brand tokens (e.g. "buycarpet")
+  names: string[]         // normalized full names/aliases for fuzzy contains
+}
+
+// Derive every identity the client may appear under in engine results:
+// legal name, website domain + its brand token, explicit brandName, aliases.
+function buildClientIdentity(companyName: string, website: string, bp: any): ClientIdentity {
+  const domain = extractDomain(website).toLowerCase().trim()
+  const explicitBrand = typeof bp?.brandName === 'string' ? bp.brandName.trim() : ''
+  const aliases: string[] = Array.isArray(bp?.aliases)
+    ? bp.aliases.filter((a: any) => typeof a === 'string' && a.trim()) : []
+  const brandTokens = Array.from(new Set(
+    [brandTokenFromDomain(domain), compactText(explicitBrand), ...aliases.map(compactText)]
+      .filter((t) => t.length >= 3),
+  ))
+  const names = Array.from(new Set(
+    [companyName, explicitBrand, ...aliases]
+      .map(normalizeText)
+      .filter((n) => n.length >= 4),
+  ))
+  return { domain, brandTokens, names }
+}
+
+// True if a result is the client, matched by domain OR brand token OR fuzzy name.
+function isOwnResult(r: any, identity: ClientIdentity): boolean {
   const resultUrl = (r.url || '').toLowerCase().trim()
-  const resultTitle = (r.title || r.name || '').toLowerCase().trim()
-  const name = companyName.toLowerCase().trim()
-  // Domain match (most reliable)
-  if (domain.length >= 3 && resultUrl.includes(domain)) return true
-  // Exact title match only
-  if (name.length >= 3 && resultTitle === name) return true
+  const resultName = r.name || r.title || ''
+  const nameNorm = normalizeText(resultName)
+  const nameCompact = compactText(resultName)
+  const urlCompact = compactText(resultUrl)
+  // 1. Domain in result URL (most reliable).
+  if (identity.domain.length >= 3 && resultUrl.includes(identity.domain)) return true
+  // 2. Brand token contained in the result name or URL text
+  //    ("BuyCarpet", "Buy Carpet", "buycarpet.co.il" all contain "buycarpet").
+  for (const tok of identity.brandTokens) {
+    if (tok.length >= 3 && (nameCompact.includes(tok) || urlCompact.includes(tok))) return true
+  }
+  // 3. Fuzzy name: normalized containment in either direction.
+  if (nameNorm.length >= 3) {
+    for (const nm of identity.names) {
+      if (nm.length >= 4 && (nameNorm.includes(nm) || nm.includes(nameNorm))) return true
+    }
+  }
   return false
 }
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+// Total result rows captured across ALL engines × ALL queries in a geo_ranking
+// object. Used by the write guard so one empty engine can't make the whole
+// scan look "empty". Falls back to the legacy single `results` array.
+function totalEngineResults(geo: any): number {
+  const qr = geo?.queryResults
+  if (qr && typeof qr === 'object') {
+    return Object.values(qr).reduce((sum: number, eng: any) =>
+      sum +
+      (Array.isArray(eng?.chatgpt?.results) ? eng.chatgpt.results.length : 0) +
+      (Array.isArray(eng?.gemini?.results) ? eng.gemini.results.length : 0) +
+      (Array.isArray(eng?.grok?.results) ? eng.grok.results.length : 0), 0)
+  }
+  return Array.isArray(geo?.results) ? geo.results.length : 0
+}
 
 // Real engines only: 'openai' = ChatGPT (Responses API + web_search),
 // 'gemini' = Google API, 'grok' = xAI. ('general' kept for legacy callers.)
@@ -136,8 +216,7 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
 
 function processResults(
   rawResults: any[],
-  companyName: string,
-  companyDomain: string,
+  identity: ClientIdentity,
   competitorNames: string[],
 ): { position: number | null; topResults: string[]; appeared: boolean; results: any[] } {
   const seenDomains = new Set<string>()
@@ -149,7 +228,7 @@ function processResults(
     results.push(r)
   }
   results.forEach((r: any) => {
-    const own = isOwnResult(r, companyName, companyDomain)
+    const own = isOwnResult(r, identity)
     r.isOwn = own
     r.isCompany = own
     const rName = (r.name || '').toLowerCase()
@@ -172,10 +251,10 @@ async function runGeminiEngine(
   companyName: string,
   website: string,
   competitorNames: string[],
+  identity: ClientIdentity,
   industry?: string,
   cost?: ScanCostCollector,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  const companyDomain = extractDomain(website)
   const geminiKey = process.env.GEMINI_API_KEY
   if (!geminiKey) return { position: null, topResults: [], appeared: false, results: [] }
 
@@ -246,7 +325,7 @@ async function runGeminiEngine(
       url: item.domain ? `https://${item.domain}` : '',
       title: item.name || '',
     }))
-    return processResults(rawResults, companyName, companyDomain, competitorNames)
+    return processResults(rawResults, identity, competitorNames)
   } catch (err) {
     console.error('[GEO gemini] exception:', err)
     return { position: null, topResults: [], appeared: false, results: [] }
@@ -260,21 +339,20 @@ async function runGeoQuestion(
   companyName: string,
   website: string,
   competitorNames: string[],
+  identity: ClientIdentity,
   engine: Engine = 'general',
   industry?: string,
   cost?: ScanCostCollector,
 ): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, industry, cost)
+  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, identity, industry, cost)
 
   // OpenAI / ChatGPT engine — real Responses API + web_search.
   if (engine === 'openai') {
-    const companyDomain = extractDomain(website)
     const rawResults = await fetchOpenAIGeoRaw(query, companyName, website, competitorNames, cost)
-    return processResults(rawResults, companyName, companyDomain, competitorNames)
+    return processResults(rawResults, identity, competitorNames)
   }
 
   const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
-  const companyDomain = extractDomain(website)
 
   const t0 = Date.now()
   let response: Response
@@ -324,7 +402,7 @@ async function runGeoQuestion(
   }
 
   const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : [])
-  return processResults(rawResults, companyName, companyDomain, competitorNames)
+  return processResults(rawResults, identity, competitorNames)
 }
 
 // ── POST ───────────────────────────────────────────────────────────────────
@@ -375,6 +453,18 @@ export async function POST(request: Request) {
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
     const coreActivityDesc = businessProfile?.coreActivity || industry
     const geminiIndustry = coreActivityDesc
+
+    // Identity used to MATCH the client inside engine results (brand/domain/
+    // alias aware), and a brand-aware label injected into the engine prompts so
+    // the engines also detect the client under its real brand (e.g. "BuyCarpet"
+    // / buycarpet.co.il), not just its legal name ("שטיחים בסנטר ב.ש בע"מ").
+    const clientIdentity = buildClientIdentity(companyName, website, businessProfile)
+    const derivedBrand = (businessProfile?.brandName && businessProfile.brandName.trim())
+      ? businessProfile.brandName.trim()
+      : extractDomain(website)
+    const companyLabel = (derivedBrand && !companyName.toLowerCase().includes(derivedBrand.toLowerCase()))
+      ? `${companyName} (ידוע גם כ-"${derivedBrand}")`
+      : companyName
 
     // Cost instrumentation — one collector per route, flushed once at the end.
     const cost = new ScanCostCollector(ctx.user.id, 'geo_ranking')
@@ -497,9 +587,9 @@ export async function POST(request: Request) {
     const queryVariantResults = await Promise.all(
       queryList.map(async (q) => {
         const [chatgptRes, geminiRes, grokRes] = await Promise.all([
-          runGeoQuestion(q, companyName, website, competitorNames, 'openai', geminiIndustry, cost),
-          runGeoQuestion(q, companyName, website, competitorNames, 'gemini', geminiIndustry, cost),
-          runGeoQuestion(q, companyName, website, competitorNames, 'grok', undefined, cost),
+          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'openai', geminiIndustry, cost),
+          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'gemini', geminiIndustry, cost),
+          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'grok', undefined, cost),
         ])
         return { query: q, chatgpt: chatgptRes, gemini: geminiRes, grok: grokRes }
       })
@@ -565,17 +655,20 @@ export async function POST(request: Request) {
       fetchedAt: new Date().toISOString(),
     }
 
-    // Guard: don't overwrite a good ranking with an empty/degraded one.
+    // Guard: only keep the OLD ranking if the new scan returned NOTHING across
+    // EVERY engine AND EVERY query. A single empty engine (e.g. ChatGPT parse
+    // failure) must NOT discard the Gemini/Grok lists or freeze the queries —
+    // so we count results across all engines × all queries, not just
+    // primary.chatgpt. Any non-zero total → the write proceeds.
     const { data: prevGeo } = await ctx.supabase
       .from('companies').select('geo_ranking').eq('id', ctx.user.id).single()
-    const existingCount = Array.isArray(prevGeo?.geo_ranking?.results) ? prevGeo.geo_ranking.results.length : 0
-    const newCount = Array.isArray(result.results) ? result.results.length : 0
-    const guard = guardWrite(existingCount, newCount)
+    const existingCount = totalEngineResults(prevGeo?.geo_ranking)
+    const newCount = totalEngineResults(result)
 
-    if (!guard.useNew) {
-      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'geo_ranking', reason: guard.reason, existing_count: existingCount, new_count: newCount })
+    if (existingCount > 0 && newCount === 0) {
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'geo_ranking', reason: 'empty', existing_count: existingCount, new_count: newCount })
       await cost.flush()
-      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingCount, new_count: newCount })
+      return NextResponse.json({ success: true, kept_existing: true, reason: 'empty', existing_count: existingCount, new_count: newCount })
     }
 
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)

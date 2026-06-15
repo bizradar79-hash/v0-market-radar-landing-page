@@ -26,6 +26,14 @@ export type BusinessProfile = {
   // week-to-week. Admins can add/edit/remove; clients may delete individual
   // questions (the next scan refills the list back up to 3).
   geoQueries?: string[]
+  // How the business is actually KNOWN to customers / AI engines, used to match
+  // it inside GEO results. The legal name (companies.name, e.g.
+  // "שטיחים בסנטר ב.ש בע"מ") often differs from the brand the engines list
+  // (e.g. "BuyCarpet" / buycarpet.co.il). brandName is the customer-facing
+  // brand; if empty it's derived from the website domain at match time.
+  // aliases are any additional names the engines might use.
+  brandName?: string
+  aliases?: string[]
   distributionChannels: string[]
   confidenceScore: number
   sourcesUsed: string[]
