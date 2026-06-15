@@ -382,69 +382,100 @@ export async function POST(request: Request) {
     // ── Build query list ────────────────────────────────────────────────────
     // GEO checks AI-engine presence using NATURAL-LANGUAGE questions
     // (business_profile.geoQueries), NOT the short product terms in
-    // company.keywords / SEO queryVariants. Source order:
+    // company.keywords / SEO queryVariants. We keep EXACTLY GEO_QUERY_LIMIT (3)
+    // questions stored. Source order:
     //   1. Stored business_profile.geoQueries (stable week-to-week for trends).
-    //   2. Lazy-generate question-style queries ONCE via Gemini, then PERSIST
-    //      them to business_profile.geoQueries so later scans reuse them (no
-    //      regeneration cost, and the queries stay comparable over time).
+    //      - More than the limit (legacy 5-query clients) → trim to 3 + persist.
+    //      - Fewer than the limit (client deleted some) → TOP UP with NEW
+    //        questions to refill to 3, then persist.
+    //   2. No stored queries → generate a full set of 3 + persist.
     //   3. Single-query fallback (only when there's no profile to persist into).
     let queryList: string[] = []
+
+    // Generate up to `count` NEW short natural-language questions, avoiding any
+    // in `existing`. Returns [] on any failure (caller handles fallback).
+    const generateGeoQuestions = async (count: number, existing: string[]): Promise<string[]> => {
+      const geminiKey = process.env.GEMINI_API_KEY
+      if (!geminiKey || !businessProfile || count <= 0) return []
+      try {
+        const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
+        const productName = (businessProfile.products as any[])?.[0]?.name || ''
+        const areaHint = isLocal && city ? ` באזור ${city}` : ' בישראל'
+        const avoidHint = existing.length > 0
+          ? `\nאל תחזור על השאלות הקיימות הבאות (צור שאלות שונות): ${existing.map((q) => `"${q}"`).join(', ')}.`
+          : ''
+        const qPrompt = `העסק: ${coreDesc}${productName ? ` (מוצר עיקרי: ${productName})` : ''}.
+צור בדיוק ${count} שאלות קצרות וטבעיות שלקוח ישראלי היה מקליד ב-ChatGPT או Gemini כדי לקבל המלצה על עסק בתחום הזה${areaHint}.
+כל שאלה: 6-12 מילים, כוונה אחת ברורה בלבד, בלי ערימת תנאים. בעברית, שאלות אמיתיות (לא מילות מפתח).
+למשל: "איפה כדאי לקנות שטיח לסלון בישראל?", "מה חנות השטיחים הכי טובה במרכז?", "המלצה על חנות שטיחים אונליין בישראל".${avoidHint}
+החזר JSON בלבד: מערך של ${count} מחרוזות.`
+        const tq = Date.now()
+        const qRes = await fetchWithTimeout(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: qPrompt }] }] }),
+          }
+        )
+        if (!qRes.ok) return []
+        const qData = await qRes.json()
+        cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: qData, ms: Date.now() - tq })
+        const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+        const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
+        if (qs === -1 || qe <= qs) return []
+        const arr = JSON.parse(qClean.slice(qs, qe + 1))
+        if (!Array.isArray(arr)) return []
+        const existingLower = new Set(existing.map((q) => q.trim().toLowerCase()))
+        return arr
+          .filter((q: any) => typeof q === 'string' && q.trim().length >= 3)
+          .map((q: string) => q.trim())
+          .filter((q: string) => !existingLower.has(q.toLowerCase()))
+          .slice(0, count)
+      } catch (err) {
+        console.error('[GEO] geoQueries generation error:', err)
+        return []
+      }
+    }
+
+    // Persist the final geoQueries set back to the profile (best-effort).
+    const persistGeoQueries = async (queries: string[]) => {
+      if (!businessProfile) return
+      const updatedProfile = { ...businessProfile, geoQueries: queries }
+      const { error: gqErr } = await ctx.supabase
+        .from('companies').update({ business_profile: updatedProfile }).eq('id', ctx.user.id)
+      if (gqErr) console.warn('[GEO] geoQueries persist error:', gqErr.message)
+      else console.log('[GEO] persisted geoQueries:', queries)
+    }
 
     const storedGeoQueries = Array.isArray(businessProfile?.geoQueries)
       ? businessProfile!.geoQueries!.filter((q) => typeof q === 'string' && q.trim().length >= 3)
       : []
-    if (storedGeoQueries.length > 0) {
-      queryList = storedGeoQueries.slice(0, GEO_QUERY_LIMIT)
-      console.log('[GEO] using stored geoQueries:', queryList)
-    }
 
-    // 2. Lazy-generate QUESTION-style geoQueries once, then persist to the profile.
-    if (queryList.length === 0 && businessProfile) {
-      const geminiKey = process.env.GEMINI_API_KEY
-      if (geminiKey) {
-        try {
-          const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
-          const productName = (businessProfile.products as any[])?.[0]?.name || ''
-          const areaHint = isLocal && city ? ` באזור ${city}` : ' בישראל'
-          const qPrompt = `העסק: ${coreDesc}${productName ? ` (מוצר עיקרי: ${productName})` : ''}.
-צור 5 שאלות בשפה טבעית שלקוח ישראלי היה שואל את ChatGPT או Gemini כדי לקבל המלצה על עסק בתחום הזה${areaHint}.
-שאלות מלאות ואמיתיות (לא מילות מפתח קצרות), בעברית. למשל: "מה חנות השטיחים הכי טובה במרכז?" או "המלצה על שטיחים איכותיים לסלון".
-החזר JSON בלבד: [string, string, string, string, string]`
-          const tq = Date.now()
-          const qRes = await fetchWithTimeout(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: qPrompt }] }] }),
-            }
-          )
-          if (qRes.ok) {
-            const qData = await qRes.json()
-            cost.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: qData, ms: Date.now() - tq })
-            const qText = qData.candidates?.[0]?.content?.parts?.[0]?.text || ''
-            const qClean = qText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-            const qs = qClean.indexOf('['); const qe = qClean.lastIndexOf(']')
-            if (qs !== -1 && qe > qs) {
-              const arr = JSON.parse(qClean.slice(qs, qe + 1))
-              if (Array.isArray(arr)) {
-                const generated = arr
-                  .filter((q: any) => typeof q === 'string' && q.trim().length >= 3)
-                  .map((q: string) => q.trim())
-                  .slice(0, 5)
-                if (generated.length > 0) {
-                  // PERSIST once so future scans reuse the SAME stable questions.
-                  const updatedProfile = { ...businessProfile, geoQueries: generated }
-                  const { error: gqErr } = await ctx.supabase
-                    .from('companies').update({ business_profile: updatedProfile }).eq('id', ctx.user.id)
-                  if (gqErr) console.warn('[GEO] geoQueries persist error:', gqErr.message)
-                  else console.log('[GEO] generated + persisted geoQueries:', generated)
-                  queryList = generated.slice(0, GEO_QUERY_LIMIT)
-                }
-              }
-            }
-          }
-        } catch (err) { console.error('[GEO] geoQueries generation error:', err) }
+    if (storedGeoQueries.length >= GEO_QUERY_LIMIT) {
+      // Enough stored. Trim legacy over-limit sets (e.g. 5 → 3) and persist the trim.
+      queryList = storedGeoQueries.slice(0, GEO_QUERY_LIMIT)
+      if (storedGeoQueries.length > GEO_QUERY_LIMIT) {
+        await persistGeoQueries(queryList)
+        console.log('[GEO] trimmed stored geoQueries to limit:', queryList)
+      } else {
+        console.log('[GEO] using stored geoQueries:', queryList)
+      }
+    } else if (storedGeoQueries.length > 0) {
+      // Client deleted some — TOP UP with NEW questions to refill back to the limit.
+      const need = GEO_QUERY_LIMIT - storedGeoQueries.length
+      const fresh = await generateGeoQuestions(need, storedGeoQueries)
+      queryList = [...storedGeoQueries, ...fresh].slice(0, GEO_QUERY_LIMIT)
+      if (fresh.length > 0) await persistGeoQueries(queryList)
+      console.log('[GEO] topped up geoQueries to limit:', queryList)
+    } else if (businessProfile) {
+      // No stored queries — generate a full set once and persist.
+      const fresh = await generateGeoQuestions(GEO_QUERY_LIMIT, [])
+      if (fresh.length > 0) {
+        queryList = fresh.slice(0, GEO_QUERY_LIMIT)
+        await persistGeoQueries(queryList)
+        console.log('[GEO] generated + persisted geoQueries:', queryList)
       }
     }
 

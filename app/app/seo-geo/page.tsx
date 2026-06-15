@@ -507,16 +507,19 @@ export default function SeoGeoPage() {
                       : geoRanking.engines
                     const eng = activeEngines?.[selectedGeoEngine]
                     if (!eng) return <p className="text-sm text-muted-foreground py-4 text-center">אין נתונים למנוע זה</p>
+                    const hasResults = Array.isArray(eng.results) && eng.results.length > 0
                     return (
                       <div className="space-y-2">
+                        {/* Status: client position if appeared, else a clear "not appearing" note ABOVE the list */}
                         <div className="flex items-center gap-2">
                           {eng.appeared && eng.position != null
-                            ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />נמצאת במיקום #{eng.position}</Badge>
-                            : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />לא נמצאת בטופ 10</Badge>
+                            ? <Badge className="bg-green-100 text-green-700 border-green-200"><CheckCircle2 className="h-3 w-3 ml-1" />העסק שלך מופיע במיקום #{eng.position}</Badge>
+                            : <Badge variant="outline" className="text-muted-foreground"><XCircle className="h-3 w-3 ml-1" />העסק לא מופיע בתוצאות</Badge>
                           }
                         </div>
+                        {/* ALWAYS show the engine's top-10 list, even when the client is absent. */}
                         <div className="space-y-0.5">
-                          {eng.results.length > 0 ? eng.results.map((r, ri) => {
+                          {hasResults ? eng.results.map((r, ri) => {
                             const own = isCompanyResult(r)
                             return (
                               <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
@@ -527,7 +530,7 @@ export default function SeoGeoPage() {
                               </div>
                             )
                           }) : (
-                            <p className="text-xs text-muted-foreground">הנתונים יתעדכנו בסנכרון השבועי</p>
+                            <p className="text-xs text-muted-foreground bg-muted/30 rounded px-2 py-1.5 border">המנוע לא החזיר תוצאות לשאילתה זו</p>
                           )}
                         </div>
                       </div>

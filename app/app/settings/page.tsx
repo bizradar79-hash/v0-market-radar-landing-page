@@ -76,8 +76,10 @@ export default function SettingsPage() {
 
   const [keywords, setKeywords] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState("")
-  // Read-only for clients — GEO presence-check questions, managed by us (admin).
+  // GEO presence-check questions. Clients may DELETE individual questions (no
+  // add/edit) — the next GEO scan tops the list back up to 3 with new questions.
   const [geoQueries, setGeoQueries] = useState<string[]>([])
+  const [geoSaving, setGeoSaving] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -196,6 +198,27 @@ export default function SettingsPage() {
 
   const removeKeyword = (keyword: string) => {
     setKeywords(keywords.filter((k) => k !== keyword))
+  }
+
+  // Client deletes a single GEO question. Persists the trimmed list immediately
+  // via update-business-profile (deep-merge). The next GEO scan refills to 3.
+  const deleteGeoQuery = async (index: number) => {
+    const previous = geoQueries
+    const updated = geoQueries.filter((_, i) => i !== index)
+    setGeoQueries(updated)
+    setGeoSaving(true)
+    try {
+      const res = await fetch('/api/update-business-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geoQueries: updated }),
+      })
+      if (!res.ok) setGeoQueries(previous) // revert on failure
+    } catch {
+      setGeoQueries(previous)
+    } finally {
+      setGeoSaving(false)
+    }
   }
 
   const handleCancelSubscription = () => {
@@ -384,14 +407,15 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* GEO queries — READ-ONLY for clients (managed by us) */}
+          {/* GEO queries — clients may DELETE (no add/edit); scan refills to 3 */}
           <Card className="border-border bg-card mt-6">
             <CardHeader>
               <CardTitle className="text-foreground flex items-center gap-2">
                 🌐 שאלות GEO
+                {geoSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                שאלות אלו נבדקות במנועי AI (ChatGPT/Gemini) כדי לבדוק אם העסק שלך מוזכר. הן מנוהלות על ידינו.
+                שאלות אלו נבדקות במנועי AI (ChatGPT/Gemini) כדי לבדוק אם העסק שלך מוזכר. ניתן למחוק שאלה שאינה מתאימה — המערכת תייצר שאלה חדשה במקומה בסריקה הבאה.
               </p>
             </CardHeader>
             <CardContent>
@@ -407,7 +431,17 @@ export default function SettingsPage() {
                       className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
                     >
                       <span className="text-muted-foreground shrink-0">{i + 1}.</span>
-                      <span dir="rtl">{q}</span>
+                      <span dir="rtl" className="flex-1">{q}</span>
+                      <button
+                        type="button"
+                        onClick={() => deleteGeoQuery(i)}
+                        disabled={geoSaving}
+                        aria-label="מחק שאלה"
+                        title="מחק שאלה"
+                        className="shrink-0 text-muted-foreground hover:text-red-500 disabled:opacity-50 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </li>
                   ))}
                 </ul>
