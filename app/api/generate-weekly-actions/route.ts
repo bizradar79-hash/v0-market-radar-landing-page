@@ -19,9 +19,26 @@ export async function POST(request: Request) {
     cost = new ScanCostCollector(ctx.user.id, 'weekly_actions')
 
     // Force: query param takes precedence, body is checked as fallback
-    const forceQuery = new URL(request.url).searchParams.get('force') === 'true'
+    const params = new URL(request.url).searchParams
+    const forceQuery = params.get('force') === 'true'
+    const cachedOnly = params.get('cachedOnly') === 'true'
     const body = await request.json().catch(() => ({}))
     const force = forceQuery || body.force === true
+
+    // Cached-only mode: DISPLAY the saved actions, NEVER generate (page load uses this).
+    // Returns whatever is stored regardless of age — generation happens only via scans.
+    if (cachedOnly) {
+      const { data: company } = await ctx.supabase
+        .from('companies').select('weekly_actions').eq('id', ctx.user.id).single()
+      const saved = company?.weekly_actions as { fetchedAt: string; actions: any[] } | null
+      await cost.flush()
+      return NextResponse.json({
+        success: true,
+        fetchedAt: saved?.fetchedAt ?? null,
+        actions: Array.isArray(saved?.actions) ? saved!.actions : [],
+        cached: true,
+      })
+    }
 
     if (!force) {
       const { data: company } = await ctx.supabase

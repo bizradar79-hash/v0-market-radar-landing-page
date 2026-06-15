@@ -3,8 +3,6 @@
 export const dynamic = 'force-dynamic'
 
 import WeeklyActionsBlock from "@/components/dashboard/WeeklyActionsBlock"
-import MarketAnalysisBlock from "@/components/dashboard/MarketAnalysisBlock"
-import NicheDiscoveryBlock from "@/components/dashboard/NicheDiscoveryBlock"
 import { Lightbulb } from "lucide-react"
 
 export default function OpportunitiesPage() {
@@ -17,23 +15,13 @@ export default function OpportunitiesPage() {
           מרכז הזדמנויות
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          המלצות AI, ניתוח שוק וגילוי נישות חדשות
+          הפעולות המומלצות לעסק שלך לשבוע הנוכחי, מבוססות על הסריקה האחרונה
         </p>
       </div>
 
-      {/* 1. המלצות AI (renamed from "מה נעשה השבוע") */}
+      {/* מה לעשות השבוע — display-only, updated via scans */}
       <section>
         <WeeklyActionsBlock />
-      </section>
-
-      {/* 2. ניתוח שוק */}
-      <section>
-        <MarketAnalysisBlock />
-      </section>
-
-      {/* 3. מצא נישה חדשה */}
-      <section>
-        <NicheDiscoveryBlock />
       </section>
     </div>
   )

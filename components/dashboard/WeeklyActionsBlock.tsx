@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, ChevronLeft, Zap, Calendar } from "lucide-react"
+import { Loader2, ChevronLeft, Zap, Calendar } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import WeeklyActionDetailsPanel from "./WeeklyActionDetailsPanel"
 import type { WeeklyAction, WeeklyActionsData } from "@/types/weekly-actions"
@@ -47,7 +46,6 @@ function formatDate(fetchedAt: string): string {
 export default function WeeklyActionsBlock() {
   const [data, setData] = useState<WeeklyActionsData | null>(_cache)
   const [loading, setLoading] = useState(_cache === null)
-  const [refreshing, setRefreshing] = useState(false)
   const [selectedAction, setSelectedAction] = useState<WeeklyAction | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
@@ -62,38 +60,32 @@ export default function WeeklyActionsBlock() {
     })
   }, [])
 
-  const fetchActions = useCallback(async (force = false) => {
-    if (force) {
-      _cache = null
-      setRefreshing(true)
-    } else {
-      setLoading(true)
-    }
+  // Display-only: read the SAVED weekly_actions, never trigger AI generation.
+  // Generation happens exclusively via the scan (weekly/admin), same as the report.
+  const loadCached = useCallback(async () => {
+    setLoading(true)
     try {
-      const url = force ? '/api/generate-weekly-actions?force=true' : '/api/generate-weekly-actions'
-      const res = await fetch(url, {
+      const res = await fetch('/api/generate-weekly-actions?cachedOnly=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(15000),
       })
       const json = await res.json()
-      if (json.actions) {
-        const next = { fetchedAt: json.fetchedAt, actions: json.actions }
-        _cache = next
-        setData(next)
-      }
+      const next = { fetchedAt: json.fetchedAt, actions: Array.isArray(json.actions) ? json.actions : [] }
+      _cache = next
+      setData(next)
     } catch {
-      // silent
+      // silent — fall through to empty state
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
   useEffect(() => {
     if (_cache !== null) return // already loaded — skip API call
-    fetchActions(false)
-  }, [fetchActions])
+    loadCached()
+  }, [loadCached])
 
   function openAction(action: WeeklyAction) {
     setSelectedAction(action)
@@ -111,18 +103,18 @@ export default function WeeklyActionsBlock() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="rounded-lg border bg-muted/30 p-4 animate-pulse">
+          <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
+            {[1, 2].map(i => (
+              <div key={i} className="rounded-lg border bg-muted/30 p-5 animate-pulse">
                 <div className="h-4 w-16 bg-muted rounded mb-3" />
-                <div className="h-4 w-full bg-muted rounded mb-2" />
+                <div className="h-5 w-full bg-muted rounded mb-2" />
                 <div className="h-3 w-3/4 bg-muted rounded" />
               </div>
             ))}
           </div>
           <div className="flex items-center justify-center gap-2 mt-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>מנתח את השוק ומכין המלצות שבועיות...</span>
+            <span>טוען...</span>
           </div>
         </CardContent>
       </Card>
@@ -138,14 +130,10 @@ export default function WeeklyActionsBlock() {
             מה לעשות השבוע
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-center py-6">
-          <p className="text-sm text-muted-foreground mb-4">
-            לחץ לקבלת המלצות מותאמות אישית לשבוע הנוכחי
+        <CardContent className="text-center py-10">
+          <p className="text-sm text-muted-foreground">
+            הפעולות יתעדכנו בסריקה הבאה
           </p>
-          <Button onClick={() => fetchActions(true)} disabled={refreshing}>
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin ml-2" /> : <Zap className="h-4 w-4 ml-2" />}
-            צור המלצות שבועיות
-          </Button>
         </CardContent>
       </Card>
     )
@@ -154,7 +142,7 @@ export default function WeeklyActionsBlock() {
   const sortedActions = [
     ...(data.actions ?? []).filter(a => a.priority === 'גבוהה'),
     ...(data.actions ?? []).filter(a => a.priority !== 'גבוהה'),
-  ]
+  ].slice(0, 6)
 
   return (
     <>
@@ -165,32 +153,19 @@ export default function WeeklyActionsBlock() {
               <Zap className="h-5 w-5 text-amber-500" />
               מה לעשות השבוע
             </CardTitle>
-            <div className="flex items-center gap-3">
-              {data.fetchedAt && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Calendar className="h-3 w-3" />
-                  {formatDate(data.fetchedAt)}
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => fetchActions(true)}
-                disabled={refreshing}
-                className="h-7 px-2"
-              >
-                {refreshing
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : <RefreshCw className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
+            {data.fetchedAt && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Calendar className="h-3 w-3" />
+                {formatDate(data.fetchedAt)}
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {data.actions.length} פעולות מומלצות · לחץ על כל כרטיס לפרטים מלאים
+            {sortedActions.length} פעולות מומלצות · לחץ על כל כרטיס לפרטים מלאים
           </p>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
             {sortedActions.map(action => (
               <ActionCard
                 key={action.id}
@@ -244,11 +219,11 @@ function ActionCard({ action, onClick, isSaved, onSave }: { action: WeeklyAction
   return (
     <button
       onClick={onClick}
-      className={`w-full text-right rounded-lg border p-4 transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer bg-white ${isHigh ? 'border-red-200 ring-1 ring-red-100' : 'border-border hover:border-primary/40'}`}
+      className={`w-full h-full text-right rounded-xl border p-5 transition-all hover:shadow-md hover:-translate-y-0.5 cursor-pointer bg-white ${isHigh ? 'border-red-200 ring-1 ring-red-100' : 'border-border hover:border-primary/40'}`}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-1.5">
-          <span className="text-base">{icon}</span>
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{icon}</span>
           <Badge variant="outline" className={`text-xs ${prioClass}`}>
             {action.priority}
           </Badge>
@@ -258,10 +233,10 @@ function ActionCard({ action, onClick, isSaved, onSave }: { action: WeeklyAction
         </Badge>
       </div>
 
-      <p className="text-sm font-semibold leading-tight mb-1.5 line-clamp-2">{action.title}</p>
-      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{(action as any).summary}</p>
+      <p className="text-base font-semibold leading-snug mb-2 line-clamp-2">{action.title}</p>
+      <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">{(action as any).summary}</p>
 
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex items-center gap-2 mt-3">
         <Badge
           variant="outline"
           className={`text-xs ${revenueLevelColor[metrics.revenueLevel] || ''} ${metrics.revenueLevel === 'חם מאוד' ? 'animate-pulse' : ''}`}
@@ -271,7 +246,7 @@ function ActionCard({ action, onClick, isSaved, onSave }: { action: WeeklyAction
         <span className="text-xs text-muted-foreground">תוך {metrics.timeToRevenueDays.min}–{metrics.timeToRevenueDays.max} יום</span>
       </div>
 
-      <div className="mt-1 flex items-center justify-between gap-1">
+      <div className="mt-3 flex items-center justify-between gap-1">
         {isSaved ? (
           <span className="flex items-center gap-1 text-xs border rounded-md px-2 py-0.5 bg-green-50 text-green-700 border-green-200 cursor-default" onClick={e => e.stopPropagation()}>✓ נשמר</span>
         ) : (
