@@ -336,9 +336,10 @@ export async function POST(request: Request) {
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
 
-    // Fetch both geo_ranking (cache check) and seo_ranking (query reuse) in one query
+    // GEO no longer reuses SEO queries (that leaked short product terms) — it
+    // sources natural-language questions from business_profile.geoQueries below.
     const { data: company } = await ctx.supabase
-      .from('companies').select('geo_ranking, seo_ranking').eq('id', ctx.user.id).single()
+      .from('companies').select('geo_ranking').eq('id', ctx.user.id).single()
 
     if (!force) {
       const cached = company?.geo_ranking as { fetchedAt?: string } | null
@@ -379,21 +380,36 @@ export async function POST(request: Request) {
     const cost = new ScanCostCollector(ctx.user.id, 'geo_ranking')
 
     // ── Build query list ────────────────────────────────────────────────────
-    // 1. Reuse SEO queryVariants if fresh enough (avoids duplicate API calls)
+    // GEO checks AI-engine presence using NATURAL-LANGUAGE questions
+    // (business_profile.geoQueries), NOT the short product terms in
+    // company.keywords / SEO queryVariants. Source order:
+    //   1. Stored business_profile.geoQueries (stable week-to-week for trends).
+    //   2. Lazy-generate question-style queries ONCE via Gemini, then PERSIST
+    //      them to business_profile.geoQueries so later scans reuse them (no
+    //      regeneration cost, and the queries stay comparable over time).
+    //   3. Single-query fallback (only when there's no profile to persist into).
     let queryList: string[] = []
-    const seoVariants = (company?.seo_ranking as any)?.queryVariants
-    if (Array.isArray(seoVariants) && seoVariants.length >= 2) {
-      queryList = seoVariants.map((v: any) => v.query).filter(Boolean).slice(0, GEO_QUERY_LIMIT)
-      console.log('[GEO] reusing SEO queries:', queryList)
+
+    const storedGeoQueries = Array.isArray(businessProfile?.geoQueries)
+      ? businessProfile!.geoQueries!.filter((q) => typeof q === 'string' && q.trim().length >= 3)
+      : []
+    if (storedGeoQueries.length > 0) {
+      queryList = storedGeoQueries.slice(0, GEO_QUERY_LIMIT)
+      console.log('[GEO] using stored geoQueries:', queryList)
     }
 
-    // 2. Generate fresh 5 queries via Gemini if no SEO queries available
-    if (queryList.length === 0) {
+    // 2. Lazy-generate QUESTION-style geoQueries once, then persist to the profile.
+    if (queryList.length === 0 && businessProfile) {
       const geminiKey = process.env.GEMINI_API_KEY
-      if (geminiKey && businessProfile) {
+      if (geminiKey) {
         try {
           const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
-          const qPrompt = `העסק: ${coreDesc}. צור 5 שאילתות חיפוש שונות שלקוח ישראלי יחפש בגוגל כדי למצוא עסק כזה. כל שאילתה 2-5 מילים. החזר JSON בלבד: [string, string, string, string, string]`
+          const productName = (businessProfile.products as any[])?.[0]?.name || ''
+          const areaHint = isLocal && city ? ` באזור ${city}` : ' בישראל'
+          const qPrompt = `העסק: ${coreDesc}${productName ? ` (מוצר עיקרי: ${productName})` : ''}.
+צור 5 שאלות בשפה טבעית שלקוח ישראלי היה שואל את ChatGPT או Gemini כדי לקבל המלצה על עסק בתחום הזה${areaHint}.
+שאלות מלאות ואמיתיות (לא מילות מפתח קצרות), בעברית. למשל: "מה חנות השטיחים הכי טובה במרכז?" או "המלצה על שטיחים איכותיים לסלון".
+החזר JSON בלבד: [string, string, string, string, string]`
           const tq = Date.now()
           const qRes = await fetchWithTimeout(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
@@ -412,15 +428,27 @@ export async function POST(request: Request) {
             if (qs !== -1 && qe > qs) {
               const arr = JSON.parse(qClean.slice(qs, qe + 1))
               if (Array.isArray(arr)) {
-                queryList = arr.filter((q: any) => typeof q === 'string' && q.length >= 3).slice(0, GEO_QUERY_LIMIT)
+                const generated = arr
+                  .filter((q: any) => typeof q === 'string' && q.trim().length >= 3)
+                  .map((q: string) => q.trim())
+                  .slice(0, 5)
+                if (generated.length > 0) {
+                  // PERSIST once so future scans reuse the SAME stable questions.
+                  const updatedProfile = { ...businessProfile, geoQueries: generated }
+                  const { error: gqErr } = await ctx.supabase
+                    .from('companies').update({ business_profile: updatedProfile }).eq('id', ctx.user.id)
+                  if (gqErr) console.warn('[GEO] geoQueries persist error:', gqErr.message)
+                  else console.log('[GEO] generated + persisted geoQueries:', generated)
+                  queryList = generated.slice(0, GEO_QUERY_LIMIT)
+                }
               }
             }
           }
-        } catch { /* fallback below */ }
+        } catch (err) { console.error('[GEO] geoQueries generation error:', err) }
       }
     }
 
-    // 3. Fallback: single query
+    // 3. Fallback: single query (no profile to persist into, or generation failed).
     if (queryList.length === 0) {
       const specificDesc = (businessProfile?.products as any[])?.[0]?.name || coreActivityDesc
       const generatedQuery = await buildSearchQuery(specificDesc, industry)

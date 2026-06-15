@@ -58,6 +58,7 @@ function normalizeProfile(raw: any): BusinessProfile {
     primaryKeywords: Array.isArray(raw.primaryKeywords) ? raw.primaryKeywords.map(String) : [],
     secondaryKeywords: Array.isArray(raw.secondaryKeywords) ? raw.secondaryKeywords.map(String) : [],
     searchQueries: Array.isArray(raw.searchQueries) ? raw.searchQueries.map(String) : [],
+    geoQueries: Array.isArray(raw.geoQueries) ? raw.geoQueries.map(String).slice(0, 5) : [],
     distributionChannels: Array.isArray(raw.distributionChannels) ? raw.distributionChannels.map(String) : [],
     confidenceScore: typeof raw.confidenceScore === 'number' ? Math.min(100, Math.max(0, raw.confidenceScore)) : 70,
     sourcesUsed: Array.isArray(raw.sourcesUsed) ? raw.sourcesUsed.map(String) : [],
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
 7. תגיות תעשייה מדויקות
 8. מילות מפתח לחיפוש בעברית ואנגלית
 9. שאילתות מוכנות לחיפוש מתחרים, טרנדים, הזדמנויות
+9ב. שאלות GEO (geoQueries) — 3-5 שאלות בשפה טבעית שלקוח ישראלי היה שואל את ChatGPT/Gemini כדי לקבל המלצה על עסק בתחום הזה. שאלות מלאות (לא מילות מפתח קצרות), בעברית, למשל: "מה חנות השטיחים הכי טובה במרכז?", "המלצה על שטיחים איכותיים לסלון". כלול אזור גיאוגרפי אם רלוונטי.
 10. ערוצי הפצה — כיצד העסק מגיע ללקוחות שלו (אתר אינטרנט, מכירה ישירה, רשתות חברתיות, מפיצים, שותפים עסקיים, חנויות, B2B פגישות, קטלוגים, פלטפורמות מקוונות וכו')
 
 החזר JSON בלבד בפורמט הבא — ללא טקסט נוסף, ללא markdown:
@@ -119,6 +121,7 @@ export async function POST(request: Request) {
   "primaryKeywords": ["..."],
   "secondaryKeywords": ["..."],
   "searchQueries": ["..."],
+  "geoQueries": ["שאלה מלאה בשפה טבעית 1", "שאלה מלאה בשפה טבעית 2", "שאלה מלאה בשפה טבעית 3"],
   "distributionChannels": ["..."],
   "confidenceScore": 0-100,
   "sourcesUsed": ["..."],

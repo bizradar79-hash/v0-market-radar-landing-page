@@ -14,10 +14,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
-  CalendarClock, Square,
+  CalendarClock, Square, Plus, X, Save,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
@@ -132,6 +133,12 @@ export default function ImpersonatePage() {
   // Per-module sync state: { userId: { moduleId: ModuleState } }
   const [moduleStates, setModuleStates] = useState<Record<string, Record<string, ModuleState>>>({})
   const [moduleSyncUser, setModuleSyncUser] = useState<UserRow | null>(null)
+
+  // GEO queries editor (inside the per-module dialog)
+  const [geoQueries, setGeoQueries] = useState<string[]>([])
+  const [geoQueriesLoading, setGeoQueriesLoading] = useState(false)
+  const [geoQueriesSaving, setGeoQueriesSaving] = useState(false)
+  const [newGeoQuery, setNewGeoQuery] = useState("")
 
   // Snapshot restore (Layer 3)
   const [snapshotUser, setSnapshotUser] = useState<UserRow | null>(null)
@@ -340,6 +347,44 @@ export default function ImpersonatePage() {
         [userId]: { ...(prev[userId] || {}), [moduleId]: 'error' },
       }))
       toast({ title: "שגיאה", description: e?.message, variant: "destructive" })
+    }
+  }
+
+  // ── GEO queries editor ──────────────────────────────────────────────────
+  // Load the client's stored business_profile.geoQueries when the module dialog
+  // opens; admins edit + save them here (writes business_profile.geoQueries).
+  useEffect(() => {
+    if (!moduleSyncUser) { setGeoQueries([]); setNewGeoQuery(""); return }
+    let cancelled = false
+    setGeoQueriesLoading(true)
+    fetch(`/api/admin/geo-queries?company_id=${moduleSyncUser.id}`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return
+        setGeoQueries(Array.isArray(data.geoQueries) ? data.geoQueries : [])
+      })
+      .catch(() => { if (!cancelled) setGeoQueries([]) })
+      .finally(() => { if (!cancelled) setGeoQueriesLoading(false) })
+    return () => { cancelled = true }
+  }, [moduleSyncUser])
+
+  async function saveGeoQueries() {
+    if (!moduleSyncUser) return
+    setGeoQueriesSaving(true)
+    try {
+      const res = await fetch('/api/admin/geo-queries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: moduleSyncUser.id, geoQueries }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setGeoQueries(Array.isArray(data.geoQueries) ? data.geoQueries : geoQueries)
+      toast({ title: '✅ שאלות GEO נשמרו', description: `${data.geoQueries?.length ?? 0} שאלות` })
+    } catch (e: any) {
+      toast({ title: 'שגיאה בשמירת שאלות GEO', description: e?.message, variant: 'destructive' })
+    } finally {
+      setGeoQueriesSaving(false)
     }
   }
 
@@ -710,7 +755,7 @@ export default function ImpersonatePage() {
 
       {/* ── Per-module sync dialog ── */}
       <Dialog open={!!moduleSyncUser} onOpenChange={open => { if (!open) setModuleSyncUser(null) }}>
-        <DialogContent className="max-w-lg" dir="rtl">
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Cpu className="h-4 w-4" />
@@ -741,6 +786,88 @@ export default function ImpersonatePage() {
               <p className="text-xs text-muted-foreground">
                 ✅ = הצליח · ❌ = שגיאה · ⟳ = רץ · האייקון המקורי = ממתין
               </p>
+
+              {/* ── GEO queries editor ── */}
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    🌐 שאלות GEO
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    שאלות בשפה טבעית שנשלחות ל-ChatGPT/Gemini כדי לבדוק אם העסק מוזכר. נוצרות אוטומטית בסריקה הראשונה ונשמרות — כאן ניתן לערוך ידנית.
+                  </p>
+                </div>
+
+                {geoQueriesLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> טוען...
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      {geoQueries.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">אין שאלות GEO עדיין — יווצרו בסריקת GEO הבאה, או הוסף ידנית.</p>
+                      ) : (
+                        geoQueries.map((q, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Input
+                              value={q}
+                              onChange={e => setGeoQueries(prev => prev.map((x, idx) => idx === i ? e.target.value : x))}
+                              className="text-sm"
+                              dir="rtl"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 shrink-0 text-destructive"
+                              onClick={() => setGeoQueries(prev => prev.filter((_, idx) => idx !== i))}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="הוסף שאלה חדשה..."
+                        value={newGeoQuery}
+                        onChange={e => setNewGeoQuery(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && newGeoQuery.trim().length >= 3) {
+                            setGeoQueries(prev => [...prev, newGeoQuery.trim()])
+                            setNewGeoQuery("")
+                          }
+                        }}
+                        className="text-sm"
+                        dir="rtl"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={newGeoQuery.trim().length < 3}
+                        onClick={() => { setGeoQueries(prev => [...prev, newGeoQuery.trim()]); setNewGeoQuery("") }}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={saveGeoQueries}
+                      disabled={geoQueriesSaving}
+                      className="w-full"
+                    >
+                      {geoQueriesSaving
+                        ? <Loader2 className="h-4 w-4 animate-spin ml-2" />
+                        : <Save className="h-4 w-4 ml-2" />}
+                      שמור שאלות GEO
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           )}
 

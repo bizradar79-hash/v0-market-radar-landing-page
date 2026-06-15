@@ -76,6 +76,8 @@ export default function SettingsPage() {
 
   const [keywords, setKeywords] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState("")
+  // Read-only for clients — GEO presence-check questions, managed by us (admin).
+  const [geoQueries, setGeoQueries] = useState<string[]>([])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -103,6 +105,8 @@ export default function SettingsPage() {
           if (company.keywords && Array.isArray(company.keywords)) {
             setKeywords(company.keywords)
           }
+          const bpGeo = (company.business_profile as any)?.geoQueries
+          if (Array.isArray(bpGeo)) setGeoQueries(bpGeo.filter((q: any) => typeof q === 'string'))
         }
 
         // Account — phone canonical source is companies.phone, fallback metadata.
@@ -327,6 +331,9 @@ export default function SettingsPage() {
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle className="text-foreground">מילות מפתח למעקב</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                מונחים קצרים (למשל "שטיח") — משמשים למעקב טרנדים, דירוג SEO ואיתור מכרזים.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2">
@@ -374,6 +381,37 @@ export default function SettingsPage() {
                 )}
                 שמור שינויים
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* GEO queries — READ-ONLY for clients (managed by us) */}
+          <Card className="border-border bg-card mt-6">
+            <CardHeader>
+              <CardTitle className="text-foreground flex items-center gap-2">
+                🌐 שאלות GEO
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                שאלות אלו נבדקות במנועי AI (ChatGPT/Gemini) כדי לבדוק אם העסק שלך מוזכר. הן מנוהלות על ידינו.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {geoQueries.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  השאלות יווצרו אוטומטית בסריקה הבאה.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {geoQueries.map((q, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
+                    >
+                      <span className="text-muted-foreground shrink-0">{i + 1}.</span>
+                      <span dir="rtl">{q}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
