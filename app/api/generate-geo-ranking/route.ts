@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
 import { logKeptExisting } from '@/lib/scan/guard'
-import { fetchOpenAIGeoRaw } from '@/lib/geo/openai-engine'
+import { fetchOpenAIGeoRaw, parseBusinessList } from '@/lib/geo/openai-engine'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -259,72 +259,62 @@ async function runGeminiEngine(
   if (!geminiKey) return { position: null, topResults: [], appeared: false, results: [] }
 
   const industryDesc = industry || query
-  const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. איזה עסקים או פלטפורמות היית ממליץ? רשום את 10 הטובים ביותר לפי סדר עדיפות. החזר JSON בלבד: [{"rank": 1, "name": "", "domain": "", "reason": ""}]`
+  // GROUNDING FIX: enable Google Search grounding so Gemini returns CURRENT,
+  // web-grounded businesses (like ChatGPT/Grok) instead of training-only guesses.
+  const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. חפש באינטרנט ורשום את 10 העסקים או האתרים הטובים ביותר לפי סדר עדיפות. החזר רק מערך JSON גולמי (ללא markdown): [{"position": 1, "name": "שם העסק", "url": "https://..."}]. אם אינך יכול להחזיר JSON, רשום רשימה ממוספרת (1., 2., 3.) של שמות העסקים והכתובת שלהם.`
+
+  const callGemini = async (body: any, t: number) => {
+    const res = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    )
+    return res
+  }
 
   try {
     const t0 = Date.now()
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
-    )
+    const res = await callGemini({
+      contents: [{ parts: [{ text: prompt }] }],
+      tools: [{ google_search: {} }],
+    }, t0)
     if (!res.ok) {
-      console.error('[GEO gemini] HTTP error:', res.status, await res.text())
+      console.error('[GEO gemini] HTTP error:', res.status, (await res.text().catch(() => '')).slice(0, 300))
       cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
       return { position: null, topResults: [], appeared: false, results: [] }
     }
     const data = await res.json()
     cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
     if (data.error) {
-      console.error('[GEO gemini] API error:', JSON.stringify(data.error))
+      console.error('[GEO gemini] API error:', JSON.stringify(data.error).slice(0, 300))
       return { position: null, topResults: [], appeared: false, results: [] }
     }
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-    if (!text) {
-      console.error('[GEO gemini] empty response, full data:', JSON.stringify(data).slice(0, 500))
-      return { position: null, topResults: [], appeared: false, results: [] }
-    }
-    const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-    const s = clean.indexOf('[')
-    const e = clean.lastIndexOf(']')
-    if (s === -1 || e <= s) {
-      console.error('[GEO gemini] no JSON array in response:', clean.slice(0, 200))
-      return { position: null, topResults: [], appeared: false, results: [] }
-    }
-    let arr: any[] = JSON.parse(clean.slice(s, e + 1))
-    // If empty — retry once with simpler prompt
-    if (!Array.isArray(arr) || arr.length === 0) {
-      console.log('[GEO gemini] empty array, retrying with simple prompt')
-      const retryPrompt = `רשום 10 חברות ישראליות שמוכרות ${query}. JSON: [{"rank": 1, "name": "", "domain": ""}]`
+    let text: string = (data.candidates?.[0]?.content?.parts || [])
+      .map((p: any) => p?.text || '').join('') || ''
+    console.log('[GEO gemini] raw response (first 800):', text.slice(0, 800))
+
+    let rawResults = parseBusinessList(text)
+
+    // Retry once (still grounded) if the first answer parsed to nothing.
+    if (rawResults.length === 0) {
+      console.warn('[GEO gemini] parse produced 0 results, retrying. Raw:', text.slice(0, 400))
+      const retryPrompt = `חפש באינטרנט ורשום 10 חברות ישראליות שמוכרות ${query}. החזר מערך JSON: [{"position": 1, "name": "", "url": ""}] או רשימה ממוספרת.`
       const tRetry = Date.now()
-      const retryRes = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: retryPrompt }] }] }),
-        }
-      )
+      const retryRes = await callGemini({
+        contents: [{ parts: [{ text: retryPrompt }] }],
+        tools: [{ google_search: {} }],
+      }, tRetry)
       if (retryRes.ok) {
         const retryData = await retryRes.json()
         cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: retryData, ms: Date.now() - tRetry })
-        const retryText = retryData.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        const rc = retryText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-        const rs = rc.indexOf('['); const re = rc.lastIndexOf(']')
-        if (rs !== -1 && re > rs) {
-          try { arr = JSON.parse(rc.slice(rs, re + 1)) } catch { /* keep empty */ }
-        }
+        const retryText: string = (retryData.candidates?.[0]?.content?.parts || [])
+          .map((p: any) => p?.text || '').join('') || ''
+        console.log('[GEO gemini] retry raw (first 500):', retryText.slice(0, 500))
+        rawResults = parseBusinessList(retryText)
       }
     }
-    const rawResults = arr.map((item: any, idx: number) => ({
-      position: item.rank ?? idx + 1,
-      name: item.name || '',
-      url: item.domain ? `https://${item.domain}` : '',
-      title: item.name || '',
-    }))
+
+    if (rawResults.length === 0) console.warn('[GEO gemini] still 0 results after retry')
+    else console.log(`[GEO gemini] parsed ${rawResults.length} businesses`)
     return processResults(rawResults, identity, competitorNames)
   } catch (err) {
     console.error('[GEO gemini] exception:', err)
@@ -387,21 +377,15 @@ async function runGeoQuestion(
     .map((c: any) => c.text)
     .join('')
 
-  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const s = clean.indexOf('{')
-  const e = clean.lastIndexOf('}')
-  if (s === -1 || e <= s) {
-    console.error(`[GEO ${engine}] no JSON in Grok response:`, clean.slice(0, 200))
-    return { position: null, topResults: [], appeared: false, results: [] }
-  }
+  console.log(`[GEO ${engine}] raw response (first 800):`, (text || '').slice(0, 800))
 
-  let parsed: any = {}
-  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch (err) {
-    console.error(`[GEO ${engine}] JSON parse error:`, err)
-    return { position: null, topResults: [], appeared: false, results: [] }
+  // Tolerant parse (JSON object/array OR prose list), same as OpenAI/Gemini.
+  const rawResults = parseBusinessList(text)
+  if (rawResults.length === 0) {
+    console.warn(`[GEO ${engine}] parse produced 0 results. Raw:`, (text || '').slice(0, 800))
+  } else {
+    console.log(`[GEO ${engine}] parsed ${rawResults.length} businesses`)
   }
-
-  const rawResults: any[] = (Array.isArray(parsed.results) ? parsed.results : [])
   return processResults(rawResults, identity, competitorNames)
 }
 

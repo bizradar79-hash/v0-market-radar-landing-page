@@ -34,6 +34,129 @@ export function extractOpenAIText(data: any): string {
     .join('')
 }
 
+// ── Tolerant business-list parser ──────────────────────────────────────────
+// Browsing models rarely obey "return strict JSON": they wrap JSON in markdown,
+// prepend prose/citations, or answer as a numbered/bulleted list. This parser
+// tries, in order: (1) a JSON object with a `results` array, (2) a bare JSON
+// array, (3) a prose numbered/bulleted list. Only returns [] when truly nothing
+// is parseable — so a good answer is never silently dropped.
+
+function pickName(item: any): string {
+  return String(
+    item?.name || item?.title || item?.business || item?.company ||
+    item?.businessName || item?.company_name || '',
+  ).trim()
+}
+
+function pickUrl(item: any): string {
+  const u = String(item?.url || item?.website || item?.link || item?.domain || '').trim()
+  if (!u) return ''
+  return /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^\/+/, '')}`
+}
+
+function normalizeResultList(arr: any[]): any[] {
+  return arr
+    .map((item: any, idx: number) => {
+      if (typeof item === 'string') {
+        const name = item.trim()
+        return { position: idx + 1, name, url: '', title: name }
+      }
+      const name = pickName(item)
+      const position = Number(item?.position ?? item?.rank ?? idx + 1) || idx + 1
+      return { position, name, url: pickUrl(item), title: name }
+    })
+    .filter((r) => r.name && r.name.length >= 2)
+    .slice(0, 10)
+}
+
+const URL_RE = /https?:\/\/[^\s)\]]+/i
+const DOMAIN_RE = /\b([a-z0-9][a-z0-9-]*\.(?:co\.il|org\.il|com\.au|com|net|org|io|ai|shop|store|biz))\b/i
+
+/** Parse a prose numbered/bulleted business list into the results[] shape. */
+function parseProseList(text: string): any[] {
+  const out: any[] = []
+  const lines = text.split(/\r?\n/)
+  let pos = 0
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) continue
+    // Require a list marker: "1." "1)" "1-" "-", "*", "•", "·".
+    const m = line.match(/^\s*(?:\d+[.)\-]|[-*•·])\s+(.*)$/)
+    if (!m) continue
+    let body = m[1].trim()
+    if (!body) continue
+
+    // Markdown link [name](url) takes priority for both name and url.
+    const md = body.match(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/)
+    let url = ''
+    let name = ''
+    if (md) {
+      name = md[1]
+      url = md[2]
+    } else {
+      const urlM = body.match(URL_RE)
+      if (urlM) url = urlM[0]
+      if (!url) {
+        const dM = body.match(DOMAIN_RE)
+        if (dM) url = `https://${dM[1]}`
+      }
+      name = body
+    }
+    // Clean the name: drop markdown emphasis, the URL, and anything after a
+    // separator (dash with spaces, colon, paren, pipe, middot).
+    name = name
+      .replace(/\*\*|__|`/g, '')
+      .replace(URL_RE, '')
+      .replace(/\[|\]/g, '')
+      .split(/\s[—–-]\s|[:|·(]/)[0]
+      .replace(/^["'״׳]+|["'״׳]+$/g, '')
+      .trim()
+    if (name.length < 2) continue
+    pos++
+    out.push({ position: pos, name, url, title: name })
+    if (out.length >= 10) break
+  }
+  return out
+}
+
+/**
+ * Robustly parse a business list from an LLM text response.
+ * Tries JSON object → JSON array → prose list. Exported so the Gemini/Grok
+ * paths can share the same tolerance.
+ */
+export function parseBusinessList(text: string): any[] {
+  if (!text) return []
+  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+
+  // 1. JSON object — look for a `results` array (or a top-level array value).
+  const objStart = clean.indexOf('{')
+  const objEnd = clean.lastIndexOf('}')
+  if (objStart !== -1 && objEnd > objStart) {
+    try {
+      const parsed = JSON.parse(clean.slice(objStart, objEnd + 1))
+      if (Array.isArray(parsed?.results) && parsed.results.length) return normalizeResultList(parsed.results)
+      if (Array.isArray(parsed?.businesses) && parsed.businesses.length) return normalizeResultList(parsed.businesses)
+      if (Array.isArray(parsed)) return normalizeResultList(parsed)
+    } catch { /* fall through */ }
+  }
+
+  // 2. Bare JSON array.
+  const arrStart = clean.indexOf('[')
+  const arrEnd = clean.lastIndexOf(']')
+  if (arrStart !== -1 && arrEnd > arrStart) {
+    try {
+      const arr = JSON.parse(clean.slice(arrStart, arrEnd + 1))
+      if (Array.isArray(arr) && arr.length) {
+        const normalized = normalizeResultList(arr)
+        if (normalized.length) return normalized
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 3. Prose numbered/bulleted list fallback.
+  return parseProseList(clean)
+}
+
 export interface OpenAIGeoRaw {
   ok: boolean
   text: string
@@ -92,23 +215,31 @@ export async function fetchOpenAIGeoRaw(
   const competitorLine = competitorNames.length > 0
     ? `\nמתחרים ידועים: ${competitorNames.join(', ')}`
     : ''
-  const prompt = `When a user asks ChatGPT for recommendations about "${query}" in Israel, which businesses or websites would you recommend? Use web search for current, real results.${competitorLine}
+  const prompt = `When a user asks ChatGPT for recommendations about "${query}" in Israel, which real businesses or websites would you recommend? Use web search for current, real results.${competitorLine}
 
-List up to 10 businesses in order of how prominently you'd recommend them.
-Also indicate whether ${companyName} (website: ${website}) appears, and at what position.
+List up to 10 real businesses in order of how prominently you'd recommend them, with each business's website URL if known.
+Indicate whether ${companyName} (website: ${website}) appears, and at what position.
 
-Return ONLY raw JSON, no markdown:
-{"results": [{"position": 1, "name": "", "url": "", "isOwn": false}], "userMentioned": false, "userPosition": null}`
+Prefer to return ONLY a raw JSON array (no markdown), each item: {"position": 1, "name": "Business name", "url": "https://..."}.
+If you cannot return JSON, return a plain numbered list (1., 2., 3. ...) of business names with their URLs — never refuse.`
 
-  const { ok, text } = await callOpenAIWebSearch(prompt, cost)
-  if (!ok || !text) return []
+  const { ok, text, error } = await callOpenAIWebSearch(prompt, cost)
+  if (!ok) {
+    console.warn(`[GEO openai] call failed: ${error}`)
+    return []
+  }
+  // BLIND-SPOT FIX: always log what ChatGPT actually returned (Vercel logs).
+  console.log('[GEO openai] raw response (first 800):', (text || '').slice(0, 800))
+  if (!text) {
+    console.warn('[GEO openai] empty text from OpenAI (no output_text)')
+    return []
+  }
 
-  const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  const s = clean.indexOf('{')
-  const e = clean.lastIndexOf('}')
-  if (s === -1 || e <= s) return []
-
-  let parsed: any = {}
-  try { parsed = JSON.parse(clean.slice(s, e + 1)) } catch { return [] }
-  return Array.isArray(parsed.results) ? parsed.results : []
+  const results = parseBusinessList(text)
+  if (results.length === 0) {
+    console.warn('[GEO openai] parse produced 0 results. Raw:', text.slice(0, 800))
+  } else {
+    console.log(`[GEO openai] parsed ${results.length} businesses`)
+  }
+  return results
 }
