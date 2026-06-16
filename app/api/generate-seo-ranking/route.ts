@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
-import { fetchSerp, findPosition, baseDomain as dfsBaseDomain } from '@/lib/seo/dataforseo'
+import { fetchSerp, findPosition, baseDomain as dfsBaseDomain, fetchSearchVolume, matchKeywordsToRows, type Competition } from '@/lib/seo/dataforseo'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -13,6 +13,10 @@ export const maxDuration = 60
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // Default to real Google SERP via DataForSEO; 'grok' keeps the old web_search path.
 const SEO_PROVIDER = (process.env.SEO_PROVIDER || 'dataforseo').toLowerCase()
+
+const COMPETITION_HE: Record<Competition, string> = {
+  LOW: 'נמוכה', MEDIUM: 'בינונית', HIGH: 'גבוהה', UNKNOWN: '—',
+}
 
 function extractDomain(url: string): string {
   try {
@@ -388,15 +392,44 @@ export async function POST(request: Request) {
       }).slice(0, 10)
     }
 
-    const queryVariants = queryList.map((q, i) => ({
-      query: q,
-      position: variantResults[i].position,
-      topResults: variantResults[i].topResults,
-      appeared: variantResults[i].appeared,
-      results: variantResults[i].results,
-      ownResult: (variantResults[i] as any).ownResult ?? null, // client's own row (real position, even past top-10)
-      status: variantResults[i].status, // 'found' | 'not_found' | 'error'
-    }))
+    // Batched search volume + competition for ALL SEO queries — ONE DataForSEO
+    // call per scan (same Google Ads endpoint keyword_trends uses). Zero
+    // per-view cost; degrades to nulls if unavailable. Pairs each query's
+    // position with its business context (a #2 on 12,100/mo ≫ a #2 on 90/mo).
+    const volByQuery: Record<string, { searchVolume: number | null; competition: Competition | null; competitionHe: string | null; cpc: number | null }> = {}
+    try {
+      const vt0 = Date.now()
+      const vol = await fetchSearchVolume(queryList)
+      cost?.add({ provider: 'dataforseo', model: 'google_ads_search_volume', webSearch: true, ms: Date.now() - vt0 })
+      if (vol.ok && vol.keywords.length > 0) {
+        const rows = vol.keywords
+        const matchIdx = matchKeywordsToRows(queryList, rows)
+        for (const q of queryList) {
+          const idx = matchIdx[q]
+          const m = idx != null ? rows[idx] : null
+          if (m) volByQuery[q] = { searchVolume: m.searchVolume, competition: m.competition, competitionHe: COMPETITION_HE[m.competition], cpc: m.cpc }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[SEO] search volume fetch failed:', e?.message)
+    }
+
+    const queryVariants = queryList.map((q, i) => {
+      const vq = volByQuery[q]
+      return {
+        query: q,
+        position: variantResults[i].position,
+        topResults: variantResults[i].topResults,
+        appeared: variantResults[i].appeared,
+        results: variantResults[i].results,
+        ownResult: (variantResults[i] as any).ownResult ?? null, // client's own row (real position, even past top-10)
+        status: variantResults[i].status, // 'found' | 'not_found' | 'error'
+        searchVolume: vq?.searchVolume ?? null,
+        competition: vq?.competition ?? null,
+        competitionHe: vq?.competitionHe ?? null,
+        cpc: vq?.cpc ?? null,
+      }
+    })
 
     // Per-keyword position summary { keyword, position, url, found, status }
     // status: 'found' | 'not_found' (SERP returned, domain absent) | 'error' (call failed/empty)

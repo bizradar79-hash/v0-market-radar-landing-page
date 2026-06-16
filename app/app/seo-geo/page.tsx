@@ -16,6 +16,8 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  Trophy,
+  Target,
 } from "lucide-react"
 
 interface RankingResult {
@@ -48,6 +50,11 @@ interface QueryVariant {
   // would be deduped — the single source of truth for "your position".
   ownResult?: { position: number | null; name?: string; url?: string; isOwn?: boolean } | null
   status?: 'found' | 'not_found' | 'error'
+  // Business context attached on scan (batched DataForSEO Google Ads volume).
+  searchVolume?: number | null
+  competition?: 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' | null
+  competitionHe?: string | null
+  cpc?: number | null
 }
 
 interface SEORanking {
@@ -139,6 +146,20 @@ export default function SeoGeoPage() {
     return false
   }
 
+
+  // Format monthly search volume, e.g. 12100 → "12,100/חו׳".
+  function fmtVolume(v: number | null | undefined): string | null {
+    if (v == null || v <= 0) return null
+    return `${v.toLocaleString('he-IL')}/חו׳`
+  }
+
+  // Competition chip color by bucket.
+  function competitionChipClass(c: string | null | undefined): string {
+    if (c === 'LOW') return 'bg-green-100 text-green-700 border-green-200'
+    if (c === 'MEDIUM') return 'bg-amber-100 text-amber-700 border-amber-200'
+    if (c === 'HIGH') return 'bg-red-100 text-red-700 border-red-200'
+    return 'bg-muted text-muted-foreground border-border'
+  }
 
   function allResults(variants: QueryVariant[] | undefined): QueryVariantResult[] {
     return (variants ?? []).flatMap(v => v.results ?? [])
@@ -249,9 +270,10 @@ export default function SeoGeoPage() {
                   <div className="rounded-lg border border-border overflow-hidden">
                     <table className="w-full table-fixed text-sm">
                       <colgroup>
-                        <col style={{ width: '50%' }} />
-                        <col style={{ width: '15%' }} />
-                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '34%' }} />
+                        <col style={{ width: '10%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '24%' }} />
                         <col style={{ width: '20%' }} className="hidden md:table-column" />
                       </colgroup>
                       <thead>
@@ -259,6 +281,7 @@ export default function SeoGeoPage() {
                           <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">שאילתה</th>
                           <th className="text-center py-2 px-3 text-xs font-medium text-muted-foreground">נמצאת</th>
                           <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">מיקום</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">נפח / תחרות</th>
                           <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground hidden md:table-cell">מתחרים מובילים</th>
                         </tr>
                       </thead>
@@ -292,13 +315,25 @@ export default function SeoGeoPage() {
                                       : <span className="text-muted-foreground">—</span>
                                   }
                                 </td>
+                                <td className="py-2.5 px-3">
+                                  {fmtVolume(v.searchVolume) ? (
+                                    <div className="flex flex-col gap-1 items-start">
+                                      <span className="text-xs font-medium text-foreground tabular-nums">{fmtVolume(v.searchVolume)}</span>
+                                      {v.competitionHe && v.competition && v.competition !== 'UNKNOWN' && (
+                                        <Badge variant="outline" className={`py-0 h-4 text-[10px] ${competitionChipClass(v.competition)}`}>{v.competitionHe}</Badge>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">—</span>
+                                  )}
+                                </td>
                                 <td className="py-2.5 px-3 hidden md:table-cell text-muted-foreground truncate">
                                   {v.topResults.slice(0, 3).join(', ') || '—'}
                                 </td>
                               </tr>
                               {expandedSeoRow === i && (
                                 <tr key={`seo-expand-${i}`} className="bg-muted/10 border-b border-border">
-                                  <td colSpan={4} className="px-3 py-3">
+                                  <td colSpan={5} className="px-3 py-3">
                                     <p className="text-xs text-muted-foreground mb-2 break-words whitespace-normal font-medium">{v.query}</p>
                                     {filteredResults.length > 0 ? (
                                       <div className="space-y-0.5">
@@ -369,7 +404,7 @@ export default function SeoGeoPage() {
                         })}
                         {filterVariants(seoRanking.queryVariants).length === 0 && (
                           <tr>
-                            <td colSpan={4} className="text-center py-6 text-sm text-muted-foreground">
+                            <td colSpan={5} className="text-center py-6 text-sm text-muted-foreground">
                               {seoFilter === 'sponsored'
                                 ? 'לא נמצאו תוצאות ממומנות לשאילתות אלו'
                                 : 'לא נמצאו תוצאות אורגניות'}
@@ -384,6 +419,86 @@ export default function SeoGeoPage() {
                       {showAllSeo ? <><ChevronUp className="h-3.5 w-3.5" />הצג פחות</> : <><ChevronDown className="h-3.5 w-3.5" />הצג הכל ({seoRanking.queryVariants.length})</>}
                     </button>
                   )}
+
+                  {/* ── Insight card: ניתוח SEO והזדמנויות (template-based, NO AI) ── */}
+                  {(() => {
+                    const variants = seoRanking.queryVariants!
+                    const vol = (v: QueryVariant) => v.searchVolume ?? 0
+                    const compSuffix = (v: QueryVariant) =>
+                      v.competitionHe && v.competition && v.competition !== 'UNKNOWN' ? `, תחרות ${v.competitionHe}` : ''
+                    const tops = (v: QueryVariant) => {
+                      const fromResults = (v.results || []).filter(r => !r.isOwn).map(r => r.name).filter(Boolean)
+                      const list = (fromResults.length ? fromResults : v.topResults || []).slice(0, 3)
+                      return list.join(', ')
+                    }
+
+                    // WINS: top-3 positions, ranked by volume (highest-value first).
+                    const wins = variants
+                      .filter(v => v.appeared && v.position != null && v.position <= 3)
+                      .sort((a, b) => vol(b) - vol(a))
+                      .slice(0, 3)
+
+                    // OPPORTUNITIES: not in top-10 OR ranked beyond #5, ranked by
+                    // volume × gap (room to climb). Prefer queries with real volume.
+                    const gap = (v: QueryVariant) => (v.appeared && v.position != null ? Math.min(v.position, 20) : 20)
+                    const oppPool = variants.filter(v => v.status !== 'error' && (!v.appeared || (v.position != null && v.position > 5)))
+                    const opps = oppPool
+                      .map(v => ({ v, score: (vol(v) || 1) * gap(v) }))
+                      .sort((a, b) => b.score - a.score)
+                      .slice(0, 3)
+                      .map(x => x.v)
+
+                    if (wins.length === 0 && opps.length === 0) return null
+
+                    const winLine = (v: QueryVariant) => {
+                      const fv = fmtVolume(v.searchVolume)
+                      return fv
+                        ? `אתה במקום #${v.position} על "${v.query}" (${v.searchVolume!.toLocaleString('he-IL')} חיפושים/חודש) — מיקום מצוין`
+                        : `אתה במקום #${v.position} על "${v.query}" — מיקום מצוין`
+                    }
+                    const oppLine = (v: QueryVariant) => {
+                      const where = v.appeared && v.position != null ? `אתה במקום #${v.position}` : 'אינך מופיע בטופ'
+                      const volPart = fmtVolume(v.searchVolume)
+                        ? ` (${v.searchVolume!.toLocaleString('he-IL')} חיפושים/חודש${compSuffix(v)})`
+                        : ''
+                      const topPart = tops(v) ? ` בטופ: ${tops(v)}.` : ''
+                      return `${where} על "${v.query}"${volPart}.${topPart} שווה להשקיע כאן.`
+                    }
+
+                    return (
+                      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                        <h4 className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                          <Lightbulb className="h-4 w-4 text-primary" />ניתוח SEO והזדמנויות
+                        </h4>
+                        {wins.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-green-700 flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5" />חוזקות</p>
+                            <ul className="space-y-1">
+                              {wins.map((v, i) => (
+                                <li key={`win-${i}`} className="text-sm flex items-start gap-2 text-foreground">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
+                                  <span>{winLine(v)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {opps.length > 0 && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-amber-700 flex items-center gap-1.5"><Target className="h-3.5 w-3.5" />הזדמנויות</p>
+                            <ul className="space-y-1">
+                              {opps.map((v, i) => (
+                                <li key={`opp-${i}`} className="text-sm flex items-start gap-2 text-foreground">
+                                  <Target className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                                  <span>{oppLine(v)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </>
               ) : (
                 /* Fallback: original single-query display */
