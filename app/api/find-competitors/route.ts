@@ -260,53 +260,55 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     steps.db = 'starting'
 
-    const { data: manualComps } = await supabase
+    // ADDITIVE discovery — NEVER delete existing competitors. Load the FULL
+    // current set (auto + manual) and only ADD newly-discovered ones that aren't
+    // already stored, up to COMPETITOR_CAP total. A scan can therefore only keep
+    // or GROW the set — it can never wipe/shrink it (the bug the 7→8 raise hit).
+    const { data: existingComps } = await supabase
       .from('competitors')
-      .select('website, name')
+      .select('website, name, source')
       .eq('company_id', userId)
-      .eq('source', 'manual')
-    const manualDomains = new Set(
-      (manualComps || []).map((c: any) => extractDomain(c.website || '')).filter(Boolean)
+    const existingRows = existingComps || []
+    const existingTotal = existingRows.length
+    const existingDomains = new Set(
+      existingRows.map((c: any) => extractDomain(c.website || '')).filter(Boolean)
     )
-    const manualNames = (manualComps || []).map((c: any) => (c.name || '').toLowerCase().trim())
-    const manualCount = (manualComps || []).length
-    steps.db = { manualKept: manualDomains.size }
+    const existingNames = new Set(
+      existingRows.map((c: any) => (c.name || '').toLowerCase().trim()).filter(Boolean)
+    )
+    steps.db = { existing: existingTotal }
 
-    // Compute the new auto competitors BEFORE deleting anything.
-    const deduped = mapped
+    // Remaining slots toward the target. At/above target → no-op (no wipe).
+    const gap = Math.max(0, COMPETITOR_CAP - existingTotal)
+    if (gap === 0) {
+      return NextResponse.json({ success: true, added: 0, count: existingTotal, message: 'at_target', steps })
+    }
+
+    // Only ADD discovered competitors not already stored (by domain or name),
+    // capped to the remaining gap.
+    const toAdd = mapped
       .filter((c: any) => {
         const domain = extractDomain(c.website || '')
         const name = (c.name || '').toLowerCase().trim()
-        if (domain && manualDomains.has(domain)) return false
-        if (name && manualNames.includes(name)) return false
+        if (domain && existingDomains.has(domain)) return false
+        if (name && existingNames.has(name)) return false
         return true
       })
-      .slice(0, Math.max(0, COMPETITOR_CAP - manualCount))
+      .slice(0, gap)
 
-    // Guard: never wipe existing auto competitors for an empty/degraded scan.
-    const { count: existingAuto } = await supabase
-      .from('competitors').select('id', { count: 'exact', head: true })
-      .eq('company_id', userId).or('source.eq.auto,source.is.null')
-    const guard = guardWrite(existingAuto ?? 0, deduped.length)
+    if (toAdd.length === 0) {
+      return NextResponse.json({ success: true, added: 0, count: existingTotal, message: 'nothing_new', steps })
+    }
 
+    // Backstop: the resulting set must NEVER be smaller than the existing one.
+    // (Always true for additive insert, but guards against future regressions.)
+    const guard = guardWrite(existingTotal, existingTotal + toAdd.length, { noReduce: true })
     if (!guard.useNew) {
-      await logKeptExisting(supabase, userId, { module: 'competitors', reason: guard.reason, existing_count: existingAuto ?? 0, new_count: deduped.length })
-      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingAuto ?? 0, new_count: deduped.length, steps })
+      await logKeptExisting(supabase, userId, { module: 'competitors', reason: guard.reason, existing_count: existingTotal, new_count: existingTotal + toAdd.length })
+      return NextResponse.json({ success: true, kept_existing: true, reason: guard.reason, existing_count: existingTotal, count: existingTotal, steps })
     }
 
-    if (deduped.length === 0) {
-      return NextResponse.json({ success: true, competitors: [], count: 0, steps })
-    }
-
-    // Only now (we have real new data) replace the auto competitors.
-    const { error: deleteError } = await supabase.from('competitors').delete()
-      .eq('company_id', userId)
-      .or('source.eq.auto,source.is.null')
-    if (deleteError) {
-      await supabase.from('competitors').delete().eq('company_id', userId)
-    }
-
-    const insertRows = deduped.map((c: any) => ({
+    const insertRows = toAdd.map((c: any) => ({
       name: c.name,
       website: c.website,
       services: c.services,
@@ -333,9 +335,10 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
       steps.db = { ok: false, error: insertError.message, code: insertError.code }
       return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
     }
-    steps.db = { ok: true, saved: saved?.length }
+    const addedCount = saved?.length || 0
+    steps.db = { ok: true, added: addedCount, total: existingTotal + addedCount }
 
-    return NextResponse.json({ success: true, competitors: saved, count: saved?.length || 0, steps })
+    return NextResponse.json({ success: true, competitors: saved, added: addedCount, count: existingTotal + addedCount, steps })
   } catch (e: any) {
     console.error('find-competitors error:', e?.message)
     return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })

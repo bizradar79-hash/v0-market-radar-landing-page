@@ -10,9 +10,18 @@ export interface GuardResult {
  * - empty:    we had data, the new scan returned nothing → keep existing.
  * - degraded: the new scan returned less than half of what we had → keep existing.
  * Otherwise the new result wins.
+ *
+ * Pass { noReduce: true } for modules that must NEVER shrink (e.g. competitor
+ * discovery, which is additive): the write is rejected whenever newCount is at
+ * all smaller than existingCount, not just below half. Default behavior is
+ * unchanged for all other callers.
  */
-export function guardWrite(existingCount: number, newCount: number): GuardResult {
+export function guardWrite(existingCount: number, newCount: number, opts?: { noReduce?: boolean }): GuardResult {
   if (existingCount > 0 && newCount === 0) return { useNew: false, reason: 'empty' }
+  if (opts?.noReduce) {
+    if (existingCount > 0 && newCount < existingCount) return { useNew: false, reason: 'degraded' }
+    return { useNew: true, reason: null }
+  }
   if (existingCount > 0 && newCount < existingCount * 0.5) return { useNew: false, reason: 'degraded' }
   return { useNew: true, reason: null }
 }
