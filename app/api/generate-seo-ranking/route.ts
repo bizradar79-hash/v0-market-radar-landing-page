@@ -153,12 +153,17 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
   const appeared = ownIdx !== -1
   const position = appeared ? ownIdx + 1 : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
+  // The client's OWN row, preserved separately so the page can always show
+  // "המיקום שלך: #N" even if dedup/top-10 capping drops it from `results`.
+  const ownRow = results.find(r => r.isOwn)
+  const ownResult = ownRow ? { position: position ?? ownRow.position ?? null, name: ownRow.name || companyName, url: ownRow.url || '', isOwn: true } : null
 
   return {
     position,
     topResults,
     appeared,
     results,
+    ownResult,
   }
 }
 
@@ -170,8 +175,10 @@ async function runSeoQueryDFS(
   website: string,
   companyDomain: string,
   competitorWebsites: string[],
-): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[]; provider: string } | null> {
-  const serp = await fetchSerp(query)
+): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[]; ownResult: any | null; provider: string } | null> {
+  // depth 100: find the client's REAL organic position up to #100 (so we can show
+  // "המיקום שלך: #N" instead of just "not in top 10"). Same per-request cost.
+  const serp = await fetchSerp(query, { depth: 100 })
   if (!serp.ok) {
     console.error(`[SEO dfs] "${query}" failed:`, serp.error)
     return null // signal caller to fall back
@@ -180,7 +187,7 @@ async function runSeoQueryDFS(
   const competitorDomains = competitorWebsites.map(w => dfsBaseDomain(w)).filter(Boolean)
   const ownBase = dfsBaseDomain(companyDomain)
 
-  // Take top organic + paid, dedupe by base domain, cap 10.
+  // Take top organic + paid, dedupe by base domain, cap 10 for the DISPLAY list.
   const seen = new Set<string>()
   const results: any[] = []
   for (const it of serp.items) {
@@ -200,10 +207,19 @@ async function runSeoQueryDFS(
     if (results.length >= 10) break
   }
 
-  const { position, found } = findPosition(serp.items, companyDomain)
+  // Real organic position over the FULL depth (can be > 10).
+  const { position, found, url } = findPosition(serp.items, companyDomain)
+  // Preserve the client's own row explicitly so it survives the top-10 cap and
+  // cross-query dedup. If they rank within the top-10 it's already in `results`;
+  // beyond that, this is the only place we keep it.
+  let ownResult: any | null = null
+  if (found) {
+    const ownItem = serp.items.find(it => it.type === 'organic' && dfsBaseDomain(it.domain || it.url) === ownBase)
+    ownResult = { position, name: ownItem?.title || companyName, url: ownItem?.url || url || '', isOwn: true }
+  }
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
 
-  return { position, topResults, appeared: found, results, provider: 'dataforseo' }
+  return { position, topResults, appeared: found, results, ownResult, provider: 'dataforseo' }
 }
 
 // ── Gemini validation step ─────────────────────────────────────────────────
@@ -360,6 +376,9 @@ export async function POST(request: Request) {
     for (const v of variantResults) {
       const withinSeen = new Set<string>()
       v.results = v.results.filter((r: any) => {
+        // NEVER dedup the client's own row — it legitimately ranks across
+        // multiple queries and must stay visible in each one.
+        if (r.isOwn) return true
         const raw = r.url ? extractDomain(r.url) : (r.name || '').toLowerCase()
         const base = baseDomain(raw) || raw
         if (!base || withinSeen.has(base) || globalSeenDomains.has(base)) return false
@@ -375,6 +394,7 @@ export async function POST(request: Request) {
       topResults: variantResults[i].topResults,
       appeared: variantResults[i].appeared,
       results: variantResults[i].results,
+      ownResult: (variantResults[i] as any).ownResult ?? null, // client's own row (real position, even past top-10)
       status: variantResults[i].status, // 'found' | 'not_found' | 'error'
     }))
 

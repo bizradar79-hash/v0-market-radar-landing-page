@@ -44,6 +44,9 @@ interface QueryVariant {
   topResults: string[]
   appeared: boolean
   results?: QueryVariantResult[]
+  // Client's OWN row, preserved by the server even when it's past the top-10 or
+  // would be deduped — the single source of truth for "your position".
+  ownResult?: { position: number | null; name?: string; url?: string; isOwn?: boolean } | null
   status?: 'found' | 'not_found' | 'error'
 }
 
@@ -300,7 +303,9 @@ export default function SeoGeoPage() {
                                     {filteredResults.length > 0 ? (
                                       <div className="space-y-0.5">
                                         {filteredResults.map((r, ri) => {
-                                          const own = isCompanyResult(r)
+                                          // SINGLE SOURCE OF TRUTH: use the SERVER's ownership flag,
+                                          // never a client-side re-scan.
+                                          const own = !!r.isOwn
                                           return (
                                           <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
                                             <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
@@ -315,12 +320,27 @@ export default function SeoGeoPage() {
                                             )}
                                           </div>
                                         )})}
-                                        {!filteredResults.some(r => isCompanyResult(r)) && v.results && v.results.some(r => isCompanyResult(r)) && (
-                                          <p className="text-xs text-amber-600 mt-1.5">העסק שלך מופיע בסינון אחר</p>
-                                        )}
-                                        {!filteredResults.some(r => isCompanyResult(r)) && !v.results?.some(r => isCompanyResult(r)) && (
-                                          <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
-                                        )}
+                                        {/* One coherent status line, driven purely by the server's
+                                            position/appeared — no contradiction with the table. */}
+                                        {(() => {
+                                          const ownInList = filteredResults.some(r => r.isOwn)
+                                          if (ownInList) return null // already highlighted above
+                                          if (v.appeared && v.position != null) {
+                                            return (
+                                              <div className="mt-1.5 flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-green-100 border border-green-200">
+                                                <span className="font-mono font-bold w-auto shrink-0 text-green-700">#{v.position}</span>
+                                                <span className="flex-1 font-medium text-green-800">{v.ownResult?.name || company?.name || 'העסק שלך'}</span>
+                                                <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">המיקום שלך</Badge>
+                                                {v.ownResult?.url && (
+                                                  <a href={v.ownResult.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0" title={v.ownResult.url}>
+                                                    <ExternalLink className="h-3 w-3" />
+                                                  </a>
+                                                )}
+                                              </div>
+                                            )
+                                          }
+                                          return <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת ב-100 התוצאות הראשונות</p>
+                                        })()}
                                       </div>
                                     ) : v.topResults && v.topResults.length > 0 ? (
                                       <div className="space-y-0.5">
@@ -331,9 +351,9 @@ export default function SeoGeoPage() {
                                           </div>
                                         ))}
                                         {v.appeared && v.position != null ? (
-                                          <p className="text-xs text-green-600 mt-1.5 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />נמצאת במיקום #{v.position}</p>
+                                          <p className="text-xs text-green-600 mt-1.5 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />המיקום שלך: #{v.position}</p>
                                         ) : (
-                                          <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת בטופ 10</p>
+                                          <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1"><XCircle className="h-3 w-3" />לא נמצאת ב-100 התוצאות הראשונות</p>
                                         )}
                                       </div>
                                     ) : v.status === 'error' ? (
