@@ -153,24 +153,41 @@ export default function SeoGeoPage() {
     return `${v.toLocaleString('he-IL')}/חו׳`
   }
 
-  // Clean a SERP result down to a BUSINESS NAME (not the page <title>/snippet).
-  // Cuts at the first title separator ("name | tagline…"), strips ellipses, and
-  // falls back to the domain (never a long meta-description) when the title is
-  // missing or too long.
-  function cleanName(r: { name?: string; title?: string; url?: string }): string {
-    let n = (r.name || r.title || '').trim()
-    n = n.split(/\s[|｜–—\-·:•]\s|[|｜•]/)[0]
-    n = n.replace(/…/g, '').replace(/\.{2,}/g, '').replace(/^["'״׳]+|["'״׳]+$/g, '').trim()
-    // A business name is short (≤ ~5 words). Anything longer is a title/snippet/
-    // description → fall back to the domain, never the phrase.
-    const wordCount = n ? n.split(/\s+/).filter(Boolean).length : 0
-    if (!n || n.length > 40 || wordCount > 5) {
-      const host = (r.url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
-      const base = host.split('.')[0]
-      if (base) return base
-      return n.split(/\s+/).slice(0, 5).join(' ')
+  // Clean brand label from a URL/domain: strip protocol, www., path and TLD →
+  // the registrable name only. "buycarpet.co.il" → "buycarpet",
+  // "shop.carmelfloor.co.il" → "carmelfloor", "golfco.com" → "golfco".
+  function domainLabel(url?: string): string {
+    const host = (url || '').replace(/^https?:\/\//, '').replace(/^www\d?\./, '').split('/')[0].toLowerCase().trim()
+    if (!host || !host.includes('.')) return host
+    const parts = host.split('.')
+    const last2 = parts.slice(-2).join('.')
+    const multi = ['co.il', 'org.il', 'net.il', 'ac.il', 'gov.il', 'co.uk', 'com.au', 'co.nz']
+    const reg = parts.length >= 3 && multi.includes(last2) ? parts.slice(-3) : parts.slice(-2)
+    return reg[0] || host
+  }
+
+  // The DOMAIN identifies the competitor; the page <title> is usually a generic
+  // phrase ("שטיחים לחדר שינה", "איך לבחור שטיח"). So DEFAULT to the domain.
+  // Use the title only when it's clearly a short BRAND (≤2 words, ≤18 chars,
+  // contains Latin letters so it isn't a generic Hebrew search phrase) that
+  // differs meaningfully from the domain. Full title stays as a hover tooltip.
+  function cleanName(r: { name?: string; title?: string; url?: string; domain?: string }): string {
+    const dom = domainLabel(r.url || r.domain || '')
+    let title = (r.name || r.title || '').trim()
+    title = title.split(/\s[|｜–—\-·:•]\s|[|｜•]/)[0].replace(/…/g, '').replace(/\.{2,}/g, '').replace(/^["'״׳]+|["'״׳]+$/g, '').trim()
+    const words = title ? title.split(/\s+/).filter(Boolean).length : 0
+
+    if (dom) {
+      const titleCompact = title.replace(/\s+/g, '').toLowerCase()
+      const domCompact = dom.replace(/[^a-z0-9֐-׿]/gi, '').toLowerCase()
+      const overlaps = !!titleCompact && !!domCompact && (domCompact.includes(titleCompact) || titleCompact.includes(domCompact))
+      const isBrand = !!title && words <= 2 && title.length <= 18 && /[A-Za-z]/.test(title)
+      if (isBrand && !overlaps) return title
+      return dom
     }
-    return n
+    // No domain available — fall back to the cleaned title (capped to 5 words).
+    if (!title) return ''
+    return words > 5 ? title.split(/\s+/).slice(0, 5).join(' ') : title
   }
 
   // Competition chip color by bucket.
@@ -384,7 +401,7 @@ export default function SeoGeoPage() {
                                             return (
                                               <div className="mt-1.5 flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-green-100 border border-green-200">
                                                 <span className="font-mono font-bold w-auto shrink-0 text-green-700">#{v.position}</span>
-                                                <span className="flex-1 font-medium text-green-800 truncate">{cleanName({ name: v.ownResult?.name, url: v.ownResult?.url }) || company?.name || 'העסק שלך'}</span>
+                                                <span className="flex-1 font-medium text-green-800 truncate" title={v.ownResult?.name || company?.name || ''}>{cleanName({ name: v.ownResult?.name, url: v.ownResult?.url }) || company?.name || 'העסק שלך'}</span>
                                                 <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">המיקום שלך</Badge>
                                                 {v.ownResult?.url && (
                                                   <a href={v.ownResult.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0" title={v.ownResult.url}>
