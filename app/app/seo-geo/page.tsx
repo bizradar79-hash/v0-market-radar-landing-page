@@ -117,6 +117,10 @@ export default function SeoGeoPage() {
   const [selectedGeoEngine, setSelectedGeoEngine] = useState<'chatgpt' | 'gemini' | 'grok'>('chatgpt')
   const [selectedGeoQuery, setSelectedGeoQuery] = useState<string>('')
 
+  // registrable-domain → ACCURATE Hebrew business name. Built from the client's
+  // own company + their curated competitors table (real names, no guessing).
+  const [nameByDomain, setNameByDomain] = useState<Record<string, string>>({})
+
   const supabase = createClient()
 
   useEffect(() => {
@@ -132,6 +136,23 @@ export default function SeoGeoPage() {
     if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
     if (data?.name || data?.website) setCompany({ name: data.name || '', website: data.website || '' })
+
+    // Build an ACCURATE registrable-domain → Hebrew-name map from curated data:
+    // the client's own company + their competitors table (human/AI-curated
+    // names + websites). No transliteration/guessing — only real stored names.
+    const map: Record<string, string> = {}
+    if (data?.website && data?.name) {
+      const own = registrableDomain(data.website)
+      if (own) map[own] = data.name
+    }
+    const { data: comps } = await supabase
+      .from('competitors').select('name, website').eq('company_id', user.id)
+    for (const c of comps || []) {
+      const dom = registrableDomain((c as any).website || '')
+      const nm = ((c as any).name || '').trim()
+      if (dom && nm && !map[dom]) map[dom] = nm
+    }
+    setNameByDomain(map)
   }
 
   function isCompanyResult(r: { url?: string; name?: string; title?: string }): boolean {
@@ -153,25 +174,36 @@ export default function SeoGeoPage() {
     return `${v.toLocaleString('he-IL')}/חו׳`
   }
 
-  // Clean brand label from a URL/domain: strip protocol, www., path and TLD →
-  // the registrable name only. "buycarpet.co.il" → "buycarpet",
-  // "shop.carmelfloor.co.il" → "carmelfloor", "golfco.com" → "golfco".
-  function domainLabel(url?: string): string {
+  // Registrable domain of a URL: "buycarpet.co.il", "shop.carmelfloor.co.il" →
+  // "carmelfloor.co.il", "golfco.com" → "golfco.com". Used as the map key.
+  function registrableDomain(url?: string): string {
     const host = (url || '').replace(/^https?:\/\//, '').replace(/^www\d?\./, '').split('/')[0].toLowerCase().trim()
     if (!host || !host.includes('.')) return host
     const parts = host.split('.')
     const last2 = parts.slice(-2).join('.')
     const multi = ['co.il', 'org.il', 'net.il', 'ac.il', 'gov.il', 'co.uk', 'com.au', 'co.nz']
     const reg = parts.length >= 3 && multi.includes(last2) ? parts.slice(-3) : parts.slice(-2)
-    return reg[0] || host
+    return reg.join('.')
   }
 
-  // The DOMAIN identifies the competitor; the page <title> is usually a generic
-  // phrase ("שטיחים לחדר שינה", "איך לבחור שטיח"). So DEFAULT to the domain.
-  // Use the title only when it's clearly a short BRAND (≤2 words, ≤18 chars,
-  // contains Latin letters so it isn't a generic Hebrew search phrase) that
-  // differs meaningfully from the domain. Full title stays as a hover tooltip.
+  // Latin brand label from a URL: registrable domain minus the TLD.
+  // "buycarpet.co.il" → "buycarpet", "golfco.com" → "golfco".
+  function domainLabel(url?: string): string {
+    const rd = registrableDomain(url)
+    return rd ? rd.split('.')[0] : ''
+  }
+
+  // Display label for a SERP result. Priority for ACCURACY:
+  //   1. Curated Hebrew name (own company / competitors table) matched by domain.
+  //   2. A clear short Latin BRAND from the title (e.g. "TerminalX").
+  //   3. The latin domain label — the reliable identifier (never a guessed/
+  //      transliterated Hebrew name, and never a generic page title).
+  // Full original title is always available as a hover tooltip.
   function cleanName(r: { name?: string; title?: string; url?: string; domain?: string }): string {
+    const rd = registrableDomain(r.url || r.domain || '')
+    // 1. Accurate curated Hebrew name (no guessing).
+    if (rd && nameByDomain[rd]) return nameByDomain[rd]
+
     const dom = domainLabel(r.url || r.domain || '')
     let title = (r.name || r.title || '').trim()
     title = title.split(/\s[|｜–—\-·:•]\s|[|｜•]/)[0].replace(/…/g, '').replace(/\.{2,}/g, '').replace(/^["'״׳]+|["'״׳]+$/g, '').trim()
