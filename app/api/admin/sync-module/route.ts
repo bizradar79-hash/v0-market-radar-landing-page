@@ -18,7 +18,7 @@ const MODULE_ROUTES: Record<string, string[]> = {
   news:           ['/api/generate-news'],
   conferences:    ['/api/generate-conferences'],
   tenders:        ['/api/find-tenders'],
-  competitors:    ['/api/find-competitors'],
+  competitors:    ['/api/sync-profile-competitors', '/api/find-competitors'],
   seo:            ['/api/generate-seo-ranking'],
   geo:            ['/api/generate-geo-ranking'],
   // The grouped `trends` button fans out to ALL THREE trend modules — including

@@ -352,15 +352,16 @@ export default function TrendsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       if (!force) {
+        // DISPLAY-ONLY on mount: read the cached field, never generate on view.
+        // (Generation happens during scans / admin sync.) Empty → empty state.
         const { data } = await supabase
           .from('companies').select('industry_trends').eq('id', user.id).single()
         const cached = (data as any)?.industry_trends as IndustryTrendsData | null
-        if (cached?.fetchedAt && Array.isArray(cached?.trends)) {
-          setIndustryTrends(cached)
-          return
-        }
+        if (cached?.fetchedAt && Array.isArray(cached?.trends)) setIndustryTrends(cached)
+        return
       }
-      const res = await fetch(`/api/industry-trends${force ? '?force=true' : ''}`, { method: 'POST' })
+      // force=true only: user-/admin-initiated regeneration.
+      const res = await fetch(`/api/industry-trends?force=true`, { method: 'POST' })
       const d = await res.json()
       if (d.success && Array.isArray(d.trends)) setIndustryTrends(d as IndustryTrendsData)
     } catch {}
@@ -374,15 +375,15 @@ export default function TrendsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       if (!force) {
+        // DISPLAY-ONLY on mount: read the cached field, never generate on view.
         const { data } = await supabase
           .from('companies').select('competitor_trends').eq('id', user.id).single()
         const cached = (data as any)?.competitor_trends as CompetitorTrendsData | null
-        if (cached?.fetchedAt && Array.isArray(cached?.competitor_data)) {
-          setCompetitorTrends(cached)
-          return
-        }
+        if (cached?.fetchedAt && Array.isArray(cached?.competitor_data)) setCompetitorTrends(cached)
+        return
       }
-      const res = await fetch(`/api/competitor-trends${force ? '?force=true' : ''}`, { method: 'POST' })
+      // force=true only: user-/admin-initiated regeneration.
+      const res = await fetch(`/api/competitor-trends?force=true`, { method: 'POST' })
       const d = await res.json()
       if (d.success) setCompetitorTrends(d as CompetitorTrendsData)
     } catch {}

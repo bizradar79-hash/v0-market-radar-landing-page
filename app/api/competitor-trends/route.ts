@@ -95,7 +95,24 @@ export async function POST(request: Request) {
 
     cost = new ScanCostCollector(ctx.user.id, 'competitor_trends')
 
-    const force = new URL(request.url).searchParams.get('force') === 'true'
+    const params = new URL(request.url).searchParams
+    const force = params.get('force') === 'true'
+    const cachedOnly = params.get('cachedOnly') === 'true'
+
+    // DISPLAY-ONLY read: return whatever is saved (or empty), NEVER generate.
+    if (cachedOnly) {
+      const { data: co } = await ctx.supabase
+        .from('companies').select('competitor_trends').eq('id', ctx.user.id).single()
+      const saved = (co as any)?.competitor_trends as { fetchedAt?: string; competitor_data?: any[] } | null
+      await cost.flush()
+      return NextResponse.json({
+        success: true,
+        competitor_data: Array.isArray(saved?.competitor_data) ? saved!.competitor_data : [],
+        fetchedAt: saved?.fetchedAt ?? null,
+        cached: true,
+      })
+    }
+
     if (!force) {
       const { data: co } = await ctx.supabase
         .from('companies').select('competitor_trends').eq('id', ctx.user.id).single()
@@ -108,12 +125,14 @@ export async function POST(request: Request) {
 
     const competitors: any[] = ctx.competitors || []
     if (competitors.length === 0) {
+      // PERSIST empty so we don't re-run on every view (no competitors = no AI
+      // cost here, but persisting keeps it consistent and cache-gated).
+      const emptyResult = { competitor_data: [] as any[], fetchedAt: new Date().toISOString() }
+      try {
+        await ctx.supabase.from('companies').update({ competitor_trends: emptyResult } as any).eq('id', ctx.user.id)
+      } catch {}
       await cost.flush()
-      return NextResponse.json({
-        success: true,
-        competitor_data: [],
-        fetchedAt: new Date().toISOString(),
-      })
+      return NextResponse.json({ success: true, ...emptyResult })
     }
 
     const companyActivity = (ctx.company?.business_profile as any)?.coreActivity || ctx.company?.description || ''

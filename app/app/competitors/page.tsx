@@ -140,8 +140,11 @@ export default function CompetitorsPage() {
   const { toast } = useToast()
 
   useEffect(() => {
+    // DISPLAY-ONLY on mount: read competitors from the DB. Do NOT sync from the
+    // profile or fire any AI on view — the scan (sync-profile-competitors +
+    // find-competitors + ratings) populates this. Empty state until first scan.
     fetchSyncDates()
-    syncProfileCompetitors().then(() => fetchCompetitors())
+    fetchCompetitors()
   }, [])
 
   async function fetchSyncDates() {
@@ -149,14 +152,6 @@ export default function CompetitorsPage() {
     if (!user) return
     const { data } = await supabase.from('companies').select('last_sync_at, next_sync_at').eq('id', user.id).single()
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
-  }
-
-  async function syncProfileCompetitors() {
-    try {
-      await fetch('/api/sync-profile-competitors', { method: 'POST' })
-    } catch {
-      // non-blocking — don't stop page load on failure
-    }
   }
 
   async function fetchCompetitors() {
@@ -183,14 +178,9 @@ export default function CompetitorsPage() {
       } else {
         setCompetitors(sorted)
       }
-      // Auto-fetch ratings for ALL competitors with missing google_rating (background, fire-and-forget)
-      // No website filter — fetch-competitor-rating falls back to Gemini when no website available
-      const needsRating = sorted.filter(c => c.google_rating == null)
-      // Stagger calls to avoid hammering the API (1 per second)
-      needsRating.forEach((c, i) => setTimeout(() => fetchGoogleRating(c), i * 1000))
-      // Auto-fetch services description for competitors with empty/null services
-      const needsServices = sorted.filter(c => !c.services || c.services === 'לא ידוע')
-      needsServices.forEach(c => fetchMissingServices(c))
+      // NOTE: ratings + services are populated by the scan (sync-competitor-
+      // ratings / profile-competitor enrichment), NOT auto-fetched on every page
+      // view. Users can still pull a rating on demand via the eye-click.
     }
     setLoading(false)
   }
@@ -249,23 +239,6 @@ export default function CompetitorsPage() {
     } finally {
       setFetchingRating(prev => ({ ...prev, [competitor.id]: false }))
     }
-  }
-
-  async function fetchMissingServices(competitor: Competitor) {
-    try {
-      const res = await fetch('/api/lookup-competitor-services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: competitor.name }),
-      })
-      if (!res.ok) return
-      const { services } = await res.json()
-      if (!services) return
-      // Update in DB
-      await supabase.from('competitors').update({ services }).eq('id', competitor.id)
-      setCompetitors(prev => prev.map(c => c.id === competitor.id ? { ...c, services } : c))
-      setSelectedCompetitor(prev => prev?.id === competitor.id ? { ...prev, services } : prev)
-    } catch { /* silent */ }
   }
 
   async function fetchReviews(competitor: Competitor) {

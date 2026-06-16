@@ -247,20 +247,27 @@ export async function POST(request: Request) {
 
   // ── Inner function with all module calls ──────────────────────────────────
   async function runAllModules() {
-    // 1. Competitor DISCOVERY — initial only (weekly skips it per FIX 4).
+    // 1. Competitor seeding + DISCOVERY — initial only (weekly skips it per FIX 4).
     await runStep('competitors', async () => {
+      // 1a. Seed competitors identified during onboarding
+      // (business_profile.directCompetitors → competitor rows + enrichment).
+      // This MUST run in the scan: the competitors page no longer syncs on view.
+      // Idempotent — short-circuits once the rows already exist.
+      const seed = await callModule(origin, '/api/sync-profile-competitors', companyId!, false)
+      const seededMsg = seed.ok ? `seeded ${seed.body?.added ?? 0}` : `seed HTTP ${seed.status}`
+
       const { count: autoCount } = await adminDb
         .from('competitors')
         .select('id', { count: 'exact', head: true })
         .eq('company_id', companyId)
         .neq('source', 'manual')
       if ((autoCount ?? 0) >= COMPETITOR_TARGET) {
-        return { status: 'skipped', message: `already have ${autoCount} auto competitors` }
+        return { status: 'ok', message: `${seededMsg}; already have ${autoCount} auto competitors` }
       }
       const r = await callModule(origin, '/api/find-competitors', companyId!, false)
       return {
         status: r.ok ? 'ok' : 'error',
-        message: r.ok ? `found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`),
+        message: r.ok ? `${seededMsg}; found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`),
       }
     })
 

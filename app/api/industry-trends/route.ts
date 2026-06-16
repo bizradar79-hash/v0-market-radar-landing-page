@@ -44,7 +44,24 @@ export async function POST(request: Request) {
 
     cost = new ScanCostCollector(ctx.user.id, 'industry_trends')
 
-    const force = new URL(request.url).searchParams.get('force') === 'true'
+    const params = new URL(request.url).searchParams
+    const force = params.get('force') === 'true'
+    const cachedOnly = params.get('cachedOnly') === 'true'
+
+    // DISPLAY-ONLY read: return whatever is saved (or empty), NEVER generate.
+    if (cachedOnly) {
+      const { data: co } = await ctx.supabase
+        .from('companies').select('industry_trends').eq('id', ctx.user.id).single()
+      const saved = (co as any)?.industry_trends as { fetchedAt?: string; trends?: any[] } | null
+      await cost.flush()
+      return NextResponse.json({
+        success: true,
+        trends: Array.isArray(saved?.trends) ? saved!.trends : [],
+        fetchedAt: saved?.fetchedAt ?? null,
+        cached: true,
+      })
+    }
+
     if (!force) {
       const { data: co } = await ctx.supabase
         .from('companies').select('industry_trends').eq('id', ctx.user.id).single()
@@ -130,8 +147,26 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
 
     const parsed = extractJSON(text)
     if (!parsed?.trends) {
+      // COST LEAK FIX: PERSIST the empty result with a fetchedAt so the 12h cache
+      // applies. Without this, a client with 0 trends had nothing saved and
+      // re-fired this Grok web_search call on EVERY page view / scan.
+      // Guard: do NOT clobber previously-good trends with an empty result —
+      // only persist empty when there's nothing good stored yet.
+      const emptyResult = { trends: [] as any[], date_range: today, search_query: searchQuery, fetchedAt: new Date().toISOString() }
+      const { data: prevIt } = await ctx.supabase
+        .from('companies').select('industry_trends').eq('id', ctx.user.id).single()
+      const prevCount = Array.isArray((prevIt?.industry_trends as any)?.trends) ? (prevIt!.industry_trends as any).trends.length : 0
+      if (prevCount === 0) {
+        try {
+          await ctx.supabase.from('companies').update({ industry_trends: emptyResult } as any).eq('id', ctx.user.id)
+        } catch {}
+        await cost.flush()
+        return NextResponse.json({ success: true, ...emptyResult })
+      }
+      // Keep the existing good trends; report kept_existing.
+      await logKeptExisting(ctx.supabase, ctx.user.id, { module: 'industry_trends', reason: 'empty', existing_count: prevCount, new_count: 0 })
       await cost.flush()
-      return NextResponse.json({ success: true, trends: [], date_range: today, search_query: searchQuery, fetchedAt: new Date().toISOString() })
+      return NextResponse.json({ success: true, kept_existing: true, reason: 'empty', existing_count: prevCount, new_count: 0 })
     }
 
     // Normalize trends — cap at the 5 best to save tokens + keep the UI focused.
