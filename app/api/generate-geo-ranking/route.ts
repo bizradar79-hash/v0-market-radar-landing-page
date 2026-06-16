@@ -523,25 +523,35 @@ export async function POST(request: Request) {
       else console.log('[GEO] persisted geoQueries:', queries)
     }
 
-    const storedGeoQueries = Array.isArray(businessProfile?.geoQueries)
+    const rawStoredGeoQueries = Array.isArray(businessProfile?.geoQueries)
       ? businessProfile!.geoQueries!.filter((q) => typeof q === 'string' && q.trim().length >= 3)
       : []
 
+    // ONE-TIME NORMALIZATION: drop legacy LONG paragraph queries (> 15 words).
+    // They hurt engine latency (ChatGPT browsing) and aren't real user phrasing.
+    // Dropped slots are refilled below with NEW short questions and persisted, so
+    // the stored set is permanently migrated to the short form on the next scan.
+    const MAX_GEO_QUERY_WORDS = 15
+    const wordCount = (q: string) => q.trim().split(/\s+/).filter(Boolean).length
+    const storedGeoQueries = rawStoredGeoQueries.filter((q) => wordCount(q) <= MAX_GEO_QUERY_WORDS)
+    const droppedLong = rawStoredGeoQueries.length - storedGeoQueries.length
+    if (droppedLong > 0) console.log(`[GEO] dropping ${droppedLong} long (>${MAX_GEO_QUERY_WORDS}-word) stored quer${droppedLong === 1 ? 'y' : 'ies'} for regeneration`)
+
     if (storedGeoQueries.length >= GEO_QUERY_LIMIT) {
-      // Enough stored. Trim legacy over-limit sets (e.g. 5 → 3) and persist the trim.
+      // Enough SHORT stored. Trim to limit; persist if we trimmed or dropped longs.
       queryList = storedGeoQueries.slice(0, GEO_QUERY_LIMIT)
-      if (storedGeoQueries.length > GEO_QUERY_LIMIT) {
+      if (storedGeoQueries.length > GEO_QUERY_LIMIT || droppedLong > 0) {
         await persistGeoQueries(queryList)
-        console.log('[GEO] trimmed stored geoQueries to limit:', queryList)
+        console.log('[GEO] normalized stored geoQueries:', queryList)
       } else {
         console.log('[GEO] using stored geoQueries:', queryList)
       }
     } else if (storedGeoQueries.length > 0) {
-      // Client deleted some — TOP UP with NEW questions to refill back to the limit.
+      // Deleted and/or long ones dropped — TOP UP with NEW SHORT questions.
       const need = GEO_QUERY_LIMIT - storedGeoQueries.length
       const fresh = await generateGeoQuestions(need, storedGeoQueries)
       queryList = [...storedGeoQueries, ...fresh].slice(0, GEO_QUERY_LIMIT)
-      if (fresh.length > 0) await persistGeoQueries(queryList)
+      if (fresh.length > 0 || droppedLong > 0) await persistGeoQueries(queryList)
       console.log('[GEO] topped up geoQueries to limit:', queryList)
     } else if (businessProfile) {
       // No stored queries — generate a full set once and persist.
@@ -568,12 +578,18 @@ export async function POST(request: Request) {
     // ── Run all queries × 3 REAL engines in parallel ────────────────────────
     // chatgpt field = real OpenAI (Responses API + web_search); gemini =
     // Google API; grok = xAI. No more fake 'chatgpt' routing to xAI.
+    const EMPTY_ENGINE = { position: null, topResults: [] as string[], appeared: false, results: [] as any[] }
+    // allSettled so one engine that times out / throws degrades to an empty cell
+    // WITHOUT failing the other two. (Runners already catch internally; this is a
+    // belt-and-braces guard.) All 3 engines × all queries run concurrently.
+    const settle = (p: Promise<any>) =>
+      p.then((v) => v).catch((err) => { console.error('[GEO] engine settled error:', err?.message || err); return EMPTY_ENGINE })
     const queryVariantResults = await Promise.all(
       queryList.map(async (q) => {
         const [chatgptRes, geminiRes, grokRes] = await Promise.all([
-          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'openai', geminiIndustry, cost),
-          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'gemini', geminiIndustry, cost),
-          runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'grok', undefined, cost),
+          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'openai', geminiIndustry, cost)),
+          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'gemini', geminiIndustry, cost)),
+          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'grok', undefined, cost)),
         ])
         return { query: q, chatgpt: chatgptRes, gemini: geminiRes, grok: grokRes }
       })

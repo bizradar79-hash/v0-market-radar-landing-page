@@ -11,14 +11,23 @@ const OPENAI_GEO_MODEL = process.env.OPENAI_GEO_MODEL || 'gpt-5-mini'
 // Responses API web search tool name. Newer accounts: 'web_search';
 // older: 'web_search_preview'. Configurable for safety.
 const OPENAI_WEB_SEARCH_TOOL = process.env.OPENAI_WEB_SEARCH_TOOL || 'web_search'
-// TIME fix — hard per-engine timeout. OpenAI's web_search can hang for minutes;
-// with no cap it dragged the whole GEO route to its maxDuration, got killed
-// mid-flight (504), and the scan's chain-resume then RE-RAN GEO, double-billing.
-// Cap each call so one slow engine degrades to "empty" instead of nuking GEO.
+// TIME fix — hard per-engine timeout. OpenAI's web_search BROWSES live and
+// legitimately takes longer than Gemini/Grok (which were fine at 30s). It gets
+// its OWN, longer budget (GEO_OPENAI_TIMEOUT_MS, default 60s) so it isn't cut
+// off mid-browse; the other engines stay at GEO_ENGINE_TIMEOUT_MS. Still capped
+// so a hung call degrades to "empty" for this engine instead of nuking GEO.
 const OPENAI_GEO_TIMEOUT_MS = Math.max(
   5_000,
-  parseInt(process.env.GEO_ENGINE_TIMEOUT_MS || '30000', 10) || 30_000,
+  parseInt(
+    process.env.GEO_OPENAI_TIMEOUT_MS || process.env.GEO_ENGINE_TIMEOUT_MS || '60000',
+    10,
+  ) || 60_000,
 )
+// Latency knobs for the gpt-5 family: low reasoning effort + low verbosity make
+// the model spend less time thinking and emit a shorter answer → faster return
+// inside the web_search budget. Overridable via env if the account differs.
+const OPENAI_REASONING_EFFORT = process.env.OPENAI_GEO_REASONING_EFFORT || 'low'
+const OPENAI_TEXT_VERBOSITY = process.env.OPENAI_GEO_VERBOSITY || 'low'
 
 /**
  * Extract concatenated output_text from a Responses API payload.
@@ -181,6 +190,8 @@ export async function callOpenAIWebSearch(prompt: string, cost?: ScanCostCollect
         model: OPENAI_GEO_MODEL,
         input: prompt,
         tools: [{ type: OPENAI_WEB_SEARCH_TOOL }],
+        reasoning: { effort: OPENAI_REASONING_EFFORT },
+        text: { verbosity: OPENAI_TEXT_VERBOSITY },
       }),
       signal: ctrl.signal,
     })
