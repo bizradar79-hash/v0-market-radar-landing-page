@@ -12,7 +12,7 @@ import type { BusinessProfile } from '@/types/business-profile'
 export const maxDuration = 60
 
 // Cap on auto-discovered competitors (keep the best N).
-const COMPETITOR_CAP = 7
+const COMPETITOR_CAP = 8
 
 // Ratings come from Google Places (project maps-leads-465314), NOT Grok.
 async function fetchGoogleRating(name: string, website: string, cost?: ScanCostCollector): Promise<{ rating: number | null; reviewCount: number | null }> {
@@ -135,7 +135,7 @@ export async function POST(request: Request) {
 - חברות עם אותו מודל עסקי (B2B, B2C, יצרן, קמעונאי וכו')
 - חברות באותו אזור גיאוגרפי אם רלוונטי
 
-תן לי 7 מתחרים ישירים ועקיפים.
+תן לי 8 מתחרים ישירים ועקיפים.
 כלול רק חברות שאתה בטוח שקיימות ושיש להן אתר אינטרנט אמיתי.
 חשוב: אל תכלול חברה אם אינך יודע את כתובת האתר שלה. עדיף 4 חברות אמיתיות עם אתרים מאשר 8 ללא אתרים.
 חפש בעברית ובאנגלית. החזר את שמות החברות ותיאור השירותים בעברית.

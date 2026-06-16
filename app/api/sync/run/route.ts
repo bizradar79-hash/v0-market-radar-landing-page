@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   // sync/run is the recurring path, so default to the lean weekly profile.
   const profile: 'initial' | 'weekly' = body.profile === 'initial' ? 'initial' : 'weekly'
   const isWeekly = profile === 'weekly'
-  const COMPETITOR_TARGET = 7
+  const COMPETITOR_TARGET = 8
 
   if (!companyId) {
     return NextResponse.json({ error: 'Missing company_id' }, { status: 400 })

@@ -1,8 +1,14 @@
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+import { createClient } from '@/lib/supabase/server'
 import { getPlaceDetails } from '@/lib/google-places'
 import { NextResponse } from 'next/server'
+
+// Reviews analysis is expensive (Google Places lookup + Place Details + Gemini).
+// Cache it server-side for 30 days so re-opening a competitor — even in a new
+// session — never re-fires those calls. Manual "רענן ביקורות" passes force=true.
+const REVIEWS_CACHE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
 async function fetchPlaceReviews(placeId: string): Promise<Array<{ text: string; rating: number; author: string }>> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
@@ -69,8 +75,32 @@ CRITICAL: Output ONLY raw JSON. No markdown. sentiment_score must be 0-100.`
 
 export async function POST(request: Request) {
   try {
-    const { competitorName, competitorWebsite } = await request.json().catch(() => ({}))
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { competitorId, competitorName, competitorWebsite, force } = await request.json().catch(() => ({}))
     if (!competitorName) return NextResponse.json({ error: 'Missing competitorName' }, { status: 400 })
+
+    // Scan-once cache (mirrors analyze-competitor): unless force, return the
+    // saved reviews analysis when it exists and is < 30 days old.
+    if (!force && competitorId) {
+      const { data: rows } = await supabase
+        .from('competitive_analysis')
+        .select('data, created_at')
+        .eq('company_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(40)
+      const hit = (rows || []).find(
+        (row: any) => row?.data?.competitor_id === competitorId && row?.data?.kind === 'reviews' && row?.data?.reviews
+      )
+      if (hit) {
+        const age = Date.now() - new Date(hit.data.fetchedAt || hit.created_at).getTime()
+        if (age < REVIEWS_CACHE_MS) {
+          return NextResponse.json({ ...hit.data.reviews, cached: true })
+        }
+      }
+    }
 
     const placesData = await getPlaceDetails(competitorName, competitorWebsite || '')
 
@@ -101,6 +131,28 @@ export async function POST(request: Request) {
           result.recommended_response = analysis.recommended_response ?? null
         }
       }
+    }
+
+    // Persist server-side so later opens (even new sessions) read cached — no
+    // recurring Places/Gemini cost. Manual upsert: drop prior reviews row(s) for
+    // this competitor, then insert the fresh one (no duplicate accumulation).
+    if (competitorId) {
+      await supabase
+        .from('competitive_analysis')
+        .delete()
+        .eq('company_id', user.id)
+        .eq('data->>competitor_id', competitorId)
+        .eq('data->>kind', 'reviews')
+      await supabase.from('competitive_analysis').insert({
+        company_id: user.id,
+        data: {
+          competitor_id: competitorId,
+          kind: 'reviews',
+          competitor_name: competitorName,
+          reviews: result,
+          fetchedAt: new Date().toISOString(),
+        },
+      })
     }
 
     return NextResponse.json(result)

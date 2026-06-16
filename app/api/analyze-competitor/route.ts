@@ -31,7 +31,7 @@ export async function POST(request: Request) {
         .select("data, created_at")
         .eq("company_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(20)
+        .limit(40)
       const hit = (cachedRows || []).find(
         (row: any) => row?.data?.competitor_id === competitorId && row?.data?.analysis
       )
@@ -79,10 +79,19 @@ ${searchResults.map(r => `[${r.title}] ${r.url} - ${r.content}`).join('\n')}
   "recommendations": ["המלצה 1", "המלצה 2"]
 }`)
 
+    // Manual upsert: drop prior analysis row(s) for this competitor, then insert
+    // the fresh one — so a refresh OVERWRITES instead of accumulating duplicates.
+    await supabase
+      .from("competitive_analysis")
+      .delete()
+      .eq("company_id", user.id)
+      .eq("data->>competitor_id", competitorId)
+      .eq("data->>kind", "analysis")
     await supabase.from("competitive_analysis").insert({
       company_id: user.id,
       data: {
         competitor_id: competitorId,
+        kind: "analysis",
         competitor_name: competitorName,
         competitor_website: competitorWebsite,
         analysis,

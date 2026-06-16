@@ -241,20 +241,23 @@ export default function CompetitorsPage() {
     }
   }
 
-  async function fetchReviews(competitor: Competitor) {
-    if (reviews[competitor.id] || loadingReviews[competitor.id]) return
-    // Check sessionStorage cache
+  async function fetchReviews(competitor: Competitor, force = false) {
+    // On a manual refresh (force) bypass the fast client caches; otherwise reuse
+    // in-memory + sessionStorage (the server now also caches for 30 days).
+    if (!force && (reviews[competitor.id] || loadingReviews[competitor.id])) return
     const cacheKey = `reviews_${competitor.id}`
-    const cached = sessionStorage.getItem(cacheKey)
-    if (cached) {
-      try { setReviews(prev => ({ ...prev, [competitor.id]: JSON.parse(cached) })); return } catch {}
+    if (!force) {
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        try { setReviews(prev => ({ ...prev, [competitor.id]: JSON.parse(cached) })); return } catch {}
+      }
     }
     setLoadingReviews(prev => ({ ...prev, [competitor.id]: true }))
     try {
       const res = await fetch('/api/analyze-competitor-reviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competitorName: competitor.name, competitorWebsite: competitor.website }),
+        body: JSON.stringify({ competitorId: competitor.id, competitorName: competitor.name, competitorWebsite: competitor.website, force }),
       })
       const data = await res.json()
       if (data.success) {
@@ -790,6 +793,16 @@ export default function CompetitorsPage() {
                       </div>
                     ) : reviews[selectedCompetitor.id] ? (
                       <div className="space-y-5">
+                        <div className="flex justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => fetchReviews(selectedCompetitor, true)}
+                            disabled={loadingReviews[selectedCompetitor.id]}
+                          >
+                            <RefreshCw className="ml-1 h-3.5 w-3.5" />רענן ביקורות
+                          </Button>
+                        </div>
                         {/* Rating + Maps link */}
                         <div className="flex flex-wrap items-center gap-3">
                           {reviews[selectedCompetitor.id].google_rating != null ? (

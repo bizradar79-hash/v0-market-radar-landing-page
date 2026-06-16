@@ -159,7 +159,7 @@ export async function POST() {
 
     // Enrich in parallel (max 5 at a time)
     const contextHint = [profile.coreActivity, ...(profile.industryTags || []).slice(0, 2)].filter(Boolean).join(', ')
-    const enrichBatch = (inserted || []).slice(0, 5)
+    const enrichBatch = (inserted || []).slice(0, 8)
     await Promise.all(
       enrichBatch.map(async (comp: any) => {
         try {

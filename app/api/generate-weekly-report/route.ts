@@ -57,13 +57,13 @@ export async function POST(request: Request) {
       .eq('id', userId)
       .single()
 
-    // Fetch top 5 competitors by threat score
+    // Fetch top 8 competitors by threat score
     const { data: competitors } = await ctx.supabase
       .from('competitors')
       .select('name, website, services, threat_score, last_activity')
       .eq('company_id', userId)
       .order('threat_score', { ascending: false })
-      .limit(5)
+      .limit(8)
 
     // Fetch news from last 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
