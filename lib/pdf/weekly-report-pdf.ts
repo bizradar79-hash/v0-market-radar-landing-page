@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit'
+import { stripMarkdownDeep } from '@/lib/text/strip-markdown'
 
 const BRAND = '#0d9488'
 const BRAND_DARK = '#0f766e'
@@ -99,6 +100,9 @@ function addSection(doc: InstanceType<typeof PDFDocument>, title: string, conten
 }
 
 export async function generateWeeklyReportPdf(data: WeeklyReportPdfData): Promise<Buffer> {
+  // Belt-and-braces: strip any markdown from AI prose so the PDF never shows
+  // literal ** / * markers, regardless of caller.
+  data = { ...data, report: stripMarkdownDeep(data.report), highlights: stripMarkdownDeep(data.highlights) }
   const [fontRegular, fontBold] = await Promise.all([
     loadFont(FONT_URL, 'regular'),
     loadFont(FONT_BOLD_URL, 'bold'),

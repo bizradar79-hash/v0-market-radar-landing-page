@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
+import { stripMarkdownDeep } from "@/lib/text/strip-markdown"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -228,7 +229,7 @@ export default function ReportsPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה בטעינת הדוח")
-      setReport(data.report || null)
+      setReport(data.report ? stripMarkdownDeep(data.report) : null)
       setCompanyName(data.company_name || "")
     } catch (e: any) {
       // Fall through to the empty state (which has the generate button), never a stuck spinner.
@@ -247,7 +248,7 @@ export default function ReportsPage() {
       const res = await fetch("/api/generate-weekly-report?force=true", { method: "POST" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "שגיאה ביצירת הדוח")
-      setReport(data.report)
+      setReport(data.report ? stripMarkdownDeep(data.report) : null)
       setCompanyName(data.company_name || "")
       toast({ title: "הדוח עודכן", description: "נוצר דוח חדש עם הנתונים העדכניים" })
     } catch (e: any) {

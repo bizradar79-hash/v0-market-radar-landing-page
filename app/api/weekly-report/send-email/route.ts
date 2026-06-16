@@ -8,6 +8,7 @@ import { Resend } from 'resend'
 import { renderWeeklyReportEmail } from '@/lib/emails/weekly-report-email'
 import { renderWeeklyReportText } from '@/lib/emails/weekly-report-text'
 import { generateWeeklyReportPdf } from '@/lib/pdf/weekly-report-pdf'
+import { stripMarkdownDeep } from '@/lib/text/strip-markdown'
 
 export async function POST() {
   try {
@@ -34,8 +35,10 @@ export async function POST() {
       year: 'numeric', month: 'long', day: 'numeric',
     })
 
-    // 3. Get report data (from cache or generate)
-    let report = company.last_report as any
+    // 3. Get report data (from cache or generate). Strip markdown from the
+    //    cached AI prose ONCE here so every downstream surface (email HTML,
+    //    plain-text, PDF, highlights) renders clean text — no literal ** / *.
+    let report = stripMarkdownDeep(company.last_report as any)
     let highlights: any = null
 
     if (report?.executive_summary) {
