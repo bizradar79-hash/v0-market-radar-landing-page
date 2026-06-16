@@ -374,20 +374,20 @@ export async function POST(request: Request) {
       if (primaryReordered) variantResults[0].results = primaryReordered
     }
 
-    // Dedup each variant by base domain (within-query), then dedup across ALL queries globally
-    // so the same domain never appears in more than one query variant
-    const globalSeenDomains = new Set<string>()
+    // Dedup each variant by base domain WITHIN the query only, and keep the full
+    // top-10 per query. We intentionally do NOT dedup across queries: the same
+    // competitor legitimately ranks for multiple keywords and must appear in
+    // each query's list (cross-query dedup previously left later queries with
+    // only 3-4 rows).
     for (const v of variantResults) {
       const withinSeen = new Set<string>()
       v.results = v.results.filter((r: any) => {
-        // NEVER dedup the client's own row — it legitimately ranks across
-        // multiple queries and must stay visible in each one.
+        // NEVER dedup the client's own row.
         if (r.isOwn) return true
         const raw = r.url ? extractDomain(r.url) : (r.name || '').toLowerCase()
         const base = baseDomain(raw) || raw
-        if (!base || withinSeen.has(base) || globalSeenDomains.has(base)) return false
+        if (!base || withinSeen.has(base)) return false
         withinSeen.add(base)
-        globalSeenDomains.add(base)
         return true
       }).slice(0, 10)
     }

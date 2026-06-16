@@ -153,6 +153,26 @@ export default function SeoGeoPage() {
     return `${v.toLocaleString('he-IL')}/חו׳`
   }
 
+  // Clean a SERP result down to a BUSINESS NAME (not the page <title>/snippet).
+  // Cuts at the first title separator ("name | tagline…"), strips ellipses, and
+  // falls back to the domain (never a long meta-description) when the title is
+  // missing or too long.
+  function cleanName(r: { name?: string; title?: string; url?: string }): string {
+    let n = (r.name || r.title || '').trim()
+    n = n.split(/\s[|｜–—\-·:•]\s|[|｜•]/)[0]
+    n = n.replace(/…/g, '').replace(/\.{2,}/g, '').replace(/^["'״׳]+|["'״׳]+$/g, '').trim()
+    // A business name is short (≤ ~5 words). Anything longer is a title/snippet/
+    // description → fall back to the domain, never the phrase.
+    const wordCount = n ? n.split(/\s+/).filter(Boolean).length : 0
+    if (!n || n.length > 40 || wordCount > 5) {
+      const host = (r.url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
+      const base = host.split('.')[0]
+      if (base) return base
+      return n.split(/\s+/).slice(0, 5).join(' ')
+    }
+    return n
+  }
+
   // Competition chip color by bucket.
   function competitionChipClass(c: string | null | undefined): string {
     if (c === 'LOW') return 'bg-green-100 text-green-700 border-green-200'
@@ -344,7 +364,7 @@ export default function SeoGeoPage() {
                                           return (
                                           <div key={ri} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${own ? 'bg-green-100 border border-green-200' : 'bg-background border border-transparent'}`}>
                                             <span className={`font-mono font-bold w-6 shrink-0 text-right ${own ? 'text-green-700' : 'text-muted-foreground'}`}>#{r.position}</span>
-                                            <span className={`flex-1 font-medium ${own ? 'text-green-800' : 'text-foreground'}`}>{r.name}</span>
+                                            <span className={`flex-1 font-medium truncate ${own ? 'text-green-800' : 'text-foreground'}`} title={r.name}>{cleanName(r)}</span>
                                             {r.is_sponsored && <Badge className="bg-orange-100 text-orange-700 border-orange-200 shrink-0 py-0 h-4 text-[10px]">ממומן</Badge>}
                                             {own && <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">אתה</Badge>}
                                             {!own && r.isKnownCompetitor && <Badge variant="outline" className="border-orange-300 text-orange-600 shrink-0 py-0 h-4 text-[10px]">מתחרה</Badge>}
@@ -364,7 +384,7 @@ export default function SeoGeoPage() {
                                             return (
                                               <div className="mt-1.5 flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-green-100 border border-green-200">
                                                 <span className="font-mono font-bold w-auto shrink-0 text-green-700">#{v.position}</span>
-                                                <span className="flex-1 font-medium text-green-800">{v.ownResult?.name || company?.name || 'העסק שלך'}</span>
+                                                <span className="flex-1 font-medium text-green-800 truncate">{cleanName({ name: v.ownResult?.name, url: v.ownResult?.url }) || company?.name || 'העסק שלך'}</span>
                                                 <Badge className="bg-green-600 text-white shrink-0 py-0 h-4 text-[10px]">המיקום שלך</Badge>
                                                 {v.ownResult?.url && (
                                                   <a href={v.ownResult.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary shrink-0" title={v.ownResult.url}>
@@ -382,7 +402,7 @@ export default function SeoGeoPage() {
                                         {v.topResults.map((name, idx) => (
                                           <div key={idx} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs bg-background border border-transparent">
                                             <span className="font-mono font-bold w-6 shrink-0 text-right text-muted-foreground">#{idx + 1}</span>
-                                            <span className="flex-1 font-medium text-foreground">{name}</span>
+                                            <span className="flex-1 font-medium text-foreground truncate" title={name}>{cleanName({ name })}</span>
                                           </div>
                                         ))}
                                         {v.appeared && v.position != null ? (
@@ -426,10 +446,14 @@ export default function SeoGeoPage() {
                     const vol = (v: QueryVariant) => v.searchVolume ?? 0
                     const compSuffix = (v: QueryVariant) =>
                       v.competitionHe && v.competition && v.competition !== 'UNKNOWN' ? `, תחרות ${v.competitionHe}` : ''
+                    // Top 3 non-own COMPETITORS by position — clean BUSINESS NAMES
+                    // (never a result's title/description/snippet).
                     const tops = (v: QueryVariant) => {
-                      const fromResults = (v.results || []).filter(r => !r.isOwn).map(r => r.name).filter(Boolean)
-                      const list = (fromResults.length ? fromResults : v.topResults || []).slice(0, 3)
-                      return list.join(', ')
+                      const fromResults = (v.results || []).filter(r => !r.isOwn).slice(0, 3).map(r => cleanName(r))
+                      const list = fromResults.length
+                        ? fromResults
+                        : (v.topResults || []).slice(0, 3).map(name => cleanName({ name }))
+                      return list.filter(Boolean).join(', ')
                     }
 
                     // WINS: top-3 positions, ranked by volume (highest-value first).
