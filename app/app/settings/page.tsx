@@ -12,7 +12,71 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X, Plus, Save, Building2, KeyRound, User, Loader2, MessageCircle } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
+import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles } from "lucide-react"
+
+// Reusable add/remove chip editor for a string[] field, with a friendly
+// explanation and a save button. Matches the existing settings card styling.
+function ChipEditor({
+  icon: Icon, title, explanation, items, onItemsChange, onSave, saving, placeholder,
+}: {
+  icon?: any
+  title: string
+  explanation: string
+  items: string[]
+  onItemsChange: (next: string[]) => void
+  onSave: () => void
+  saving: boolean
+  placeholder: string
+}) {
+  const [val, setVal] = useState("")
+  const add = () => {
+    const t = val.trim()
+    if (t && !items.includes(t)) { onItemsChange([...items, t]); setVal("") }
+  }
+  return (
+    <Card className="border-border bg-card">
+      <CardHeader>
+        <CardTitle className="text-foreground flex items-center gap-2 text-base">
+          {Icon && <Icon className="h-4 w-4 text-primary" />}{title}
+        </CardTitle>
+        <p className="text-sm text-muted-foreground mt-1">{explanation}</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-2">
+          <Input
+            placeholder={placeholder}
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            className="border-border bg-input"
+          />
+          <Button onClick={add} className="bg-primary text-primary-foreground"><Plus className="h-4 w-4" /></Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">לא הוגדרו עדיין</p>
+          ) : (
+            items.map((it) => (
+              <Badge key={it} variant="secondary" className="flex items-center gap-1 bg-primary/10 px-3 py-1.5 text-primary">
+                <span dir="rtl">{it}</span>
+                <button onClick={() => onItemsChange(items.filter((x) => x !== it))} className="mr-1 rounded-full hover:bg-primary/20">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-xs text-muted-foreground">שינויים ייכנסו לתוקף בסריקה הבאה.</p>
+          <Button onClick={onSave} disabled={saving} className="bg-primary text-primary-foreground hover:bg-primary/90">
+            {saving ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Save className="ml-2 h-4 w-4" />}שמור
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 // Mirror the registration/onboarding area-of-activity options exactly.
 const GEOGRAPHIC_OPTIONS = [
@@ -74,12 +138,26 @@ export default function SettingsPage() {
 
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null)
 
+  const { toast } = useToast()
+
   const [keywords, setKeywords] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState("")
   // GEO presence-check questions. Clients may DELETE individual questions (no
   // add/edit) — the next GEO scan tops the list back up to 3 with new questions.
   const [geoQueries, setGeoQueries] = useState<string[]>([])
   const [geoSaving, setGeoSaving] = useState(false)
+
+  // ── business_profile fields (saved via update-business-profile deep-merge) ──
+  const [directCompetitors, setDirectCompetitors] = useState<string[]>([])
+  const [targetAudiences, setTargetAudiences] = useState<string[]>([])
+  const [industryTags, setIndustryTags] = useState<string[]>([])
+  const [geographicMarkets, setGeographicMarkets] = useState<string[]>([])
+  const [competitiveAdvantage, setCompetitiveAdvantage] = useState("")
+  const [productNames, setProductNames] = useState<string[]>([])
+  // Keep the original product objects so a name edit preserves description/etc.
+  const [productObjects, setProductObjects] = useState<any[]>([])
+  // Which business_profile section is currently saving (for its spinner).
+  const [bpSaving, setBpSaving] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -107,8 +185,17 @@ export default function SettingsPage() {
           if (company.keywords && Array.isArray(company.keywords)) {
             setKeywords(company.keywords)
           }
-          const bpGeo = (company.business_profile as any)?.geoQueries
-          if (Array.isArray(bpGeo)) setGeoQueries(bpGeo.filter((q: any) => typeof q === 'string'))
+          const bp = (company.business_profile as any) || {}
+          if (Array.isArray(bp.geoQueries)) setGeoQueries(bp.geoQueries.filter((q: any) => typeof q === 'string'))
+          if (Array.isArray(bp.directCompetitors)) setDirectCompetitors(bp.directCompetitors.filter((q: any) => typeof q === 'string'))
+          if (Array.isArray(bp.targetAudiences)) setTargetAudiences(bp.targetAudiences.filter((q: any) => typeof q === 'string'))
+          if (Array.isArray(bp.industryTags)) setIndustryTags(bp.industryTags.filter((q: any) => typeof q === 'string'))
+          if (Array.isArray(bp.geographicMarkets)) setGeographicMarkets(bp.geographicMarkets.filter((q: any) => typeof q === 'string'))
+          if (typeof bp.competitiveAdvantage === 'string') setCompetitiveAdvantage(bp.competitiveAdvantage)
+          if (Array.isArray(bp.products)) {
+            setProductObjects(bp.products)
+            setProductNames(bp.products.map((p: any) => String(p?.name || '')).filter(Boolean))
+          }
         }
 
         // Account — phone canonical source is companies.phone, fallback metadata.
@@ -221,6 +308,38 @@ export default function SettingsPage() {
     }
   }
 
+  // Save a business_profile partial via the deep-merge PATCH endpoint (same path
+  // the profile page uses). `section` drives the per-card saving spinner.
+  const patchProfile = async (section: string, partial: Record<string, any>) => {
+    setBpSaving(section)
+    try {
+      const res = await fetch('/api/update-business-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(partial),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.success === false) throw new Error(data?.error || 'save failed')
+      toast({ title: 'נשמר בהצלחה', description: 'השינוי ייכנס לתוקף בסריקה הבאה' })
+    } catch {
+      toast({ title: 'שגיאה בשמירה', variant: 'destructive' })
+    } finally {
+      setBpSaving(null)
+    }
+  }
+
+  // Products: edit the NAMES as chips while preserving each product's existing
+  // description/targetAudience/priceRange (matched by name); new names → minimal
+  // objects. Keeps the stored product shape intact.
+  const saveProducts = async () => {
+    const byName = new Map(productObjects.map((p: any) => [String(p?.name || ''), p]))
+    const products = productNames.map((name) =>
+      byName.get(name) || { name, description: '', targetAudience: '' }
+    )
+    setProductObjects(products)
+    await patchProfile('products', { products })
+  }
+
   const handleCancelSubscription = () => {
     if (!confirm("לפנות לביטול המנוי בוואטסאפ?")) return
     const msg = `שלום, אני מעוניין בביטול המנוי שלי. אימייל: ${userData.email}`
@@ -259,8 +378,8 @@ export default function SettingsPage() {
             <span className="hidden sm:inline">פרופיל חברה</span>
           </TabsTrigger>
           <TabsTrigger value="keywords" className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4" />
-            <span className="hidden sm:inline">מילות מפתח</span>
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">נתוני סריקה</span>
           </TabsTrigger>
           <TabsTrigger value="account" className="flex items-center gap-2">
             <User className="h-4 w-4" />
@@ -272,7 +391,10 @@ export default function SettingsPage() {
         <TabsContent value="company">
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-foreground">פרופיל חברה</CardTitle>
+              <CardTitle className="text-foreground">פרטי העסק</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                המידע הבסיסי על העסק — משמש בכל הניתוחים והסריקות.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
@@ -353,9 +475,11 @@ export default function SettingsPage() {
         <TabsContent value="keywords">
           <Card className="border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-foreground">מילות מפתח למעקב</CardTitle>
+              <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                <Tag className="h-4 w-4 text-primary" />מילות מפתח למעקב
+              </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                מונחים קצרים (למשל "שטיח") — משמשים למעקב טרנדים, דירוג SEO ואיתור מכרזים.
+                מילות המפתח שאנחנו עוקבים אחריהן — משפיעות על דירוג ה-SEO שלך בגוגל, זיהוי טרנדים, והתאמת מכרזים וחדשות.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -410,12 +534,12 @@ export default function SettingsPage() {
           {/* GEO queries — clients may DELETE (no add/edit); scan refills to 3 */}
           <Card className="border-border bg-card mt-6">
             <CardHeader>
-              <CardTitle className="text-foreground flex items-center gap-2">
+              <CardTitle className="text-foreground flex items-center gap-2 text-base">
                 🌐 שאלות GEO
                 {geoSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                שאלות אלו נבדקות במנועי AI (ChatGPT/Gemini) כדי לבדוק אם העסק שלך מוזכר. ניתן למחוק שאלה שאינה מתאימה — המערכת תייצר שאלה חדשה במקומה בסריקה הבאה.
+                השאלות שאנחנו בודקים במנועי AI (ChatGPT/Gemini) כדי לראות אם העסק שלך מומלץ. מנוהלות על ידינו; אפשר למחוק שאלה לא רלוונטית והמערכת תחליף אותה בסריקה הבאה.
               </p>
             </CardHeader>
             <CardContent>
@@ -448,6 +572,103 @@ export default function SettingsPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* D. מתחרים ישירים */}
+          <div className="mt-6">
+            <ChipEditor
+              icon={Target}
+              title="מתחרים ישירים"
+              explanation="המתחרים שאתה רוצה שנעקוב אחריהם — משפיע על גילוי וניתוח המתחרים."
+              items={directCompetitors}
+              onItemsChange={setDirectCompetitors}
+              onSave={() => patchProfile('competitors', { directCompetitors })}
+              saving={bpSaving === 'competitors'}
+              placeholder="הוסף שם מתחרה"
+            />
+          </div>
+
+          {/* E. קהל יעד */}
+          <div className="mt-6">
+            <ChipEditor
+              icon={Users}
+              title="קהל יעד"
+              explanation="מי הלקוחות שלך — עוזר לנו למצוא לידים, חדשות וכנסים רלוונטיים."
+              items={targetAudiences}
+              onItemsChange={setTargetAudiences}
+              onSave={() => patchProfile('audiences', { targetAudiences })}
+              saving={bpSaving === 'audiences'}
+              placeholder="הוסף קהל יעד"
+            />
+          </div>
+
+          {/* F. תחום ותגיות (industryTags + geographicMarkets) */}
+          <div className="mt-6">
+            <ChipEditor
+              icon={Tag}
+              title="תגיות תעשייה"
+              explanation="התחום שלך — משפיע על כנסים, מכרזים וניתוח מתחרים."
+              items={industryTags}
+              onItemsChange={setIndustryTags}
+              onSave={() => patchProfile('industry', { industryTags })}
+              saving={bpSaving === 'industry'}
+              placeholder="הוסף תגית תעשייה"
+            />
+          </div>
+          <div className="mt-6">
+            <ChipEditor
+              icon={Building2}
+              title="שווקים גיאוגרפיים"
+              explanation="האזורים שבהם אתה פעיל — משפיע על כנסים, מכרזים וחדשות רלוונטיים."
+              items={geographicMarkets}
+              onItemsChange={setGeographicMarkets}
+              onSave={() => patchProfile('geo', { geographicMarkets })}
+              saving={bpSaving === 'geo'}
+              placeholder="הוסף שוק גיאוגרפי"
+            />
+          </div>
+
+          {/* G. יתרון תחרותי + מוצרים/שירותים */}
+          <Card className="border-border bg-card mt-6">
+            <CardHeader>
+              <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                <Trophy className="h-4 w-4 text-primary" />יתרון תחרותי
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                מה מייחד אותך מהמתחרים — משמש בהמלצות ובזיהוי הזדמנויות.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Textarea
+                value={competitiveAdvantage}
+                onChange={(e) => setCompetitiveAdvantage(e.target.value)}
+                className="min-h-[90px] border-border bg-input"
+                placeholder="לדוגמה: משלוח חינם, ייצור בישראל, שירות אישי..."
+              />
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">שינויים ייכנסו לתוקף בסריקה הבאה.</p>
+                <Button
+                  onClick={() => patchProfile('advantage', { competitiveAdvantage })}
+                  disabled={bpSaving === 'advantage'}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  {bpSaving === 'advantage' ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Save className="ml-2 h-4 w-4" />}שמור
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="mt-6">
+            <ChipEditor
+              icon={Sparkles}
+              title="מוצרים ושירותים"
+              explanation="מה אתה מציע — משמש בהמלצות ובזיהוי הזדמנויות. (עריכה מפורטת זמינה בעמוד הפרופיל)"
+              items={productNames}
+              onItemsChange={setProductNames}
+              onSave={saveProducts}
+              saving={bpSaving === 'products'}
+              placeholder="הוסף מוצר/שירות"
+            />
+          </div>
         </TabsContent>
 
         {/* Account Tab */}
