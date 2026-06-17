@@ -35,12 +35,10 @@ function extractJSON(text: string): any {
 
 function normalizeProfile(raw: any): BusinessProfile {
   const validModels = ['B2B', 'B2C', 'B2B2C', 'mixed']
-  const validStages = ['startup', 'growing', 'established', 'enterprise']
 
   return {
     coreActivity: String(raw.coreActivity || ''),
     businessModel: validModels.includes(raw.businessModel) ? raw.businessModel : 'mixed',
-    companyStage: validStages.includes(raw.companyStage) ? raw.companyStage : 'established',
     products: Array.isArray(raw.products)
       ? raw.products.map((p: any) => ({
           name: String(p.name || ''),
@@ -110,7 +108,6 @@ export async function POST(request: Request) {
 {
   "coreActivity": "...",
   "businessModel": "B2B|B2C|B2B2C|mixed",
-  "companyStage": "startup|growing|established|enterprise",
   "products": [{"name":"...","description":"...","targetAudience":"...","priceRange":"..."}],
   "targetAudiences": ["..."],
   "industryTags": ["..."],

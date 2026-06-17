@@ -1,7 +1,6 @@
 export type BusinessProfile = {
   coreActivity: string
   businessModel: 'B2B' | 'B2C' | 'B2B2C' | 'mixed'
-  companyStage: 'startup' | 'growing' | 'established' | 'enterprise'
   products: Array<{
     name: string
     description: string

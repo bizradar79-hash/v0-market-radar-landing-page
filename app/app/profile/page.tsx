@@ -134,15 +134,6 @@ function TagList({
 const BUSINESS_MODEL_LABELS: Record<string, string> = {
   B2B: 'B2B', B2C: 'B2C', B2B2C: 'B2B2C', mixed: 'מעורב',
 }
-const STAGE_LABELS: Record<string, string> = {
-  startup: 'סטארטאפ', growing: 'בצמיחה', established: 'מבוסס', enterprise: 'ארגוני',
-}
-const STAGE_COLORS: Record<string, string> = {
-  startup: 'bg-purple-100 text-purple-800 border-purple-200',
-  growing: 'bg-blue-100 text-blue-800 border-blue-200',
-  established: 'bg-green-100 text-green-800 border-green-200',
-  enterprise: 'bg-orange-100 text-orange-800 border-orange-200',
-}
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -672,26 +663,9 @@ export default function ProfilePage() {
                 <Badge className="bg-primary/10 text-primary border-primary/20 border text-sm font-medium px-3">
                   {BUSINESS_MODEL_LABELS[businessProfile.businessModel] ?? businessProfile.businessModel}
                 </Badge>
-                <Badge className={`border text-sm font-medium px-3 ${STAGE_COLORS[businessProfile.companyStage] ?? 'bg-muted text-muted-foreground'}`}>
-                  {STAGE_LABELS[businessProfile.companyStage] ?? businessProfile.companyStage}
-                </Badge>
                 {businessProfile.marketPosition && (
                   <span className="text-sm text-muted-foreground">{businessProfile.marketPosition}</span>
                 )}
-              </div>
-
-              {/* Confidence bar */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>רמת ביטחון ניתוח</span>
-                  <span className="font-medium">{businessProfile.confidenceScore}%</span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${businessProfile.confidenceScore >= 80 ? 'bg-green-500' : businessProfile.confidenceScore >= 60 ? 'bg-yellow-500' : 'bg-red-400'}`}
-                    style={{ width: `${businessProfile.confidenceScore}%` }}
-                  />
-                </div>
               </div>
 
               {businessProfile.generatedAt && (
