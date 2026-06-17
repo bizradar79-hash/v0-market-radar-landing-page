@@ -1,4 +1,5 @@
 import { getFullContext } from '@/lib/context'
+import { effectiveKeywords } from '@/lib/keywords'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
@@ -135,7 +136,7 @@ export async function POST(request: Request) {
     const profileEdge = businessProfile ? `
 - יתרון תחרותי: ${businessProfile.competitiveAdvantage}
 - מיצוב בשוק: ${businessProfile.marketPosition}
-- נישות קשורות לחיפוש: ${[...businessProfile.primaryKeywords, ...businessProfile.secondaryKeywords].slice(0, 8).join(', ')}` : ''
+- נישות קשורות לחיפוש: ${[...effectiveKeywords(ctx.company, businessProfile), ...(businessProfile.secondaryKeywords || [])].slice(0, 8).join(', ')}` : ''
 
     const prompt = `אתה אסטרטג שוק ישראלי מנוסה. היום הוא ${todayStr}.
 

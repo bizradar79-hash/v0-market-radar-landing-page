@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { callModel, callModelTwoStage } from '@/lib/call-model'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
+import { effectiveKeywords } from '@/lib/keywords'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
         const bp = (company as any).business_profile
         const coreActivity = bp?.coreActivity || company.description || ''
         const products = bp?.products?.map((p: any) => p.name).join(', ') || ''
-        const keywords = (bp?.primaryKeywords || (company as any).keywords || []).join(', ')
+        const keywords = effectiveKeywords(company as any, bp).join(', ')
         const targetAudience = (bp?.targetAudiences || (company as any).target_customers || []).join(', ')
 
         // Fetch competitor names for this company

@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { scrapeWebsite } from './scrape'
+import { effectiveKeywords } from './keywords'
 import type { BusinessProfile } from '@/types/business-profile'
 
 function parseDomain(url: string): string {
@@ -134,7 +135,7 @@ ${websiteContent ? websiteContent.slice(0, 2000) : 'לא זמין'}
 - קהלי יעד: ${businessProfile.targetAudiences.join(', ')}
 - יתרון תחרותי: ${businessProfile.competitiveAdvantage}
 - תגיות תעשייה: ${businessProfile.industryTags.join(', ')}
-- מילות חיפוש עיקריות: ${businessProfile.primaryKeywords.join(', ')}
+- מילות חיפוש עיקריות: ${effectiveKeywords(company, businessProfile).join(', ')}
 - שאילתות מוכנות: ${businessProfile.searchQueries.join(' | ')}
 
 ${context}` : context

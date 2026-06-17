@@ -167,11 +167,22 @@ export async function POST(request: Request) {
     // Save to companies.business_profile + distribution_channels column
     // Also set next_sync_at = now() + 7 days (first sync after onboarding)
     const nextSync = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    // Seed company.keywords (the authoritative tracking-keyword column) from the
+    // AI profile so the column is never empty for new clients. The onboarding
+    // wizard later overwrites it with the user-edited set; this is belt-and-
+    // braces in case the wizard step is skipped. Mirrors the wizard's composition
+    // (primary + secondary + industry tags), deduped.
+    const seededKeywords = Array.from(new Set([
+      ...profile.primaryKeywords,
+      ...profile.secondaryKeywords,
+      ...profile.industryTags,
+    ].filter((k) => typeof k === 'string' && k.trim().length > 0)))
     await supabase
       .from('companies')
       .upsert({
         id: user.id,
         business_profile: profile,
+        keywords: seededKeywords,
         distribution_channels: profile.distributionChannels,
         last_sync_at: new Date().toISOString(),
         next_sync_at: nextSync,

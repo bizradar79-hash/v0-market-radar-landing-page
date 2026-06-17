@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { effectiveKeywords } from '@/lib/keywords'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
@@ -109,9 +110,9 @@ export async function POST(request: Request) {
     const geoContext = ctx?.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     const businessProfile = (ctx?.company?.business_profile ?? null) as BusinessProfile | null
-    const searchTerms = businessProfile?.primaryKeywords?.join(', ')
-      ?? keywords
-      ?? businessOverview.slice(0, 120)
+    const searchTerms = effectiveKeywords(ctx?.company, businessProfile).join(', ')
+      || keywords
+      || businessOverview.slice(0, 120)
     const industryContext = businessProfile
       ? `תחום: ${businessProfile.industryTags.join(', ')}. קהל יעד: ${businessProfile.targetAudiences.join(', ')}.`
       : ''

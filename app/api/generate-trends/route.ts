@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { effectiveKeywords } from '@/lib/keywords'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -34,9 +35,10 @@ export async function POST(request: Request) {
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
-    const searchTerms = businessProfile
-      ? [...(businessProfile.primaryKeywords || []), ...(businessProfile.secondaryKeywords || [])].join(', ')
-      : (ctx.company?.keywords || []).join(', ') || businessOverview.slice(0, 120)
+    const searchTerms = [
+      ...effectiveKeywords(ctx.company, businessProfile),
+      ...((businessProfile?.secondaryKeywords) || []),
+    ].join(', ') || businessOverview.slice(0, 120)
     const audienceContext = businessProfile?.targetAudiences?.length
       ? `קהלי יעד: ${businessProfile.targetAudiences.join(', ')}.`
       : ''
