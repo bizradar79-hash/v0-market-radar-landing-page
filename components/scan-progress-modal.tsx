@@ -34,6 +34,8 @@ interface ScanControl {
 
 // Ordered module ids + Hebrew labels (mirror sync/run MODULE_IDS).
 const MODULE_LABELS: Array<{ id: string; label: string }> = [
+  { id: 'overview',           label: 'ניתוח פרופיל עסקי' },
+  { id: 'swot',               label: 'ניתוח SWOT' },
   { id: 'competitors',        label: 'גילוי מתחרים' },
   { id: 'competitor_ratings', label: 'דירוגי מתחרים' },
   { id: 'review_analysis',    label: 'ניתוח ביקורות' },

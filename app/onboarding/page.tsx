@@ -414,14 +414,15 @@ export default function OnboardingPage() {
         })
       } catch { /* best-effort */ }
 
-      for (let i = 0; i < SCAN_STEPS.length; i++) {
-        setScanStep(i)
-        try {
-          await fetch(SCAN_STEPS[i].route, { method: 'POST', headers: authHeaders })
-        } catch {
-          // ignore errors, continue
-        }
-      }
+      // Trigger the FULL initial scan SERVER-SIDE via sync/run (after() +
+      // chaining), replacing the old browser-driven for…await loop that died if
+      // the user closed the tab. /api/sync/start authenticates the user and
+      // fires sync/run with the cron secret + profile:'initial'. We do NOT wait
+      // for the modules to finish — the scan runs independently of the browser
+      // and the dashboard reflects its progress from scan_control. Tab-close-safe.
+      try {
+        await fetch('/api/sync/start', { method: 'POST', headers: authHeaders })
+      } catch { /* best-effort — the dashboard still reflects scan status */ }
 
       router.push('/app/dashboard')
     } catch (err: any) {

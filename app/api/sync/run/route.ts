@@ -125,6 +125,8 @@ export async function POST(request: Request) {
   // FIX 4 — weekly is LEAN: these modules are skipped entirely (no AI call).
   // Weekly runs only the dynamic data modules + cheap synthesis.
   const WEEKLY_SKIP = new Set<string>([
+    'overview',             // business overview — onboarding/initial only
+    'swot',                 // SWOT analysis — onboarding/initial only
     'competitors',          // competitor DISCOVERY (expensive)
     'competitor_ratings',   // Google Places sweep
     'review_analysis',      // analyze-company-reviews (the runaway)
@@ -134,7 +136,10 @@ export async function POST(request: Request) {
   const isSkipped = (moduleId: string) => isWeekly && WEEKLY_SKIP.has(moduleId)
 
   // Ordered module ids for the progress modal / circuit-breaker state.
+  // overview + swot run only on the initial (onboarding) profile — they're in
+  // WEEKLY_SKIP so the lean weekly refresh skips them.
   const MODULE_IDS = [
+    'overview', 'swot',
     'competitors', 'competitor_ratings', 'review_analysis',
     'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
     'competitor_trends', 'news', 'tenders', 'leads', 'weekly_actions',
@@ -247,6 +252,18 @@ export async function POST(request: Request) {
 
   // ── Inner function with all module calls ──────────────────────────────────
   async function runAllModules() {
+    // 0a. Business overview — initial (onboarding) only.
+    await runStep('overview', async () => {
+      const r = await callModule(origin, '/api/generate-overview', companyId!)
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'generated' : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
+
+    // 0b. SWOT analysis — initial (onboarding) only.
+    await runStep('swot', async () => {
+      const r = await callModule(origin, '/api/generate-swot', companyId!)
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'generated' : (r.body?.error ?? `HTTP ${r.status}`) }
+    })
+
     // 1. Competitor seeding + DISCOVERY — initial only (weekly skips it per FIX 4).
     await runStep('competitors', async () => {
       // 1a. Seed competitors identified during onboarding
