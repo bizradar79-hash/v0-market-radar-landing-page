@@ -111,6 +111,11 @@ export async function POST(request: Request) {
     if (e?.message === 'coupon_misconfigured') {
       return NextResponse.json({ error: 'מבצע לא זמין כרגע' }, { status: 400 })
     }
+    if (e?.message === 'upay_base_url_missing') {
+      // Full-price Upay link not configured — better to block than charge ₪0.
+      console.error('[checkout] UPAY_STATIC_PAYMENT_URL is not set — full-price checkout blocked')
+      return NextResponse.json({ error: 'התשלום אינו זמין כרגע, נסה שוב מאוחר יותר' }, { status: 503 })
+    }
     return NextResponse.json({ error: e?.message ?? 'checkout_failed' }, { status: 500 })
   }
 }

@@ -1,10 +1,16 @@
 // Payment provider abstraction. We currently use STATIC Upay payment-page
-// links only (no Upay API). Each paid coupon carries its own pre-built link;
-// the no-coupon full-price flow uses UPAY_STATIC_PAYMENT_URL.
-
-export const UPAY_STATIC_PAYMENT_URL =
-  process.env.UPAY_STATIC_PAYMENT_URL
-  || 'https://app.upay.co.il/API6/s.php?m=VnF2bWZPcXVpdTh0ZFpIWENuL1YvUT09'
+// links only (no Upay API). The amount is BAKED INTO each Upay link token
+// (s.php?m=...) on Upay's side — it is NOT a query param we can set. So every
+// price needs its own pre-built link: each paid coupon carries its own link,
+// and the no-coupon FULL-PRICE (₪79) flow uses UPAY_STATIC_PAYMENT_URL.
+//
+// PRODUCTION BUG FIX: there used to be a hardcoded fallback link here. When
+// UPAY_STATIC_PAYMENT_URL was unset in prod, the no-coupon flow silently used
+// that fallback — a ₪0 page — so full-price customers were charged ₪0. There is
+// now NO fallback: this MUST be set to the real ₪79 Upay payment-page link
+// (built in the Upay dashboard exactly like a coupon link). If it's empty we
+// FAIL LOUDLY (see createCheckout) rather than send a customer to a ₪0 page.
+export const UPAY_STATIC_PAYMENT_URL = process.env.UPAY_STATIC_PAYMENT_URL || ''
 
 export interface CheckoutArgs {
   userId: string
@@ -44,7 +50,12 @@ export const staticLinkProvider: PaymentProvider = {
       return { mode: 'redirect', url: coupon.payment_url }
     }
 
-    // Paid, no coupon → full-price static link.
+    // Paid, no coupon → full-price (₪79) static link. Must be configured to a
+    // real ₪79 Upay page. NEVER fall back to a default — a wrong link silently
+    // charges ₪0. Fail loud so checkout surfaces an error instead.
+    if (!UPAY_STATIC_PAYMENT_URL) {
+      throw new Error('upay_base_url_missing')
+    }
     return { mode: 'redirect', url: UPAY_STATIC_PAYMENT_URL }
   },
 }
