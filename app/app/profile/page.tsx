@@ -3,11 +3,9 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import {
   Building2,
@@ -17,13 +15,8 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  Phone,
-  Globe,
   MapPin,
   Search,
-  Pencil,
-  Check,
-  X,
   ShieldCheck,
   Target,
   Tag,
@@ -35,11 +28,12 @@ import {
   Truck,
   MessageSquare,
   ExternalLink,
+  Settings,
+  ArrowLeft,
 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
 import type { BusinessProfile } from "@/types/business-profile"
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface SwotData {
   strengths: string[]
@@ -47,18 +41,6 @@ interface SwotData {
   opportunities: string[]
   threats: string[]
 }
-
-interface PlacesData {
-  rating: number | null
-  reviewCount: number
-  reviews: Array<{ author: string; rating: number; text: string; time: string }>
-  address?: string
-  phone?: string
-  website?: string
-  source?: string
-  error?: string
-}
-
 
 interface ReviewAnalysis {
   google_rating?: number | null
@@ -75,74 +57,29 @@ interface ReviewAnalysis {
   recommended_response?: string | null
 }
 
-function StarRating({ rating }: { rating: number }) {
+const BUSINESS_MODEL_LABELS: Record<string, string> = {
+  B2B: 'B2B', B2C: 'B2C', B2B2C: 'B2B2C', mixed: 'מעורב',
+}
+
+// Read-only chip list.
+function Tags({ tags }: { tags: string[] | undefined | null }) {
+  if (!tags || tags.length === 0) return <span className="text-sm text-muted-foreground">לא הוגדר</span>
   return (
-    <div className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map(i => (
-        <Star key={i} className={`h-4 w-4 ${i <= Math.round(rating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`} />
+    <div className="flex flex-wrap gap-1.5">
+      {tags.map((t, i) => (
+        <Badge key={i} variant="secondary" className="text-sm">{t}</Badge>
       ))}
     </div>
   )
 }
 
-// ── Inline edit sub-components ─────────────────────────────────────────────
-
-function TagList({
-  tags,
-  onChange,
-  editing,
-}: {
-  tags: string[]
-  onChange: (t: string[]) => void
-  editing: boolean
-}) {
-  const [input, setInput] = useState("")
-  const add = () => {
-    const v = input.trim()
-    if (v && !tags.includes(v)) onChange([...tags, v])
-    setInput("")
-  }
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {tags.map((t, i) => (
-          <Badge key={i} variant="secondary" className="gap-1 pr-1 text-sm">
-            {t}
-            {editing && (
-              <button type="button" onClick={() => onChange(tags.filter((_, idx) => idx !== i))} className="rounded hover:text-destructive">
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </Badge>
-        ))}
-        {tags.length === 0 && <span className="text-sm text-muted-foreground">לא הוגדר</span>}
-      </div>
-      {editing && (
-        <div className="flex gap-2">
-          <Input value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
-            placeholder="הוסף..." className="h-8 bg-background text-sm" />
-          <Button type="button" variant="outline" size="sm" onClick={add} disabled={!input.trim()}>
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-const BUSINESS_MODEL_LABELS: Record<string, string> = {
-  B2B: 'B2B', B2C: 'B2C', B2B2C: 'B2B2C', mixed: 'מעורב',
-}
-
-// ── Main component ─────────────────────────────────────────────────────────
+// ── Main component (READ-ONLY) ──────────────────────────────────────────────
+// Editing of every field shown here lives in /app/settings. This page is a
+// read-only "what the AI understands about your business" overview + the
+// generated analysis outputs (SWOT, reviews).
 
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
-  const [generatingOverview, setGeneratingOverview] = useState(false)
-  const [generatingSwot, setGeneratingSwot] = useState(false)
-  const [loadingPlaces, setLoadingPlaces] = useState(false)
-
 
   const [companyName, setCompanyName] = useState("")
   const [companyCity, setCompanyCity] = useState("")
@@ -150,34 +87,13 @@ export default function ProfilePage() {
   const [companyWebsite, setCompanyWebsite] = useState("")
   const [companyIndustry, setCompanyIndustry] = useState("")
   const [companyDescription, setCompanyDescription] = useState("")
-  const [overview, setOverview] = useState<string>("")
-  const [savingCompany, setSavingCompany] = useState(false)
-  const [editingCompany, setEditingCompany] = useState(false)
   const [swot, setSwot] = useState<SwotData | null>(null)
-  const [places, setPlaces] = useState<PlacesData | null>(null)
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null)
-
-  // Section edit states
-  const [editSection, setEditSection] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  // Local edit buffers (populated when entering edit mode)
-  const [editCoreActivity, setEditCoreActivity] = useState("")
-  const [editTargetAudiences, setEditTargetAudiences] = useState<string[]>([])
-  const [editIndustryTags, setEditIndustryTags] = useState<string[]>([])
-  const [editGeoMarkets, setEditGeoMarkets] = useState<string[]>([])
-  const [editAdvantage, setEditAdvantage] = useState("")
-  const [editCompetitors, setEditCompetitors] = useState<string[]>([])
-  const [editPrimaryKw, setEditPrimaryKw] = useState<string[]>([])
-  const [editSecondaryKw, setEditSecondaryKw] = useState<string[]>([])
-  const [editProducts, setEditProducts] = useState<BusinessProfile['products']>([])
-  const [editDistributionChannels, setEditDistributionChannels] = useState<string[]>([])
-  const [searchExpanded, setSearchExpanded] = useState(false)
   const [reviewAnalysis, setReviewAnalysis] = useState<ReviewAnalysis | null>(null)
   const [loadingReviewAnalysis, setLoadingReviewAnalysis] = useState(false)
+  const [searchExpanded, setSearchExpanded] = useState(false)
 
   const supabase = createClient()
-  const { toast } = useToast()
 
   useEffect(() => { loadData() }, [])
 
@@ -187,7 +103,7 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('companies')
-      .select('name, city, phone, website, industry, description, swot, business_overview, geo_data, business_profile, review_analysis, distribution_channels')
+      .select('name, city, phone, website, industry, description, swot, business_profile, review_analysis, distribution_channels')
       .eq('id', user.id)
       .single()
 
@@ -198,14 +114,9 @@ export default function ProfilePage() {
       setCompanyWebsite(data.website || '')
       setCompanyIndustry(data.industry || '')
       setCompanyDescription(data.description || '')
-      if (data.business_overview) setOverview(data.business_overview)
       if (data.swot && Object.keys(data.swot).length > 0) setSwot(data.swot as SwotData)
-      if (data.geo_data && typeof data.geo_data === 'object' && Object.keys(data.geo_data).length > 0) {
-        setPlaces(data.geo_data as PlacesData)
-      }
       if (data.business_profile) {
         const bp = data.business_profile as BusinessProfile
-        // Merge top-level distribution_channels into profile if not already there
         if (!bp.distributionChannels?.length && Array.isArray(data.distribution_channels)) {
           bp.distributionChannels = data.distribution_channels
         }
@@ -214,236 +125,74 @@ export default function ProfilePage() {
       if (data.review_analysis && typeof data.review_analysis === 'object') {
         setReviewAnalysis(data.review_analysis as ReviewAnalysis)
       } else {
-        // Auto-trigger review analysis if not yet available
-        loadReviewAnalysis(false)
+        // Surface the review analysis (cached server-side) if not yet stored.
+        loadReviewAnalysis()
       }
     }
     setLoading(false)
   }
 
-  async function saveCompanyDetails() {
-    setSavingCompany(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { error } = await supabase.from('companies').update({
-        name: companyName.trim(),
-        city: companyCity.trim(),
-        phone: companyPhone.trim(),
-        website: companyWebsite.trim(),
-        industry: companyIndustry.trim(),
-        description: companyDescription.trim(),
-      }).eq('id', user.id)
-      if (error) throw error
-      setEditingCompany(false)
-      toast({ title: "פרטי החברה עודכנו" })
-    } catch {
-      toast({ title: "שגיאה בשמירה", variant: "destructive" })
-    } finally {
-      setSavingCompany(false)
-    }
-  }
-
-  async function patchProfile(partial: Partial<BusinessProfile>) {
-    setSaving(true)
-    const optimistic = { ...businessProfile!, ...partial }
-    setBusinessProfile(optimistic) // optimistic update
-    try {
-      const res = await fetch('/api/update-business-profile', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(partial),
-      })
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error)
-      if (data.profile) setBusinessProfile(data.profile as BusinessProfile)
-      setEditSection(null)
-      toast({ title: "נשמר בהצלחה" })
-    } catch {
-      setBusinessProfile(businessProfile) // rollback
-      toast({ title: "שגיאה בשמירה", variant: "destructive" })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  function startEdit(section: string) {
-    if (!businessProfile) return
-    setEditSection(section)
-    switch (section) {
-      case 'core': setEditCoreActivity(businessProfile.coreActivity); break
-      case 'audiences': setEditTargetAudiences([...businessProfile.targetAudiences]); break
-      case 'industry': setEditIndustryTags([...businessProfile.industryTags]); break
-      case 'geo': setEditGeoMarkets([...businessProfile.geographicMarkets]); break
-      case 'advantage': setEditAdvantage(businessProfile.competitiveAdvantage); break
-      case 'competitors': setEditCompetitors([...businessProfile.directCompetitors]); break
-      case 'keywords': setEditPrimaryKw([...businessProfile.primaryKeywords]); setEditSecondaryKw([...businessProfile.secondaryKeywords]); break
-      case 'products': setEditProducts(businessProfile.products.map(p => ({ ...p }))); break
-      case 'distribution': setEditDistributionChannels([...(businessProfile.distributionChannels || [])]); break
-    }
-  }
-
-  function cancelEdit() { setEditSection(null) }
-
-  async function generateOverview() {
-    setGeneratingOverview(true)
-    try {
-      const res = await fetch('/api/generate-overview', { method: 'POST' })
-      const data = await res.json()
-      if (data.success && data.overview) {
-        setOverview(data.overview)
-        // Belt-and-suspenders: ensure it's saved to DB
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) await supabase.from('companies').update({ business_overview: data.overview }).eq('id', user.id)
-        toast({ title: "הסקירה עודכנה בהצלחה" })
-      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור סקירה", variant: "destructive" })
-    } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
-    finally { setGeneratingOverview(false) }
-  }
-
-  async function generateSwot() {
-    setGeneratingSwot(true)
-    try {
-      const res = await fetch('/api/generate-swot', { method: 'POST' })
-      const data = await res.json()
-      if (data.success && data.swot) {
-        setSwot(data.swot)
-        // Ensure saved to DB even if API DB save failed
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) await supabase.from('companies').update({ swot: data.swot }).eq('id', user.id)
-        toast({ title: "ניתוח SWOT נוצר בהצלחה" })
-      } else toast({ title: "שגיאה", description: data.error || "לא הצלחנו ליצור ניתוח", variant: "destructive" })
-    } catch { toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" }) }
-    finally { setGeneratingSwot(false) }
-  }
-
-  async function loadPlaces() {
-    setLoadingPlaces(true)
-    try {
-      const res = await fetch('/api/google-places')
-      setPlaces(await res.json())
-    } catch {
-      setPlaces({ rating: null, reviewCount: 0, reviews: [], error: 'שגיאה בטעינת נתוני Google' })
-    } finally { setLoadingPlaces(false) }
-  }
-
-  async function loadReviewAnalysis(force = false) {
+  async function loadReviewAnalysis() {
     setLoadingReviewAnalysis(true)
     try {
-      const url = force ? '/api/analyze-company-reviews?force=true' : '/api/analyze-company-reviews'
-      const res = await fetch(url, { method: 'POST' })
+      const res = await fetch('/api/analyze-company-reviews', { method: 'POST' })
       const data = await res.json()
       if (data.success !== false) {
         setReviewAnalysis(data as ReviewAnalysis)
-        // Belt-and-suspenders: save to DB in case API DB save failed
         const { data: { user } } = await supabase.auth.getUser()
         if (user) await supabase.from('companies').update({ review_analysis: data } as any).eq('id', user.id)
-      } else toast({ title: "שגיאה", description: data.error || "לא ניתן לטעון ניתוח ביקורות", variant: "destructive" })
-    } catch {
-      toast({ title: "שגיאה", description: "אירעה שגיאה", variant: "destructive" })
-    } finally { setLoadingReviewAnalysis(false) }
+      }
+    } catch { /* best-effort — read-only display */ }
+    finally { setLoadingReviewAnalysis(false) }
   }
-
 
   if (loading) {
     return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
   }
 
-  // ── Inline save/cancel bar ────────────────────────────────────────────────
-  const EditBar = ({ onSave }: { onSave: () => void }) => (
-    <div className="flex justify-end gap-2 mt-3">
-      <Button type="button" variant="ghost" size="sm" onClick={cancelEdit} disabled={saving}>
-        <X className="h-3.5 w-3.5 ml-1" />ביטול
-      </Button>
-      <Button type="button" size="sm" onClick={onSave} disabled={saving}>
-        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1" /> : <Check className="h-3.5 w-3.5 ml-1" />}
-        שמור
-      </Button>
-    </div>
-  )
-
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Page title */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">פרופיל עסקי</h1>
-        <p className="text-muted-foreground text-sm">ניהול פרופיל ה-AI שמניע את כל הניתוחים</p>
+      {/* Page title + read-only framing + link to settings for editing */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold text-foreground">הסקירה העסקית שלך</h1>
+          <p className="text-muted-foreground text-sm max-w-xl">
+            כך אנחנו מבינים את העסק שלך — זו התמונה שמניעה את כל הניתוחים. לעריכת הפרטים, עבור להגדרות.
+          </p>
+        </div>
+        <Link
+          href="/app/settings"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors shrink-0"
+        >
+          <Settings className="h-4 w-4" />
+          ערוך פרטים בהגדרות
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* COMPANY DETAILS CARD                                                */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* ── Company details (read-only) ─────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="h-4 w-4 text-primary" />פרטי החברה
-            </CardTitle>
-            {!editingCompany && (
-              <Button variant="ghost" size="sm" onClick={() => setEditingCompany(true)} className="h-7 gap-1 text-xs">
-                <Pencil className="h-3 w-3" />ערוך
-              </Button>
-            )}
-          </div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2 className="h-4 w-4 text-primary" />פרטי החברה
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          {editingCompany ? (
-            <div className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">שם חברה</label>
-                  <Input value={companyName} onChange={e => setCompanyName(e.target.value)} className="h-8 text-sm bg-background" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">טלפון</label>
-                  <Input dir="ltr" value={companyPhone} onChange={e => setCompanyPhone(e.target.value)} placeholder="05X-XXXXXXX" className="h-8 text-sm bg-background text-left" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">עיר</label>
-                  <Input value={companyCity} onChange={e => setCompanyCity(e.target.value)} className="h-8 text-sm bg-background" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">אתר אינטרנט</label>
-                  <Input dir="ltr" value={companyWebsite} onChange={e => setCompanyWebsite(e.target.value)} placeholder="https://" className="h-8 text-sm bg-background text-left" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">תעשייה</label>
-                  <Input value={companyIndustry} onChange={e => setCompanyIndustry(e.target.value)} className="h-8 text-sm bg-background" />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">תיאור מוצרים/שירותים</label>
-                <Textarea value={companyDescription} onChange={e => setCompanyDescription(e.target.value)} className="min-h-[80px] text-sm bg-background" />
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setEditingCompany(false)} disabled={savingCompany}>
-                  <X className="h-3.5 w-3.5 ml-1" />ביטול
-                </Button>
-                <Button type="button" size="sm" onClick={saveCompanyDetails} disabled={savingCompany}>
-                  {savingCompany ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1" /> : <Check className="h-3.5 w-3.5 ml-1" />}
-                  שמור
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 text-sm">
-              {companyName && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">שם:</span><span className="font-medium">{companyName}</span></div>}
-              {companyPhone && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">טלפון:</span><span className="font-medium" dir="ltr">{companyPhone}</span></div>}
-              {companyCity && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">עיר:</span><span className="font-medium">{companyCity}</span></div>}
-              {companyWebsite && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">אתר:</span><a href={companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline truncate" dir="ltr">{companyWebsite.replace(/^https?:\/\//, '')}</a></div>}
-              {companyIndustry && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">תעשייה:</span><span className="font-medium">{companyIndustry}</span></div>}
-              {companyDescription && <div className="col-span-2 flex gap-2"><span className="text-muted-foreground min-w-[60px]">תיאור:</span><span className="text-muted-foreground line-clamp-2">{companyDescription}</span></div>}
-              {!companyName && !companyPhone && !companyCity && !companyWebsite && !companyIndustry && (
-                <p className="col-span-2 text-muted-foreground text-xs">לחץ "ערוך" כדי להוסיף פרטי חברה</p>
-              )}
-            </div>
-          )}
+          <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 text-sm">
+            {companyName && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">שם:</span><span className="font-medium">{companyName}</span></div>}
+            {companyPhone && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">טלפון:</span><span className="font-medium" dir="ltr">{companyPhone}</span></div>}
+            {companyCity && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">עיר:</span><span className="font-medium">{companyCity}</span></div>}
+            {companyWebsite && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">אתר:</span><a href={companyWebsite.startsWith('http') ? companyWebsite : `https://${companyWebsite}`} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline truncate" dir="ltr">{companyWebsite.replace(/^https?:\/\//, '')}</a></div>}
+            {companyIndustry && <div className="flex gap-2"><span className="text-muted-foreground min-w-[60px]">תעשייה:</span><span className="font-medium">{companyIndustry}</span></div>}
+            {companyDescription && <div className="col-span-2 flex gap-2"><span className="text-muted-foreground min-w-[60px]">תיאור:</span><span className="text-muted-foreground">{companyDescription}</span></div>}
+            {!companyName && !companyPhone && !companyCity && !companyWebsite && !companyIndustry && (
+              <p className="col-span-2 text-muted-foreground text-xs">הפרטים יתווספו לאחר ההרשמה. לעריכה, עבור להגדרות.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* SWOT                                                                 */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* ── SWOT (generated, read-only) ─────────────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -478,9 +227,7 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* REVIEW ANALYSIS (includes Google Maps as first source)              */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* ── Review analysis (generated, read-only) ──────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -495,7 +242,6 @@ export default function ProfilePage() {
             </div>
           ) : reviewAnalysis ? (
             <div className="space-y-5 py-1">
-              {/* Rating + Maps link */}
               <div className="flex flex-wrap items-center gap-3">
                 {reviewAnalysis.google_rating != null ? (
                   <div className="flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1">
@@ -534,7 +280,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Sentiment bar */}
               {reviewAnalysis.sentiment_score != null && (
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs text-muted-foreground">
@@ -550,14 +295,12 @@ export default function ProfilePage() {
                 </div>
               )}
 
-              {/* Summary */}
               {reviewAnalysis.summary && (
                 <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
                   {reviewAnalysis.summary}
                 </div>
               )}
 
-              {/* 3 columns: positives / negatives / opportunities */}
               {(reviewAnalysis.positives?.length || reviewAnalysis.negatives?.length || reviewAnalysis.opportunities?.length) ? (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {reviewAnalysis.positives?.length ? (
@@ -593,7 +336,6 @@ export default function ProfilePage() {
                 </div>
               ) : null}
 
-              {/* Recommended response */}
               {reviewAnalysis.recommended_response && (
                 <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-1">
                   <p className="text-xs font-semibold text-purple-700">💬 תגובה מומלצת לביקורות שליליות</p>
@@ -611,12 +353,8 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* DEEP BUSINESS PROFILE SECTION                                       */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-
+      {/* ── Business profile (read-only) ────────────────────────────────────── */}
       {!businessProfile ? (
-        /* Empty state */
         <Card className="border-dashed border-2 border-primary/30">
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
             <div className="rounded-full bg-primary/10 p-4">
@@ -632,33 +370,10 @@ export default function ProfilePage() {
         </Card>
       ) : (
         <div className="space-y-4">
-
-          {/* ── 1. Header card ─────────────────────────────────────────────── */}
+          {/* Header: core activity + model */}
           <Card>
             <CardContent className="pt-6 space-y-4">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="space-y-1 flex-1">
-                  {editSection === 'core' ? (
-                    <>
-                      <Textarea
-                        value={editCoreActivity}
-                        onChange={e => setEditCoreActivity(e.target.value)}
-                        className="text-base min-h-[72px] bg-background"
-                      />
-                      <EditBar onSave={() => patchProfile({ coreActivity: editCoreActivity })} />
-                    </>
-                  ) : (
-                    <div className="flex items-start gap-2 group">
-                      <p className="text-lg font-semibold text-foreground leading-snug flex-1">{businessProfile.coreActivity}</p>
-                      <button type="button" onClick={() => startEdit('core')} className="opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
-                        <Pencil className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Badges row */}
+              <p className="text-lg font-semibold text-foreground leading-snug">{businessProfile.coreActivity}</p>
               <div className="flex flex-wrap gap-2 items-center">
                 <Badge className="bg-primary/10 text-primary border-primary/20 border text-sm font-medium px-3">
                   {BUSINESS_MODEL_LABELS[businessProfile.businessModel] ?? businessProfile.businessModel}
@@ -667,7 +382,6 @@ export default function ProfilePage() {
                   <span className="text-sm text-muted-foreground">{businessProfile.marketPosition}</span>
                 )}
               </div>
-
               {businessProfile.generatedAt && (
                 <p className="text-xs text-muted-foreground">
                   עודכן: {new Date(businessProfile.generatedAt).toLocaleDateString('he-IL')}
@@ -676,249 +390,122 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
-          {/* ── 2. Products ────────────────────────────────────────────────── */}
+          {/* Products */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Tag className="h-4 w-4 text-primary" />מוצרים ושירותים
-                </CardTitle>
-                {editSection !== 'products' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('products')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Tag className="h-4 w-4 text-primary" />מוצרים ושירותים
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {editSection === 'products' ? (
-                <>
-                  <div className="space-y-2">
-                    {editProducts.map((p, i) => (
-                      <div key={i} className="flex items-start gap-2 rounded-lg border border-border bg-background p-3">
-                        <div className="flex-1 space-y-1.5 min-w-0">
-                          <Input value={p.name} onChange={e => setEditProducts(editProducts.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))}
-                            placeholder="שם המוצר" className="h-7 bg-card text-sm" />
-                          <Input value={p.description} onChange={e => setEditProducts(editProducts.map((x, xi) => xi === i ? { ...x, description: e.target.value } : x))}
-                            placeholder="תיאור" className="h-7 bg-card text-sm" />
-                          <div className="flex gap-2">
-                            <Input value={p.targetAudience} onChange={e => setEditProducts(editProducts.map((x, xi) => xi === i ? { ...x, targetAudience: e.target.value } : x))}
-                              placeholder="קהל יעד" className="h-7 bg-card text-sm flex-1" />
-                            <Input value={p.priceRange || ''} onChange={e => setEditProducts(editProducts.map((x, xi) => xi === i ? { ...x, priceRange: e.target.value } : x))}
-                              placeholder="טווח מחיר" className="h-7 bg-card text-sm w-32" />
-                          </div>
-                        </div>
-                        <button type="button" onClick={() => setEditProducts(editProducts.filter((_, xi) => xi !== i))} className="text-muted-foreground hover:text-destructive mt-1">
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                    <Button type="button" variant="outline" size="sm" className="w-full gap-1"
-                      onClick={() => setEditProducts([...editProducts, { name: '', description: '', targetAudience: '', priceRange: '' }])}>
-                      <Plus className="h-3.5 w-3.5" />הוסף מוצר
-                    </Button>
-                  </div>
-                  <EditBar onSave={() => patchProfile({ products: editProducts.filter(p => p.name.trim()) })} />
-                </>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {businessProfile.products.length === 0 && (
-                    <p className="text-sm text-muted-foreground col-span-2">לא הוגדרו מוצרים</p>
-                  )}
-                  {businessProfile.products.map((p, i) => (
-                    <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-1">
-                      <p className="font-medium text-sm text-foreground">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.description}</p>
-                      <div className="flex flex-wrap gap-2 mt-1.5">
-                        {p.targetAudience && (
-                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                            <Users className="h-3 w-3" />{p.targetAudience}
-                          </span>
-                        )}
-                        {p.priceRange && (
-                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                            💰 {p.priceRange}
-                          </span>
-                        )}
-                      </div>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {businessProfile.products.length === 0 && (
+                  <p className="text-sm text-muted-foreground col-span-2">לא הוגדרו מוצרים</p>
+                )}
+                {businessProfile.products.map((p, i) => (
+                  <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-1">
+                    <p className="font-medium text-sm text-foreground">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.description}</p>
+                    <div className="flex flex-wrap gap-2 mt-1.5">
+                      {p.targetAudience && (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Users className="h-3 w-3" />{p.targetAudience}
+                        </span>
+                      )}
+                      {p.priceRange && (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">💰 {p.priceRange}</span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
-          {/* ── 3. Target Audiences ─────────────────────────────────────────── */}
+          {/* Target audiences */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-4 w-4 text-primary" />קהלי יעד
-                </CardTitle>
-                {editSection !== 'audiences' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('audiences')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="h-4 w-4 text-primary" />קהלי יעד
+              </CardTitle>
+            </CardHeader>
+            <CardContent><Tags tags={businessProfile.targetAudiences} /></CardContent>
+          </Card>
+
+          {/* Industry tags */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Building2 className="h-4 w-4 text-primary" />תגיות תעשייה
+              </CardTitle>
+            </CardHeader>
+            <CardContent><Tags tags={businessProfile.industryTags} /></CardContent>
+          </Card>
+
+          {/* Geographic markets */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MapPin className="h-4 w-4 text-primary" />שווקים גיאוגרפיים
+              </CardTitle>
+            </CardHeader>
+            <CardContent><Tags tags={businessProfile.geographicMarkets} /></CardContent>
+          </Card>
+
+          {/* Distribution channels */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Truck className="h-4 w-4 text-primary" />ערוצי הפצה
+              </CardTitle>
+            </CardHeader>
+            <CardContent><Tags tags={businessProfile.distributionChannels} /></CardContent>
+          </Card>
+
+          {/* Competitive advantage */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Trophy className="h-4 w-4 text-primary" />יתרון תחרותי
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <TagList tags={editSection === 'audiences' ? editTargetAudiences : businessProfile.targetAudiences}
-                onChange={setEditTargetAudiences} editing={editSection === 'audiences'} />
-              {editSection === 'audiences' && <EditBar onSave={() => patchProfile({ targetAudiences: editTargetAudiences })} />}
+              <p className="text-sm text-foreground leading-relaxed">
+                {businessProfile.competitiveAdvantage || <span className="text-muted-foreground">לא הוגדר</span>}
+              </p>
             </CardContent>
           </Card>
 
-          {/* ── 4. Industry Tags ────────────────────────────────────────────── */}
+          {/* Direct competitors */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Building2 className="h-4 w-4 text-primary" />תגיות תעשייה
-                </CardTitle>
-                {editSection !== 'industry' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('industry')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldCheck className="h-4 w-4 text-primary" />מתחרים ישירים שזוהו
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              <TagList tags={editSection === 'industry' ? editIndustryTags : businessProfile.industryTags}
-                onChange={setEditIndustryTags} editing={editSection === 'industry'} />
-              {editSection === 'industry' && <EditBar onSave={() => patchProfile({ industryTags: editIndustryTags })} />}
-            </CardContent>
+            <CardContent><Tags tags={businessProfile.directCompetitors} /></CardContent>
           </Card>
 
-          {/* ── 5. Geographic Markets ───────────────────────────────────────── */}
+          {/* Keywords */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <MapPin className="h-4 w-4 text-primary" />שווקים גיאוגרפיים
-                </CardTitle>
-                {editSection !== 'geo' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('geo')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <TagList tags={editSection === 'geo' ? editGeoMarkets : businessProfile.geographicMarkets}
-                onChange={setEditGeoMarkets} editing={editSection === 'geo'} />
-              {editSection === 'geo' && <EditBar onSave={() => patchProfile({ geographicMarkets: editGeoMarkets })} />}
-            </CardContent>
-          </Card>
-
-          {/* ── 5b. Distribution Channels ───────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Truck className="h-4 w-4 text-primary" />ערוצי הפצה
-                </CardTitle>
-                {editSection !== 'distribution' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('distribution')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <TagList
-                tags={editSection === 'distribution' ? editDistributionChannels : (businessProfile.distributionChannels || [])}
-                onChange={setEditDistributionChannels}
-                editing={editSection === 'distribution'}
-              />
-              {editSection === 'distribution' && (
-                <EditBar onSave={() => patchProfile({ distributionChannels: editDistributionChannels })} />
-              )}
-            </CardContent>
-          </Card>
-
-          {/* ── 6. Competitive Advantage ────────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Trophy className="h-4 w-4 text-primary" />יתרון תחרותי
-                </CardTitle>
-                {editSection !== 'advantage' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('advantage')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {editSection === 'advantage' ? (
-                <>
-                  <Textarea value={editAdvantage} onChange={e => setEditAdvantage(e.target.value)}
-                    className="min-h-[80px] bg-background text-sm" />
-                  <EditBar onSave={() => patchProfile({ competitiveAdvantage: editAdvantage })} />
-                </>
-              ) : (
-                <p className="text-sm text-foreground leading-relaxed">
-                  {businessProfile.competitiveAdvantage || <span className="text-muted-foreground">לא הוגדר</span>}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* ── 7. Direct Competitors ───────────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-4 w-4 text-primary" />מתחרים ישירים שזוהו
-                </CardTitle>
-                {editSection !== 'competitors' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('competitors')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <TagList tags={editSection === 'competitors' ? editCompetitors : businessProfile.directCompetitors}
-                onChange={setEditCompetitors} editing={editSection === 'competitors'} />
-              {editSection === 'competitors' && <EditBar onSave={() => patchProfile({ directCompetitors: editCompetitors })} />}
-            </CardContent>
-          </Card>
-
-          {/* ── 8. Keywords ─────────────────────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Key className="h-4 w-4 text-primary" />מילות מפתח
-                </CardTitle>
-                {editSection !== 'keywords' && (
-                  <Button variant="ghost" size="sm" onClick={() => startEdit('keywords')} className="h-7 gap-1 text-xs">
-                    <Pencil className="h-3 w-3" />ערוך
-                  </Button>
-                )}
-              </div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Key className="h-4 w-4 text-primary" />מילות מפתח
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">עיקריות</p>
-                <TagList tags={editSection === 'keywords' ? editPrimaryKw : businessProfile.primaryKeywords}
-                  onChange={setEditPrimaryKw} editing={editSection === 'keywords'} />
+                <Tags tags={businessProfile.primaryKeywords} />
               </div>
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">משניות</p>
-                <TagList tags={editSection === 'keywords' ? editSecondaryKw : businessProfile.secondaryKeywords}
-                  onChange={setEditSecondaryKw} editing={editSection === 'keywords'} />
+                <Tags tags={businessProfile.secondaryKeywords} />
               </div>
-              {editSection === 'keywords' && (
-                <EditBar onSave={() => patchProfile({ primaryKeywords: editPrimaryKw, secondaryKeywords: editSecondaryKw })} />
-              )}
             </CardContent>
           </Card>
 
-          {/* ── 9. Search Queries (read-only, collapsible) ──────────────────── */}
+          {/* Search queries (read-only, collapsible) */}
           {businessProfile.searchQueries?.length > 0 && (
             <Card>
               <CardHeader className="pb-0">
@@ -947,10 +534,8 @@ export default function ProfilePage() {
               )}
             </Card>
           )}
-
         </div>
       )}
-
     </div>
   )
 }
