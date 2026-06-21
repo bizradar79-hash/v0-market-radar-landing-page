@@ -7,13 +7,10 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/hooks/use-toast"
 import {
   Calendar,
   MapPin,
   ExternalLink,
-  Loader2,
-  Sparkles,
   Tag,
 } from "lucide-react"
 
@@ -52,10 +49,8 @@ interface Conference {
 export default function ConferencesPage() {
   const [conferences, setConferences] = useState<Conference[]>([])
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
   const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
-  const { toast } = useToast()
 
   useEffect(() => {
     fetchConferences()
@@ -112,37 +107,6 @@ export default function ConferencesPage() {
     } catch {}
   }
 
-  async function generateWithAI() {
-    setGenerating(true)
-    try {
-      const response = await fetch("/api/generate-conferences", { method: "POST" })
-      const data = await response.json()
-      
-      if (data.success) {
-        await fetchConferences()
-        toast({
-          title: "הכנסים נוצרו בהצלחה",
-          description: `נמצאו ${data.count || 0} כנסים רלוונטיים`,
-        })
-      } else {
-        toast({
-          title: "שגיאה",
-          description: data.error || "לא הצלחנו ליצור כנסים",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error generating conferences:", error)
-      toast({
-        title: "שגיאה",
-        description: "אירעה שגיאה ביצירת הכנסים",
-        variant: "destructive",
-      })
-    } finally {
-      setGenerating(false)
-    }
-  }
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -164,30 +128,11 @@ export default function ConferencesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">כנסים ואירועים</h1>
-          <p className="text-muted-foreground">
-            {conferences.length} כנסים נמצאו
-          </p>
-        </div>
-        <Button 
-          onClick={generateWithAI} 
-          disabled={generating}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          {generating ? (
-            <>
-              <Loader2 className="ml-2 h-4 w-4 animate-spin" />
-              מחפש כנסים...
-            </>
-          ) : (
-            <>
-              <Sparkles className="ml-2 h-4 w-4" />
-              מצא כנסים עם AI
-            </>
-          )}
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">כנסים ואירועים</h1>
+        <p className="text-muted-foreground">
+          {conferences.length} כנסים נמצאו · מתעדכן בסריקה השבועית
+        </p>
       </div>
 
       {/* Empty State */}
@@ -268,14 +213,25 @@ export default function ConferencesPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => window.open(conference.url, '_blank')}
-                  >
-                    <ExternalLink className="ml-2 h-4 w-4" />
-                    הירשם לכנס
-                  </Button>
+                  {(() => {
+                    const u = (conference.url || '').trim()
+                    const hasReal = /^https?:\/\//i.test(u)
+                    // Real verified URL → open it. Otherwise never open a dead/
+                    // empty link — fall back to a Google search for the event name.
+                    const target = hasReal
+                      ? u
+                      : `https://www.google.com/search?q=${encodeURIComponent(conference.name)}`
+                    return (
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => window.open(target, '_blank', 'noopener,noreferrer')}
+                      >
+                        <ExternalLink className="ml-2 h-4 w-4" />
+                        {hasReal ? 'הירשם לכנס' : 'חפש בגוגל'}
+                      </Button>
+                    )
+                  })()}
                   {savedTitles.has(conference.name) ? (
                     <button className="flex items-center gap-1 text-xs border rounded-md px-2 py-1 bg-green-50 text-green-700 border-green-200 cursor-default">✓ נשמר</button>
                   ) : (

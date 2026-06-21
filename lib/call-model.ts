@@ -4,7 +4,6 @@
 // Returns JSON string: { tenders: [...] }
 export async function callModelTwoStage(prompt: string, _company?: any): Promise<string> {
   const GEMINI_MODEL = 'gemini-2.5-flash'
-  const XAI_MODEL = 'grok-4-fast-non-reasoning'
 
   // ── Stage 1: Gemini ──────────────────────────────────────────────────────
   const geminiPrompt = prompt +
@@ -56,50 +55,12 @@ export async function callModelTwoStage(prompt: string, _company?: any): Promise
   // ── Stage 2: xAI — find real URL for each tender (max 5 in parallel) ───────
   const tendersToLookup = tenders.slice(0, 5)
   const urlResults = await Promise.all(
-    tendersToLookup.map(async (tender: any) => {
-      const title = tender.title || ''
-      const publisher = tender.publisher || tender.organization || tender.ministry || ''
-      const urlPrompt = `מצא את הקישור הרשמי לדף המכרז: "${title}" של ${publisher || 'הגוף הממשלתי'}.
-הקישור חייב להיות לדף HTML של המכרז הספציפי — לא PDF, לא דף ראשי.
-החזר JSON בלבד: {"url": "https://..."}`
-
-      try {
-        const xaiRes = await fetch('https://api.x.ai/v1/responses', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: XAI_MODEL,
-            tools: [{ type: 'web_search' }],
-            input: urlPrompt,
-          }),
-        })
-        if (!xaiRes.ok) return ''
-        const xaiData = await xaiRes.json()
-        const xaiText = xaiData.output
-          ?.filter((b: any) => b.type === 'message')
-          .flatMap((b: any) => b.content)
-          .filter((c: any) => c.type === 'output_text')
-          .map((c: any) => c.text)
-          .join('') || ''
-
-        // Parse URL from JSON response
-        try {
-          const clean = xaiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-          const parsed = JSON.parse(clean)
-          return parsed.url || ''
-        } catch {
-          // Fallback: extract first https URL from text
-          const match = xaiText.match(/https?:\/\/[^\s"',\]]+/)
-          return match?.[0] || ''
-        }
-      } catch (e: any) {
-        console.warn(`[callModelTwoStage] Stage 2 failed for "${title}":`, e?.message)
-        return ''
-      }
-    })
+    tendersToLookup.map((tender: any) =>
+      findRealUrl(
+        tender.title || '',
+        `מכרז של ${tender.publisher || tender.organization || tender.ministry || 'הגוף הממשלתי'}`,
+      ),
+    )
   )
 
   console.log('[callModelTwoStage] Stage 2 ok. URLs found:', urlResults.filter(Boolean).length)
@@ -111,6 +72,53 @@ export async function callModelTwoStage(prompt: string, _company?: any): Promise
   }))
 
   return JSON.stringify({ tenders: merged })
+}
+
+// ── Stage-2 URL resolver ─────────────────────────────────────────────────────
+// Per-item xAI web_search to find the REAL page URL for an item (tender,
+// conference, …). Shared by callModelTwoStage and generate-conferences so both
+// resolve URLs identically instead of trusting a model-written `website` field.
+// Returns '' when nothing is found. Callers should still validateUrl() the
+// result before storing it.
+export async function findRealUrl(title: string, context: string): Promise<string> {
+  const XAI_MODEL = 'grok-4-fast-non-reasoning'
+  if (!title.trim()) return ''
+  const urlPrompt = `מצא את הקישור הרשמי לדף של: "${title}"${context ? ` (${context})` : ''}.
+הקישור חייב להיות לדף HTML אמיתי של הפריט הספציפי — לא PDF, לא דף ראשי גנרי.
+החזר JSON בלבד: {"url": "https://..."}`
+  try {
+    const xaiRes = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: XAI_MODEL,
+        tools: [{ type: 'web_search' }],
+        input: urlPrompt,
+      }),
+    })
+    if (!xaiRes.ok) return ''
+    const xaiData = await xaiRes.json()
+    const xaiText = xaiData.output
+      ?.filter((b: any) => b.type === 'message')
+      .flatMap((b: any) => b.content)
+      .filter((c: any) => c.type === 'output_text')
+      .map((c: any) => c.text)
+      .join('') || ''
+    try {
+      const clean = xaiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      const parsed = JSON.parse(clean)
+      return parsed.url || ''
+    } catch {
+      const match = xaiText.match(/https?:\/\/[^\s"',\]]+/)
+      return match?.[0] || ''
+    }
+  } catch (e: any) {
+    console.warn(`[findRealUrl] failed for "${title}":`, e?.message)
+    return ''
+  }
 }
 
 // ── Single-provider call ───────────────────────────────────────────────────

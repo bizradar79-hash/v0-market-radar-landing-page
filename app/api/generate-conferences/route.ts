@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
-import { callModel } from '@/lib/call-model'
+import { callModel, findRealUrl } from '@/lib/call-model'
+import { validateUrl } from '@/lib/ai'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -104,12 +105,28 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
     return NextResponse.json({ success: true, conferences: [], count: 0, kept_existing: true, steps })
   }
 
-  const rows = scored.map(({ c, score }) => ({
+  // URL RESOLUTION — same two-stage pattern as tenders: NEVER trust the model's
+  // `website`/`url` field (it hallucinates events like hitech-hr.co.il). For each
+  // kept conference (already capped at CONFERENCES_MAX), do a per-item xAI
+  // web_search to find the real event page (findRealUrl), then validate it
+  // resolves (validateUrl: HEAD→GET). Keep only a real, resolvable URL; otherwise
+  // store '' (the UI falls back to a Google search by name).
+  const resolved = await Promise.all(
+    scored.map(async ({ c, score }) => {
+      const name = String(c.name || c.title || '')
+      const candidate = await findRealUrl(name, `כנס/אירוע ${String(c.location || '')}`.trim())
+      const url = (/^https?:\/\//i.test(candidate) && await validateUrl(candidate)) ? candidate : ''
+      return { c, score, url }
+    })
+  )
+  steps.urls = { resolved: resolved.filter(r => r.url).length, total: resolved.length }
+
+  const rows = resolved.map(({ c, score, url }) => ({
     name: c.name || c.title || '',
     date: c.date || null,
     location: c.location || '',
     description: packDescription(score, c.relevanceReason || c.reason || '', c.description || ''),
-    url: c.url || c.website || '',
+    url, // validated Stage-2 URL or '' — never the model's hallucinated website
     category: c.category || '',
     company_id: ctx.user.id,
   }))

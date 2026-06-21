@@ -142,7 +142,7 @@ export async function POST(request: Request) {
     'overview', 'swot',
     'competitors', 'competitor_ratings', 'review_analysis',
     'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
-    'competitor_trends', 'news', 'tenders', 'leads', 'weekly_actions',
+    'competitor_trends', 'news', 'tenders', 'conferences', 'leads', 'weekly_actions',
     'niche_opportunities', 'weekly_report',
   ]
 
@@ -394,6 +394,14 @@ export async function POST(request: Request) {
       if (r.ok && newCount >= (existingTenders ?? 0)) return { status: 'ok', message: `${newCount} tenders` }
       if (r.ok) return { status: 'skipped', message: `new ${newCount} < existing ${existingTenders}` }
       return { status: 'error', message: r.body?.error ?? `HTTP ${r.status}` }
+    })
+
+    // 7b. Conferences — real events + verified URLs (two-stage like tenders).
+    // Runs on every scan (incl. weekly); the route's own 7-day cache + the
+    // finalize guard keep it from wiping good data with an empty refresh.
+    await runStep('conferences', async () => {
+      const r = await callModule(origin, '/api/generate-conferences', companyId!)
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} conferences` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
     // 8. Leads — initial only (weekly skips), and only when below threshold.

@@ -46,6 +46,7 @@ const MODULE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'competitor_trends',  label: 'טרנדים מתחרים' },
   { id: 'news',               label: 'חדשות' },
   { id: 'tenders',            label: 'מכרזים' },
+  { id: 'conferences',        label: 'כנסים' },
   { id: 'leads',              label: 'לידים' },
   { id: 'weekly_actions',     label: 'פעולות שבועיות' },
   { id: 'niche_opportunities',label: 'הזדמנויות נישה' },
