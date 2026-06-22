@@ -3,6 +3,7 @@ import Image from 'next/image'
 
 export const metadata = {
   title: 'תנאי שימוש | North Star Radar',
+  alternates: { canonical: '/terms' },
 }
 
 export default function TermsPage() {

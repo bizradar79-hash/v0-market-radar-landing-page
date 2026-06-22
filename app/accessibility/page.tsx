@@ -4,6 +4,7 @@ import { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'הצהרת נגישות — North Star Radar',
   description: 'הצהרת נגישות של אתר North Star Radar בהתאם לתקן WCAG 2.1 ברמת AA.',
+  alternates: { canonical: '/accessibility' },
 }
 
 export default function AccessibilityPage() {

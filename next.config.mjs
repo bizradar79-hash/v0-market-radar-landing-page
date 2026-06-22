@@ -11,6 +11,14 @@ const nextConfig = {
   },
   async redirects() {
     return [
+      // Canonical host: 301 non-www (nsradar.co.il) → www.nsradar.co.il so there
+      // is ONE indexable host (matches metadataBase / GSC). Preserves the path.
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'nsradar.co.il' }],
+        destination: 'https://www.nsradar.co.il/:path*',
+        permanent: true,
+      },
       // Permanent guard: Upay return URLs once had a typo (/onboaring). Forward
       // to /onboarding preserving ALL query params so paid users land correctly.
       { source: '/onboaring', destination: '/onboarding', permanent: false },

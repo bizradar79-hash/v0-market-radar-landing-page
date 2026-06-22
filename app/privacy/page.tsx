@@ -3,6 +3,7 @@ import Image from 'next/image'
 
 export const metadata = {
   title: 'מדיניות פרטיות | North Star Radar',
+  alternates: { canonical: '/privacy' },
 }
 
 export default function PrivacyPage() {
