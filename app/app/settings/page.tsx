@@ -146,6 +146,10 @@ export default function SettingsPage() {
   // add/edit) — the next GEO scan tops the list back up to 3 with new questions.
   const [geoQueries, setGeoQueries] = useState<string[]>([])
   const [geoSaving, setGeoSaving] = useState(false)
+  // Distribution channels. Clients may DELETE channels (no add) — nothing
+  // regenerates them, so a removal is permanent.
+  const [distChannels, setDistChannels] = useState<string[]>([])
+  const [distSaving, setDistSaving] = useState(false)
 
   // ── business_profile fields (saved via update-business-profile deep-merge) ──
   const [directCompetitors, setDirectCompetitors] = useState<string[]>([])
@@ -187,6 +191,13 @@ export default function SettingsPage() {
           }
           const bp = (company.business_profile as any) || {}
           if (Array.isArray(bp.geoQueries)) setGeoQueries(bp.geoQueries.filter((q: any) => typeof q === 'string'))
+          // Distribution channels: prefer the blob, fall back to the mirrored column.
+          {
+            const dc = Array.isArray(bp.distributionChannels)
+              ? bp.distributionChannels
+              : (Array.isArray((company as any).distribution_channels) ? (company as any).distribution_channels : [])
+            setDistChannels(dc.filter((q: any) => typeof q === 'string'))
+          }
           if (Array.isArray(bp.directCompetitors)) setDirectCompetitors(bp.directCompetitors.filter((q: any) => typeof q === 'string'))
           if (Array.isArray(bp.targetAudiences)) setTargetAudiences(bp.targetAudiences.filter((q: any) => typeof q === 'string'))
           if (Array.isArray(bp.industryTags)) setIndustryTags(bp.industryTags.filter((q: any) => typeof q === 'string'))
@@ -305,6 +316,28 @@ export default function SettingsPage() {
       setGeoQueries(previous)
     } finally {
       setGeoSaving(false)
+    }
+  }
+
+  // Client deletes a single distribution channel. Persists via
+  // update-business-profile (which mirrors the distribution_channels column).
+  // Nothing regenerates channels, so the removal is permanent.
+  const deleteDistChannel = async (index: number) => {
+    const previous = distChannels
+    const updated = distChannels.filter((_, i) => i !== index)
+    setDistChannels(updated)
+    setDistSaving(true)
+    try {
+      const res = await fetch('/api/update-business-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ distributionChannels: updated }),
+      })
+      if (!res.ok) setDistChannels(previous) // revert on failure
+    } catch {
+      setDistChannels(previous)
+    } finally {
+      setDistSaving(false)
     }
   }
 
@@ -562,6 +595,48 @@ export default function SettingsPage() {
                         disabled={geoSaving}
                         aria-label="מחק שאלה"
                         title="מחק שאלה"
+                        className="shrink-0 text-muted-foreground hover:text-red-500 disabled:opacity-50 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Distribution channels — clients may DELETE (no add); permanent */}
+          <Card className="border-border bg-card mt-6">
+            <CardHeader>
+              <CardTitle className="text-foreground flex items-center gap-2 text-base">
+                🚚 ערוצי הפצה
+                {distSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                ערוצי ההפצה שזיהינו עבורך. אפשר להסיר ערוצים שאינם רלוונטיים — הם לא יחזרו.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {distChannels.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  לא זוהו ערוצי הפצה.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {distChannels.map((c, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
+                    >
+                      <span className="text-muted-foreground shrink-0">{i + 1}.</span>
+                      <span dir="rtl" className="flex-1">{c}</span>
+                      <button
+                        type="button"
+                        onClick={() => deleteDistChannel(i)}
+                        disabled={distSaving}
+                        aria-label="מחק ערוץ"
+                        title="מחק ערוץ"
                         className="shrink-0 text-muted-foreground hover:text-red-500 disabled:opacity-50 transition-colors"
                       >
                         <X className="h-4 w-4" />

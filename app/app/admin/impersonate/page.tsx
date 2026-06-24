@@ -139,6 +139,10 @@ export default function ImpersonatePage() {
   const [geoQueriesLoading, setGeoQueriesLoading] = useState(false)
   const [geoQueriesSaving, setGeoQueriesSaving] = useState(false)
   const [newGeoQuery, setNewGeoQuery] = useState("")
+  const [distChannels, setDistChannels] = useState<string[]>([])
+  const [distChannelsLoading, setDistChannelsLoading] = useState(false)
+  const [distChannelsSaving, setDistChannelsSaving] = useState(false)
+  const [newDistChannel, setNewDistChannel] = useState("")
 
   // Snapshot restore (Layer 3)
   const [snapshotUser, setSnapshotUser] = useState<UserRow | null>(null)
@@ -385,6 +389,44 @@ export default function ImpersonatePage() {
       toast({ title: 'שגיאה בשמירת שאלות GEO', description: e?.message, variant: 'destructive' })
     } finally {
       setGeoQueriesSaving(false)
+    }
+  }
+
+  // ── Distribution channels editor (mirrors the GEO queries editor) ─────────
+  // Writes business_profile.distributionChannels (+ the mirrored column) via
+  // /api/admin/distribution-channels.
+  useEffect(() => {
+    if (!moduleSyncUser) { setDistChannels([]); setNewDistChannel(""); return }
+    let cancelled = false
+    setDistChannelsLoading(true)
+    fetch(`/api/admin/distribution-channels?company_id=${moduleSyncUser.id}`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return
+        setDistChannels(Array.isArray(data.distributionChannels) ? data.distributionChannels : [])
+      })
+      .catch(() => { if (!cancelled) setDistChannels([]) })
+      .finally(() => { if (!cancelled) setDistChannelsLoading(false) })
+    return () => { cancelled = true }
+  }, [moduleSyncUser])
+
+  async function saveDistChannels() {
+    if (!moduleSyncUser) return
+    setDistChannelsSaving(true)
+    try {
+      const res = await fetch('/api/admin/distribution-channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: moduleSyncUser.id, distributionChannels: distChannels }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setDistChannels(Array.isArray(data.distributionChannels) ? data.distributionChannels : distChannels)
+      toast({ title: '✅ ערוצי הפצה נשמרו', description: `${data.distributionChannels?.length ?? 0} ערוצים` })
+    } catch (e: any) {
+      toast({ title: 'שגיאה בשמירת ערוצי הפצה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setDistChannelsSaving(false)
     }
   }
 
@@ -864,6 +906,88 @@ export default function ImpersonatePage() {
                         ? <Loader2 className="h-4 w-4 animate-spin ml-2" />
                         : <Save className="h-4 w-4 ml-2" />}
                       שמור שאלות GEO
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* ── Distribution channels editor ── */}
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    🚚 ערוצי הפצה
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    ערוצי ההפצה של העסק. נוצרים בהרשמה ואינם מתרעננים בסריקות — כאן ניתן לערוך ידנית (הוספה/הסרה/החלפה). הלקוח יכול להסיר ערוצים בהגדרות.
+                  </p>
+                </div>
+
+                {distChannelsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> טוען...
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      {distChannels.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">אין ערוצי הפצה — הוסף ידנית.</p>
+                      ) : (
+                        distChannels.map((c, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Input
+                              value={c}
+                              onChange={e => setDistChannels(prev => prev.map((x, idx) => idx === i ? e.target.value : x))}
+                              className="text-sm"
+                              dir="rtl"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 shrink-0 text-destructive"
+                              onClick={() => setDistChannels(prev => prev.filter((_, idx) => idx !== i))}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Input
+                        placeholder="הוסף ערוץ חדש..."
+                        value={newDistChannel}
+                        onChange={e => setNewDistChannel(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && newDistChannel.trim().length >= 1) {
+                            setDistChannels(prev => [...prev, newDistChannel.trim()])
+                            setNewDistChannel("")
+                          }
+                        }}
+                        className="text-sm"
+                        dir="rtl"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={newDistChannel.trim().length < 1}
+                        onClick={() => { setDistChannels(prev => [...prev, newDistChannel.trim()]); setNewDistChannel("") }}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={saveDistChannels}
+                      disabled={distChannelsSaving}
+                      className="w-full"
+                    >
+                      {distChannelsSaving
+                        ? <Loader2 className="h-4 w-4 animate-spin ml-2" />
+                        : <Save className="h-4 w-4 ml-2" />}
+                      שמור ערוצי הפצה
                     </Button>
                   </>
                 )}
