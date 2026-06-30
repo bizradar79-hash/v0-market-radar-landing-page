@@ -19,6 +19,10 @@ const MODULE_ROUTES: Record<string, string[]> = {
   conferences:    ['/api/generate-conferences'],
   tenders:        ['/api/find-tenders'],
   competitors:    ['/api/sync-profile-competitors', '/api/find-competitors'],
+  // Leads — distribution-channel-driven partner search (or customer fallback).
+  // force=true here bypasses the route's 7-day cache AND the sync/run ≥5-leads
+  // skip, so re-running after editing channels actually regenerates.
+  leads:          ['/api/generate-leads'],
   seo:            ['/api/generate-seo-ranking'],
   geo:            ['/api/generate-geo-ranking'],
   // The grouped `trends` button fans out to ALL THREE trend modules — including

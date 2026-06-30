@@ -54,6 +54,7 @@ const SYNC_MODULES = [
   { id: 'conferences', label: 'כנסים',      emoji: '🏛️' },
   { id: 'tenders',     label: 'מכרזים',     emoji: '📋' },
   { id: 'competitors', label: 'מתחרים',     emoji: '👥' },
+  { id: 'leads',       label: 'לידים',      emoji: '🎯' },
   { id: 'seo',         label: 'SEO',         emoji: '📈' },
   { id: 'geo',         label: 'GEO',         emoji: '🌐' },
   { id: 'trends',      label: 'טרנדים',     emoji: '📊' },
