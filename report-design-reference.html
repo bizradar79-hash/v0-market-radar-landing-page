@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>North Star Radar — דוח שבועי · משכנתא פלוס</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#14212d;
+    --ink-soft:#485866;
+    --ink-faint:#84939f;
+    --bg:#f4f7f6;
+    --card:#ffffff;
+    --line:#e0e7e4;
+    --teal:#0d9488;
+    --teal-bright:#10b981;
+    --teal-deep:#0a6b62;
+    --teal-wash:#e0f2ef;
+    --teal-glow:#ccfbf1;
+    --navy:#0f2033;
+    --navy-2:#16304a;
+    --amber:#d97706;
+    --amber-wash:#fef3c7;
+    --red:#dc2626;
+    --red-wash:#fee2e2;
+    --green:#16a34a;
+    --green-wash:#dcfce7;
+    --gold:#f59e0b;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Heebo',sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.65;
+    font-size:16px;
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:0 20px}
+
+  /* ===== Header ===== */
+  header{
+    background:linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 60%,#0d3b45 100%);
+    color:#fff;
+    padding:28px 0 36px;
+    position:relative;
+    overflow:hidden;
+  }
+  header::after{
+    content:'';position:absolute;inset-inline-end:-80px;top:-80px;width:280px;height:280px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(16,185,129,.22),transparent 65%);
+    pointer-events:none;
+  }
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:26px}
+  .brand svg{flex:none}
+  .brand-name{font-size:14px;font-weight:600;letter-spacing:.04em;color:#bcd2e2}
+  h1{
+    font-family:'Frank Ruhl Libre',serif;
+    font-weight:700;font-size:27px;line-height:1.3;color:#fff;
+  }
+  .report-meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13.5px;color:#93a9bb;margin-top:10px}
+  .report-meta b{color:#fff;font-weight:600}
+
+  /* ===== Achievement banner ===== */
+  .achieve{
+    margin-top:22px;
+    background:linear-gradient(120deg,rgba(16,185,129,.16),rgba(16,185,129,.05));
+    border:1px solid rgba(16,185,129,.45);
+    border-radius:14px;
+    padding:14px 18px;
+    display:flex;align-items:center;gap:14px;
+  }
+  .achieve .medal{font-size:28px;flex:none}
+  .achieve .a-title{font-weight:700;font-size:15.5px;color:#d7fff2}
+  .achieve .a-sub{font-size:13.5px;color:#9fc9bd}
+
+  /* ===== Thesis ===== */
+  .thesis{
+    background:var(--card);
+    border-bottom:1px solid var(--line);
+    padding:38px 0 30px;
+  }
+  .thesis p.big{
+    font-family:'Frank Ruhl Libre',serif;
+    font-size:28px;font-weight:500;line-height:1.45;color:var(--ink);
+    max-width:660px;
+  }
+  .thesis p.big em{
+    font-style:normal;font-weight:700;
+    background:linear-gradient(transparent 62%,var(--teal-glow) 62%);
+    color:var(--teal-deep);
+    padding:0 2px;
+  }
+  .thesis .sub{margin-top:12px;color:var(--ink-soft);font-size:15.5px;max-width:620px}
+
+  /* ===== Metrics strip ===== */
+  .metrics{background:var(--card);padding:26px 0 36px;border-bottom:1px solid var(--line)}
+  .metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:14px}
+  .metric{
+    background:var(--bg);border:1px solid var(--line);border-radius:14px;
+    padding:18px 16px 15px;position:relative;
+    transition:transform .15s;
+  }
+  .metric.hot{
+    background:linear-gradient(160deg,var(--teal-wash),#fff 70%);
+    border-color:var(--teal);
+    box-shadow:0 4px 18px -6px rgba(13,148,136,.25);
+  }
+  .metric .num{
+    font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:38px;line-height:1;
+    color:var(--ink);
+  }
+  .metric.hot .num{color:var(--teal-deep)}
+  .badge{
+    display:inline-flex;align-items:center;gap:3px;
+    font-family:'Heebo',sans-serif;font-size:12px;font-weight:800;
+    border-radius:20px;padding:2.5px 10px;margin-top:8px;
+  }
+  .badge.up{background:var(--green-wash);color:var(--green)}
+  .badge.down{background:var(--red-wash);color:var(--red)}
+  .badge.flat{background:#eef1f0;color:var(--ink-faint)}
+  .badge.new{background:var(--amber-wash);color:var(--amber)}
+  .metric .label{font-size:12.5px;color:var(--ink-soft);margin-top:9px;line-height:1.4;font-weight:500}
+
+  /* ===== Sections ===== */
+  section{padding:42px 0 8px}
+  .sec-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .sec-kicker{
+    font-size:12px;font-weight:800;letter-spacing:.06em;color:#fff;
+    background:var(--teal);border-radius:20px;padding:4px 14px;
+    box-shadow:0 2px 8px -2px rgba(13,148,136,.4);
+  }
+  h2{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:23px}
+  .sec-bottomline{
+    font-size:15.5px;color:var(--ink-soft);margin:6px 0 20px;max-width:660px;
+  }
+  .sec-bottomline b{color:var(--ink);background:linear-gradient(transparent 65%,var(--teal-glow) 65%)}
+
+  /* ===== Action cards ===== */
+  .action{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:20px 22px;margin-bottom:14px;
+    display:flex;gap:16px;align-items:flex-start;
+    border-inline-start:5px solid var(--teal);
+    box-shadow:0 2px 10px -4px rgba(20,33,45,.08);
+    position:relative;
+  }
+  .action.urgent{
+    border-inline-start-color:var(--red);
+    background:linear-gradient(120deg,#fff 82%,var(--red-wash));
+  }
+  .action.watch{border-inline-start-color:var(--amber)}
+  .action-num{
+    flex:none;width:34px;height:34px;border-radius:10px;
+    background:var(--navy);color:#fff;
+    font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:18px;
+    display:flex;align-items:center;justify-content:center;margin-top:2px;
+  }
+  .action-body{flex:1}
+  .action-title{font-weight:700;font-size:17px;line-height:1.4}
+  .action-why{color:var(--ink-soft);font-size:14.5px;margin-top:6px}
+  .action-why b{color:var(--ink)}
+  .action-src{font-size:12.5px;color:var(--ink-faint);margin-top:9px}
+  .chip{
+    flex:none;font-size:12px;font-weight:800;border-radius:20px;padding:4px 13px;margin-top:2px;
+  }
+  .chip.urgent{background:var(--red);color:#fff;box-shadow:0 2px 8px -2px rgba(220,38,38,.5)}
+  .chip.watch{background:var(--amber);color:#fff}
+  .chip.go{background:var(--teal-bright);color:#fff;box-shadow:0 2px 8px -2px rgba(16,185,129,.5)}
+
+  /* ===== Cards & rows ===== */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    margin-bottom:14px;
+    box-shadow:0 2px 10px -4px rgba(20,33,45,.06);
+  }
+  .row{
+    padding:16px 22px;border-bottom:1px solid var(--line);
+    display:flex;gap:14px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;
+  }
+  .row:last-child{border-bottom:none}
+  .row.hot-row{background:linear-gradient(120deg,var(--teal-wash) 0%,#fff 55%)}
+  .row-main{flex:1;min-width:220px}
+  .row-title{font-weight:700;font-size:15.5px}
+  .row-sub{font-size:13.5px;color:var(--ink-soft);margin-top:3px}
+  .row-side{font-size:13px;color:var(--ink-faint);text-align:left;flex:none}
+  .row-side b{color:var(--ink);font-weight:700}
+  .pill{
+    display:inline-block;font-size:11.5px;font-weight:800;border-radius:14px;
+    padding:2.5px 11px;margin-inline-start:8px;vertical-align:2px;
+  }
+  .pill.teal{background:var(--teal);color:#fff}
+  .pill.amber{background:var(--amber-wash);color:var(--amber)}
+  .pill.red{background:var(--red-wash);color:var(--red);font-weight:800}
+  .deadline{color:var(--red);font-weight:800}
+  .score-pill{
+    display:inline-block;min-width:52px;text-align:center;
+    background:var(--teal-wash);color:var(--teal-deep);
+    font-weight:800;font-size:14px;border-radius:10px;padding:4px 10px;
+  }
+  .more-link{
+    display:block;text-align:center;padding:12px;font-size:13.5px;font-weight:700;
+    color:var(--teal-deep);text-decoration:none;background:#f8fbfa;
+  }
+  .more-link:hover{background:var(--teal-wash)}
+
+  /* competitor change strip */
+  .comp-change{
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:5px;font-size:13px;
+  }
+  .delta{
+    font-weight:800;font-size:12.5px;border-radius:8px;padding:2px 9px;
+  }
+  .delta.bad{background:var(--red-wash);color:var(--red)}
+  .delta.good{background:var(--green-wash);color:var(--green)}
+  .delta.neutral{background:#eef1f0;color:var(--ink-faint)}
+
+  /* rank visual */
+  .rank-row{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  .rank-row:last-child{border-bottom:none}
+  .rank-num{
+    font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:24px;color:#fff;
+    background:linear-gradient(135deg,var(--teal),var(--teal-bright));
+    border-radius:12px;width:48px;height:48px;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 3px 10px -3px rgba(13,148,136,.5);
+  }
+  .rank-num.warn{background:linear-gradient(135deg,var(--amber),#f59e0b);box-shadow:0 3px 10px -3px rgba(217,119,6,.5)}
+  .rank-main{flex:1}
+  .rank-title{font-weight:700;font-size:15px}
+  .rank-sub{font-size:13px;color:var(--ink-soft)}
+
+  .channel-tag{
+    font-size:12.5px;font-weight:800;color:var(--teal-deep);letter-spacing:.02em;
+    padding:15px 22px 5px;
+  }
+
+  /* ===== Next scan ===== */
+  .next{
+    background:linear-gradient(135deg,var(--navy),var(--navy-2));
+    color:#fff;border-radius:16px;
+    padding:28px 28px;margin:46px 0 0;
+    position:relative;overflow:hidden;
+  }
+  .next::after{
+    content:'';position:absolute;inset-inline-start:-60px;bottom:-60px;width:220px;height:220px;
+    border-radius:50%;
+    background:radial-gradient(circle,rgba(16,185,129,.18),transparent 65%);
+  }
+  .next h2{color:#fff;margin-bottom:8px;font-size:20px}
+  .next p{color:#bcd2e2;font-size:14.5px;max-width:580px;position:relative;z-index:1}
+  .next .date{margin-top:16px;font-size:13px;color:#93a9bb}
+  .next .date b{color:#3fd0ba}
+
+  footer{
+    padding:36px 0 44px;text-align:center;color:var(--ink-faint);font-size:12.5px;
+  }
+  footer a{color:var(--teal-deep);text-decoration:none;font-weight:700}
+  .foot-brand{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:8px;color:var(--ink-soft);font-weight:700;font-size:13px}
+
+  @media (max-width:560px){
+    .thesis p.big{font-size:23px}
+    h1{font-size:23px}
+    .metric .num{font-size:31px}
+    .row-side{text-align:right;width:100%}
+    .action{padding:16px}
+    .action-num{display:none}
+  }
+  @media print{
+    body{background:#fff}
+    .more-link{display:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ HEADER ============ -->
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <circle cx="13" cy="13" r="12" stroke="#2ea08f" stroke-width="1.4" opacity=".45"/>
+        <circle cx="13" cy="13" r="7.5" stroke="#2ea08f" stroke-width="1.2" opacity=".7"/>
+        <path d="M13 4.5 L14.6 11.4 L21.5 13 L14.6 14.6 L13 21.5 L11.4 14.6 L4.5 13 L11.4 11.4 Z" fill="#3fd0ba"/>
+      </svg>
+      <span class="brand-name">NORTH STAR RADAR · מודיעין שוק לעסק שלך</span>
+    </div>
+    <h1>הדוח השבועי של משכנתא פלוס</h1>
+    <div class="report-meta">
+      <span>סריקה מ־<b>29 ביוני 2026</b></span>
+      <span>תקופה: <b>23–29 ביוני</b></span>
+      <span>אזור פעילות: <b>ראשון לציון והמרכז</b></span>
+    </div>
+    <div class="achieve">
+      <span class="medal">🏆</span>
+      <div>
+        <div class="a-title">הישג השבוע: נכנסת ל־3 הגדולים בגוגל</div>
+        <div class="a-sub">"יועץ משכנתאות ראשון לציון" — ממקום 5 למקום 3, שבוע שלישי של עלייה רצופה</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ THESIS ============ -->
+<div class="thesis">
+  <div class="wrap">
+    <p class="big">שבוע חזק בדירוג — ו<em>שתי הזדמנויות עם דדליין</em> שכדאי לא לפספס.</p>
+    <p class="sub">העלייה במיקומי גוגל נמשכת, נפתח מכרז ליווי פיננסי שמתאים לך בול, ומתווך מוביל חדש זוהה באזור שלך. הנה מה שחשוב, לפי סדר עדיפות.</p>
+  </div>
+</div>
+
+<!-- ============ METRICS ============ -->
+<div class="metrics">
+  <div class="wrap">
+    <div class="metrics-grid">
+      <div class="metric hot">
+        <div class="num">4</div>
+        <div><span class="badge up">▲ ‎+2 מקומות</span></div>
+        <div class="label">מיקום ממוצע בגוגל<br>(5 מילות מפתח)</div>
+      </div>
+      <div class="metric hot">
+        <div class="num">#2</div>
+        <div><span class="badge up">▲ ‎+1</span></div>
+        <div class="label">מיקום בהמלצות AI<br>(ChatGPT, Gemini)</div>
+      </div>
+      <div class="metric">
+        <div class="num">3</div>
+        <div><span class="badge new">✦ 1 חדש</span></div>
+        <div class="label">מכרזים רלוונטיים<br>פתוחים כרגע</div>
+      </div>
+      <div class="metric">
+        <div class="num">5</div>
+        <div><span class="badge up">▲ ‎+3</span></div>
+        <div class="label">שותפים פוטנציאליים<br>חדשים שזוהו</div>
+      </div>
+      <div class="metric">
+        <div class="num">2</div>
+        <div><span class="badge flat">קרובים</span></div>
+        <div class="label">כנסים רלוונטיים<br>בחודשיים הקרובים</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ACTIONS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-kicker">מה לעשות השבוע</span>
+    </div>
+    <h2>שלוש פעולות, לפי סדר דחיפות</h2>
+    <p class="sec-bottomline">כל המלצה מבוססת על <b>נתון שנמצא בסריקה</b> — המקור מצוין מתחתיה.</p>
+
+    <div class="action urgent">
+      <div class="action-num">1</div>
+      <div class="action-body">
+        <div class="action-title">להגיש מועמדות למכרז ליווי פיננסי לרוכשי דירות — עיריית ראשון לציון</div>
+        <div class="action-why">המכרז נסגר ב־6 ביולי — <b>נשארו 7 ימים</b>. הדרישות תואמות את הפרופיל שלך: ייעוץ משכנתאות לזוגות צעירים, ניסיון 5+ שנים.</div>
+        <div class="action-src">מקור: מודול מכרזים · נמצא בסריקה של 29.6</div>
+      </div>
+      <span class="chip urgent">דדליין קרוב</span>
+    </div>
+
+    <div class="action">
+      <div class="action-num">2</div>
+      <div class="action-body">
+        <div class="action-title">ליצור קשר עם "רימקס מרכז העיר" — מתווך חדש ומוביל שזוהה באזורך</div>
+        <div class="action-why">משרד תיווך פעיל עם היקף עסקאות גבוה בראשון לציון, <b>ללא שיתוף פעולה מוכר עם יועץ משכנתאות</b>. ציון ליד: 85.</div>
+        <div class="action-src">מקור: מנוע שותפים · ערוץ "מתווכים" שהגדרת</div>
+      </div>
+      <span class="chip go">הזדמנות</span>
+    </div>
+
+    <div class="action watch">
+      <div class="action-num">3</div>
+      <div class="action-body">
+        <div class="action-title">לרענן את עמוד "מיחזור משכנתא" באתר — מתחרה עוקף אותך</div>
+        <div class="action-why">"משכנתא סמארט" עלו למקום 2 בגוגל על "מיחזור משכנתא" — מילת מפתח עם <b>2,400 חיפושים בחודש</b> שאתה במקום 5 בה.</div>
+        <div class="action-src">מקור: מעקב SEO + ניתוח מתחרים</div>
+      </div>
+      <span class="chip watch">לתשומת לב</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ COMPETITORS (moved up) ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">מתחרים</span></div>
+    <h2>מה קרה אצל המתחרים שלך השבוע</h2>
+    <p class="sec-bottomline"><b>תנועה אחת משמעותית</b> — והיא קשורה ישירות להמלצה מס' 3 למעלה. השאר יציבים.</p>
+    <div class="card">
+      <div class="row hot-row">
+        <div class="row-main">
+          <div class="row-title">משכנתא סמארט <span class="pill red">שינוי בולט</span></div>
+          <div class="row-sub">פרסמו מדריך מיחזור חדש ועלו למקום 2 בגוגל על "מיחזור משכנתא"</div>
+          <div class="comp-change">
+            <span class="delta bad">דירוג: 5 ← 2 ▲</span>
+            <span class="delta neutral">תוכן חדש באתר</span>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">גיל יועצים פיננסיים</div>
+          <div class="row-sub">ללא שינוי מהותי · דירוג יציב · 4.9★ בגוגל (67 ביקורות)</div>
+          <div class="comp-change">
+            <span class="delta neutral">יציב</span>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">המומחים למשכנתא</div>
+          <div class="row-sub">ירידה קלה בנראות · ביקורת שלילית חדשה בגוגל</div>
+          <div class="comp-change">
+            <span class="delta good">נראות: ירידה ▼</span>
+            <span class="delta bad">ביקורת 3★ חדשה</span>
+          </div>
+        </div>
+      </div>
+      <a class="more-link" href="#">לניתוח המתחרים המלא — כולל ביקורות ומגמות ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TENDERS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">מכרזים</span></div>
+    <h2>3 מכרזים פתוחים רלוונטיים</h2>
+    <p class="sec-bottomline"><b>אחד חדש השבוע</b> — וזו ההתאמה הטובה ביותר שנמצאה החודש.</p>
+    <div class="card">
+      <div class="row hot-row">
+        <div class="row-main">
+          <div class="row-title">ליווי פיננסי לרוכשי דירות ראשונות <span class="pill teal">חדש · התאמה 92%</span></div>
+          <div class="row-sub">עיריית ראשון לציון · היקף משוער: 180,000 ₪ לשנה</div>
+        </div>
+        <div class="row-side"><span class="deadline">⏳ נסגר בעוד 7 ימים</span></div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">ייעוץ כלכלי למשפחות — מחלקת רווחה <span class="pill amber">התאמה 71%</span></div>
+          <div class="row-sub">עיריית חולון · מסגרת שנתית</div>
+        </div>
+        <div class="row-side">נסגר בעוד 19 ימים</div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">הרצאות חינוך פיננסי לעובדים <span class="pill amber">התאמה 64%</span></div>
+          <div class="row-sub">חברת נמלי ישראל · מאגר ספקים</div>
+        </div>
+        <div class="row-side">פתוח — ללא מועד</div>
+      </div>
+      <a class="more-link" href="#">לכל המכרזים במערכת ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PARTNERS / LEADS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">שותפים ולידים</span></div>
+    <h2>5 שותפים פוטנציאליים חדשים</h2>
+    <p class="sec-bottomline">לפי ערוצי ההפצה שהגדרת: <b>מתווכים, קבלנים, עו"ד נדל"ן</b>. כל האתרים אומתו ✓</p>
+    <div class="card">
+      <div class="channel-tag">🏠 מתווכים</div>
+      <div class="row hot-row">
+        <div class="row-main">
+          <div class="row-title">רימקס מרכז העיר — ראשון לציון <span class="pill teal">מוביל</span></div>
+          <div class="row-sub">משרד מוביל בהיקף עסקאות · אין להם יועץ משכנתאות קבוע</div>
+        </div>
+        <div class="row-side"><span class="score-pill">85</span></div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">אנגלו סכסון ראשל"צ מערב</div>
+          <div class="row-sub">מתמחים בדירות יד שנייה — קהל היעד המרכזי שלך</div>
+        </div>
+        <div class="row-side"><span class="score-pill">78</span></div>
+      </div>
+      <div class="channel-tag">🏗️ קבלנים</div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">קופמן יזמות ובנייה</div>
+          <div class="row-sub">מעל 1,500 יח"ד בבנייה במרכז · מחפשים ייעוץ משכנתאות לרוכשים</div>
+        </div>
+        <div class="row-side"><span class="score-pill">80</span></div>
+      </div>
+      <div class="channel-tag">⚖️ עו"ד נדל"ן</div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">משרד עו"ד לוי־ברק ושות'</div>
+          <div class="row-sub">מלווים כ־40 עסקאות נדל"ן בחודש באזור המרכז</div>
+        </div>
+        <div class="row-side"><span class="score-pill">74</span></div>
+      </div>
+      <a class="more-link" href="#">לכל השותפים במערכת ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SEO / GEO ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">איך מוצאים אותך</span></div>
+    <h2>הדירוג שלך בגוגל ובמנועי AI</h2>
+    <p class="sec-bottomline"><b>מגמה חיובית שבוע שלישי ברציפות.</b> ככה אתה נראה כשמחפשים יועץ משכנתאות באזורך:</p>
+    <div class="card">
+      <div class="rank-row">
+        <div class="rank-num">3</div>
+        <div class="rank-main">
+          <div class="rank-title">"יועץ משכנתאות ראשון לציון"</div>
+          <div class="rank-sub">גוגל · 1,900 חיפושים בחודש</div>
+        </div>
+        <span class="badge up">▲ ‎+2</span>
+      </div>
+      <div class="rank-row">
+        <div class="rank-num">2</div>
+        <div class="rank-main">
+          <div class="rank-title">המלצות ChatGPT — "יועץ משכנתאות מומלץ במרכז"</div>
+          <div class="rank-sub">מתוך 10 עסקים שמוזכרים · אתה מעל כל המתחרים הישירים</div>
+        </div>
+        <span class="badge up">▲ ‎+1</span>
+      </div>
+      <div class="rank-row">
+        <div class="rank-num warn">5</div>
+        <div class="rank-main">
+          <div class="rank-title">"מיחזור משכנתא"</div>
+          <div class="rank-sub">גוגל · 2,400 חיפושים בחודש · "משכנתא סמארט" עלו למקום 2</div>
+        </div>
+        <span class="badge down">▼ ‎−1</span>
+      </div>
+      <a class="more-link" href="#">לדוח הדירוג המלא במערכת ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TRENDS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">טרנדים ומילות מפתח</span></div>
+    <h2>מה עולה בשוק שלך</h2>
+    <p class="sec-bottomline"><b>"מיחזור משכנתא" ממשיך לטפס</b> — ההזדמנות התוכנית המרכזית שלך כרגע.</p>
+    <div class="card">
+      <div class="row hot-row">
+        <div class="row-main">
+          <div class="row-title">מיחזור משכנתא <span class="pill red">🔥 חם</span></div>
+          <div class="row-sub">2,400 חיפושים בחודש</div>
+        </div>
+        <div class="row-side"><span class="badge up">▲ ‎+18%</span></div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">משכנתא לדירה ראשונה</div>
+          <div class="row-sub">3,600 חיפושים בחודש</div>
+        </div>
+        <div class="row-side"><span class="badge up">▲ ‎+6%</span></div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">ייעוץ משכנתאות מחיר</div>
+          <div class="row-sub">880 חיפושים בחודש</div>
+        </div>
+        <div class="row-side"><span class="badge flat">יציב</span></div>
+      </div>
+      <a class="more-link" href="#">לניתוח הטרנדים המלא ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONFERENCES ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">כנסים ואירועים</span></div>
+    <h2>2 אירועים ששווים את הזמן שלך</h2>
+    <p class="sec-bottomline">שניהם באזור המרכז, בחודשיים הקרובים. <b>הלינקים אומתו ✓</b></p>
+    <div class="card">
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">ועידת הנדל"ן והמימון של ישראל <span class="pill teal">התאמה גבוהה</span></div>
+          <div class="row-sub">תל אביב · 14 באוגוסט · הזדמנות נטוורקינג עם מתווכים וקבלנים</div>
+        </div>
+        <div class="row-side">הרשמה פתוחה</div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">מפגש איגוד יועצי המשכנתאות — מחוז מרכז</div>
+          <div class="row-sub">ראשון לציון · 3 בספטמבר</div>
+        </div>
+        <div class="row-side">ללא עלות</div>
+      </div>
+      <a class="more-link" href="#">לכל הכנסים במערכת ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ NEWS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-kicker">חדשות רלוונטיות</span></div>
+    <h2>שתי ידיעות ששוות דקה</h2>
+    <p class="sec-bottomline"><b>הריבית במוקד</b> — צפויה הכרעה שתשפיע ישירות על שוק המיחזורים.</p>
+    <div class="card">
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">בנק ישראל צפוי להכריע על הריבית ב־8 ביולי <span class="pill amber">רלוונטי אליך</span></div>
+          <div class="row-sub">הורדה נוספת צפויה להגדיל את הביקוש למיחזורי משכנתא — התכונן לגל פניות</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title">רפורמת "משכנתא בקליק" יוצאת לדרך ברבעון הבא</div>
+          <div class="row-sub">הבנקים יחויבו בשקיפות מלאה בהצעות — יתרון ליועצים שיודעים להשוות</div>
+        </div>
+      </div>
+      <a class="more-link" href="#">לכל החדשות במערכת ←</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ NEXT ============ -->
+<section>
+  <div class="wrap">
+    <div class="next">
+      <h2>מה בסריקה הבאה</h2>
+      <p>נעקוב אחרי החלטת הריבית של בנק ישראל והשפעתה על חיפושי המיחזור, נבדוק אם רענון התוכן החזיר אותך למקום 3, ונרחיב את סריקת השותפים לערוץ חדש שהוגדר: <b style="color:#3fd0ba">סוכני ביטוח</b>.</p>
+      <div class="date">הסריקה הבאה: <b>יום שני, 6 ביולי 2026</b> · הדוח יגיע אליך אוטומטית</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-brand">
+      <svg width="16" height="16" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <circle cx="13" cy="13" r="12" stroke="#0d9488" stroke-width="1.6" opacity=".4"/>
+        <path d="M13 4.5 L14.6 11.4 L21.5 13 L14.6 14.6 L13 21.5 L11.4 14.6 L4.5 13 L11.4 11.4 Z" fill="#0d9488"/>
+      </svg>
+      North Star Radar
+    </div>
+    הדוח הופק אוטומטית מסריקת השוק של 29.6.2026 · <a href="#">לצפייה בדוחות קודמים</a> · <a href="#">לכניסה למערכת</a>
+  </div>
+</footer>
+
+</body>
+</html>
