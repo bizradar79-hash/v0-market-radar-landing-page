@@ -4,6 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { validateUrl } from '@/lib/ai'
 import { findRealUrl } from '@/lib/call-model'
+import { channelsSig } from '@/lib/leads/channels-sig'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -78,6 +79,19 @@ export async function POST(request: Request) {
     const isInternational = geoContext.includes('בינלאומי')
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+
+    // Persist the distribution-channels fingerprint so sync/run's change-gate
+    // stays accurate. Computed from the RAW distributionChannels (same input the
+    // gate hashes) → adds/removes/renames flip it, unchanged sets stay stable
+    // ('empty' when none). Called on every SUCCESSFUL run (weekly/initial/admin).
+    const persistChannelsSig = async () => {
+      try {
+        const merged = { ...(businessProfile ?? {}), leadsChannelsSig: channelsSig(businessProfile?.distributionChannels) }
+        await ctx.supabase.from('companies').update({ business_profile: merged as any }).eq('id', ctx.user.id)
+      } catch (e: any) {
+        console.warn('[generate-leads] channels-sig persist failed:', e?.message)
+      }
+    }
 
     // Explicit client area for geo-targeting (city → geographic_area → country).
     const city = (ctx.company?.city || '').trim()
@@ -203,6 +217,7 @@ export async function POST(request: Request) {
     await ctx.supabase.from('leads').delete().eq('company_id', ctx.user.id)
 
     if (list.length === 0) {
+      await persistChannelsSig() // channels were processed — record sig so we don't re-run unchanged
       await cost.flush()
       return NextResponse.json({ success: true, count: 0, mode: steps.mode, steps })
     }
@@ -236,6 +251,7 @@ export async function POST(request: Request) {
       is_read: false,
     })
 
+    await persistChannelsSig() // successful run — update fingerprint (weekly/initial/admin)
     await cost.flush()
     return NextResponse.json({ success: true, count: saved?.length || 0, mode: steps.mode, steps })
   } catch (e: any) {

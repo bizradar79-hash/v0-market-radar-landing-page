@@ -10,6 +10,7 @@ import {
   finishScan, ScanAbortError, type ScanProfile, type ModuleStatus as BreakerModuleStatus,
 } from '@/lib/scan/breaker'
 import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
+import { channelsSig } from '@/lib/leads/channels-sig'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -130,7 +131,9 @@ export async function POST(request: Request) {
     'competitors',          // competitor DISCOVERY (expensive)
     'competitor_ratings',   // Google Places sweep
     'review_analysis',      // analyze-company-reviews (the runaway)
-    'leads',                // lead generation
+    // 'leads' is NOT weekly-skipped anymore: its runStep gates on a channels
+    // fingerprint (run only when distribution channels changed / leads empty),
+    // so unchanged weeks cost nothing without hard-skipping the module.
     'niche_opportunities',  // niche AI generation
   ])
   const isSkipped = (moduleId: string) => isWeekly && WEEKLY_SKIP.has(moduleId)
@@ -404,13 +407,29 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} conferences` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 8. Leads — initial only (weekly skips), and only when below threshold.
+    // 8. Leads — change-based gate. Runs (incl. weekly) ONLY when the
+    // distribution-channel set changed since the last successful run, or leads
+    // are empty. Channel-driven leads cost ~20 web_search calls, so unchanged
+    // weeks must cost nothing. generate-leads persists the fingerprint on every
+    // successful run (weekly/initial/admin) so the signal stays accurate. The
+    // manual admin 🎯 button calls generate-leads directly (force) and bypasses
+    // this gate entirely.
     await runStep('leads', async () => {
+      const { data: co } = await adminDb
+        .from('companies').select('business_profile').eq('id', companyId).single()
+      const bp = (co?.business_profile ?? null) as any
+      const currentSig = channelsSig(bp?.distributionChannels)
+      const storedSig = typeof bp?.leadsChannelsSig === 'string' ? bp.leadsChannelsSig : null
+
       const { count: leadsCount } = await adminDb
         .from('leads').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
-      if ((leadsCount ?? 0) >= 5) return { status: 'skipped', message: `already have ${leadsCount} leads` }
+      const empty = (leadsCount ?? 0) === 0
+
+      if (!empty && storedSig === currentSig) {
+        return { status: 'skipped', message: `channels unchanged (${currentSig.slice(0, 24)})` }
+      }
       const r = await callModule(origin, '/api/generate-leads', companyId!)
-      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} leads` : (r.body?.error ?? `HTTP ${r.status}`) }
+      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} leads (${r.body?.mode ?? '?'})` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
     // 9. Weekly actions
