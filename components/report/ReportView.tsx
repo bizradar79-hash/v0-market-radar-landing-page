@@ -87,6 +87,24 @@ const REPORT_CSS = `
   .rpt .rank-title{font-weight:700;font-size:15px}
   .rpt .rank-sub{font-size:13px;color:var(--ink-soft)}
   .rpt .channel-tag{font-size:12.5px;font-weight:800;color:var(--teal-deep);letter-spacing:.02em;padding:15px 22px 5px}
+  .rpt .calm-note{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;color:var(--ink-soft);font-size:14.5px;box-shadow:0 2px 10px -4px rgba(20,33,45,.06)}
+  .rpt .lead-link{font-size:12.5px;font-weight:700;color:var(--teal-deep);text-decoration:none}
+  .rpt .lead-link:hover{text-decoration:underline}
+  .rpt .ai-engines{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 22px;border-bottom:1px solid var(--line)}
+  .rpt .ai-eng{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center}
+  .rpt .ai-eng .eng-name{font-size:12px;font-weight:700;color:var(--ink-soft)}
+  .rpt .ai-eng .eng-rank{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:26px;line-height:1.1;margin-top:4px;color:var(--ink)}
+  .rpt .ai-eng.on{background:linear-gradient(160deg,var(--teal-wash),#fff 70%);border-color:var(--teal)}
+  .rpt .ai-eng.on .eng-rank{color:var(--teal-deep)}
+  .rpt .ai-eng.off .eng-rank{color:var(--ink-faint)}
+  .rpt .ai-q{font-size:13px;color:var(--ink-soft);padding:14px 22px 0}
+  .rpt .ai-q b{color:var(--ink)}
+  .rpt .demand{padding:16px 22px 18px;border-bottom:1px solid var(--line)}
+  .rpt .demand-head{font-size:12.5px;font-weight:700;color:var(--ink-soft);margin-bottom:10px}
+  .rpt .demand-head b{color:var(--ink)}
+  .rpt .spark{display:flex;align-items:flex-end;gap:3px;height:56px}
+  .rpt .spark .bar{flex:1;background:linear-gradient(180deg,var(--teal-bright),var(--teal));border-radius:3px 3px 0 0;min-height:3px}
+  .rpt .spark .bar.last{background:linear-gradient(180deg,var(--gold),var(--amber))}
   .rpt .next{background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;border-radius:16px;padding:28px 28px;margin:46px 0 0;position:relative;overflow:hidden}
   .rpt .next::after{content:'';position:absolute;inset-inline-start:-60px;bottom:-60px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(16,185,129,.18),transparent 65%)}
   .rpt .next h2{color:#fff;margin-bottom:8px;font-size:20px}
@@ -106,6 +124,25 @@ const STAR_SVG = (
     <path d="M13 4.5 L14.6 11.4 L21.5 13 L14.6 14.6 L13 21.5 L11.4 14.6 L4.5 13 L11.4 11.4 Z" fill="#3fd0ba" />
   </svg>
 )
+
+// Inline demand sparkline — no chart library. Bars read oldest→newest (dir=ltr),
+// last month highlighted. Heights scale to the series max.
+function DemandSpark({ series }: { series: number[] }) {
+  const max = Math.max(...series, 1)
+  const bars = series.slice(-12)
+  return (
+    <div className="spark" dir="ltr">
+      {bars.map((v, i) => (
+        <div
+          key={i}
+          className={`bar${i === bars.length - 1 ? ' last' : ''}`}
+          style={{ height: `${Math.max(6, Math.round((v / max) * 100))}%` }}
+          title={String(v)}
+        />
+      ))}
+    </div>
+  )
+}
 
 export default function ReportView({ data: r, archive }: { data: ReportData; archive?: { label: string } }) {
   return (
@@ -186,26 +223,30 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
         </section>
       )}
 
-      {/* COMPETITORS */}
-      {r.competitors.length > 0 && (
+      {/* COMPETITORS — changes only, or a calm line */}
+      {(r.competitors.length > 0 || r.competitorsNote) && (
         <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">מתחרים</span></div>
-            <h2>מה קורה אצל המתחרים שלך</h2>
-            <div className="card">
-              {r.competitors.map((c, i) => (
-                <div className={`row${c.hot ? ' hot-row' : ''}`} key={i}>
-                  <div className="row-main">
-                    <div className="row-title">{c.name}{c.hot && <span className="pill red">שינוי בולט</span>}</div>
-                    {c.sub && <div className="row-sub">{c.sub}</div>}
-                    <div className="comp-change">
-                      {c.deltas.map((d, j) => <span className={`delta ${d.kind}`} key={j}>{d.text}</span>)}
+            <h2>מה השתנה אצל המתחרים שלך</h2>
+            {r.competitors.length > 0 ? (
+              <div className="card">
+                {r.competitors.map((c, i) => (
+                  <div className={`row${c.hot ? ' hot-row' : ''}`} key={i}>
+                    <div className="row-main">
+                      <div className="row-title">{c.name}{c.hot && <span className="pill amber">שינוי בולט</span>}</div>
+                      {c.sub && <div className="row-sub">{c.sub}</div>}
+                      <div className="comp-change">
+                        {c.deltas.map((d, j) => <span className={`delta ${d.kind}`} key={j}>{d.text}</span>)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              <a className="more-link" href="/app/competitors">לניתוח המתחרים המלא במערכת ←</a>
-            </div>
+                ))}
+                <a className="more-link" href="/app/competitors">לניתוח המתחרים המלא במערכת ←</a>
+              </div>
+            ) : (
+              <div className="calm-note">{r.competitorsNote}</div>
+            )}
           </div>
         </section>
       )}
@@ -232,24 +273,28 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
         </section>
       )}
 
-      {/* PARTNERS / LEADS */}
+      {/* PARTNERS / LEADS — word tags, verified links, no numeric scores */}
       {r.leadGroups.length > 0 && (
         <section>
           <div className="wrap">
-            <div className="sec-head"><span className="sec-kicker">שותפים ולידים</span></div>
-            <h2>שותפים פוטנציאליים שזוהו</h2>
+            <div className="sec-head"><span className="sec-kicker">שותפים וערוצי הפצה</span></div>
+            <h2>שותפים וערוצי הפצה פוטנציאליים</h2>
             <p className="sec-bottomline">לפי ערוצי ההפצה שהגדרת. כל האתרים אומתו ✓</p>
             <div className="card">
               {r.leadGroups.map((g, gi) => (
                 <div key={gi}>
                   <div className="channel-tag">{g.channel}</div>
                   {g.leads.map((l, i) => (
-                    <div className={`row${l.hot ? ' hot-row' : ''}`} key={i}>
+                    <div className="row" key={i}>
                       <div className="row-main">
-                        <div className="row-title">{l.title}{l.hot && <span className="pill teal">מוביל</span>}</div>
+                        <div className="row-title">
+                          {l.website
+                            ? <a className="lead-link" href={l.website} target="_blank" rel="noopener noreferrer">{l.title}</a>
+                            : l.title}
+                          {l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}
+                        </div>
                         {l.sub && <div className="row-sub">{l.sub}</div>}
                       </div>
-                      <div className="row-side"><span className="score-pill">{l.score}</span></div>
                     </div>
                   ))}
                 </div>
@@ -260,15 +305,61 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
         </section>
       )}
 
-      {/* SEO / GEO */}
-      {r.seo.length > 0 && (
+      {/* SEO / GEO — focused: 1 primary keyword + 1 AI question (3 engines) + ≤3 expressions + demand */}
+      {(r.seoPrimary || r.seoAi || r.seo.length > 0) && (
         <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">איך מוצאים אותך</span></div>
             <h2>הדירוג שלך בגוגל ובמנועי AI</h2>
             <div className="card">
-              {r.seo.map((s, i) => (
+              {/* Primary Google keyword */}
+              {r.seoPrimary && (
+                <div className="rank-row">
+                  <div className={`rank-num${r.seoPrimary.warn ? ' warn' : ''}`}>{r.seoPrimary.rank}</div>
+                  <div className="rank-main">
+                    <div className="rank-title">{r.seoPrimary.query}</div>
+                    <div className="rank-sub">{r.seoPrimary.sub}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Demand sparkline for the primary keyword */}
+              {r.demand && r.demand.series.length >= 3 && (
+                <div className="demand">
+                  <div className="demand-head"><b>{r.demand.label}</b> · "{r.demand.keyword}"</div>
+                  <DemandSpark series={r.demand.series} />
+                </div>
+              )}
+
+              {/* Up to 2 more expressions (total ≤ 3) */}
+              {(r.seoExtras || []).map((s, i) => (
                 <div className="rank-row" key={i}>
+                  <div className={`rank-num${s.warn ? ' warn' : ''}`}>{s.rank}</div>
+                  <div className="rank-main">
+                    <div className="rank-title">{s.query}</div>
+                    <div className="rank-sub">{s.sub}</div>
+                  </div>
+                </div>
+              ))}
+
+              {/* One central AI question across the 3 engines */}
+              {r.seoAi && (
+                <>
+                  <div className="ai-q">שאלה במנועי AI: <b>"{r.seoAi.question}"</b></div>
+                  <div className="ai-engines">
+                    {r.seoAi.engines.map((e, i) => (
+                      <div className={`ai-eng ${e.appeared ? 'on' : 'off'}`} key={i}>
+                        <div className="eng-name">{e.name}</div>
+                        <div className="eng-rank">{e.rank}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Legacy fallback for older snapshots (no focused fields) */}
+              {!r.seoPrimary && !r.seoAi && r.seo.map((s, i) => (
+                <div className="rank-row" key={`legacy-${i}`}>
                   <div className={`rank-num${s.warn ? ' warn' : ''}`}>{s.rank}</div>
                   <div className="rank-main">
                     <div className="rank-title">{s.title}</div>
@@ -277,6 +368,7 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
                   {s.badge && <span className={`badge ${s.badge.kind}`}>{s.badge.text}</span>}
                 </div>
               ))}
+
               <a className="more-link" href="/app/seo-geo">לדוח הדירוג המלא במערכת ←</a>
             </div>
           </div>
@@ -293,7 +385,7 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
               {r.trends.map((t, i) => (
                 <div className={`row${t.hot ? ' hot-row' : ''}`} key={i}>
                   <div className="row-main">
-                    <div className="row-title">{t.title}{t.hot && <span className="pill red">🔥 חם</span>}</div>
+                    <div className="row-title">{t.title}{t.hot && <span className="pill amber">🔥 חם</span>}</div>
                     {t.sub && <div className="row-sub">{t.sub}</div>}
                   </div>
                   <div className="row-side"><span className={`badge ${t.badge.kind}`}>{t.badge.text}</span></div>
