@@ -83,6 +83,7 @@ const REPORT_CSS = `
   .rpt .rank-row:last-child{border-bottom:none}
   .rpt .rank-num{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:24px;color:#fff;background:linear-gradient(135deg,var(--teal),var(--teal-bright));border-radius:12px;width:48px;height:48px;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px -3px rgba(13,148,136,.5)}
   .rpt .rank-num.warn{background:linear-gradient(135deg,var(--amber),#f59e0b);box-shadow:0 3px 10px -3px rgba(217,119,6,.5)}
+  .rpt .rank-unranked{flex:none;min-width:48px;min-height:48px;padding:6px 10px;border-radius:12px;background:#eef1f0;color:var(--ink-faint);font-size:11.5px;font-weight:700;line-height:1.3;display:flex;align-items:center;justify-content:center;text-align:center}
   .rpt .rank-main{flex:1}
   .rpt .rank-title{font-weight:700;font-size:15px}
   .rpt .rank-sub{font-size:13px;color:var(--ink-soft)}
@@ -312,50 +313,64 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
             <div className="sec-head"><span className="sec-kicker">איך מוצאים אותך</span></div>
             <h2>הדירוג שלך בגוגל ובמנועי AI</h2>
             <div className="card">
-              {/* Primary Google keyword */}
-              {r.seoPrimary && (
-                <div className="rank-row">
-                  <div className={`rank-num${r.seoPrimary.warn ? ' warn' : ''}`}>{r.seoPrimary.rank}</div>
-                  <div className="rank-main">
-                    <div className="rank-title">{r.seoPrimary.query}</div>
-                    <div className="rank-sub">{r.seoPrimary.sub}</div>
-                  </div>
-                </div>
-              )}
+              {(() => {
+                // Unranked (not found in Google top 100) → a calm muted label, not a bare dash.
+                const rankCell = (row: { rank: string; warn?: boolean; unranked?: boolean }) =>
+                  row.unranked
+                    ? <div className="rank-unranked">לא מדורג<br />עדיין</div>
+                    : <div className={`rank-num${row.warn ? ' warn' : ''}`}>{row.rank}</div>
 
-              {/* Demand sparkline for the primary keyword */}
-              {r.demand && r.demand.series.length >= 3 && (
-                <div className="demand">
-                  <div className="demand-head"><b>{r.demand.label}</b> · "{r.demand.keyword}"</div>
-                  <DemandSpark series={r.demand.series} />
-                </div>
-              )}
-
-              {/* Up to 2 more expressions (total ≤ 3) */}
-              {(r.seoExtras || []).map((s, i) => (
-                <div className="rank-row" key={i}>
-                  <div className={`rank-num${s.warn ? ' warn' : ''}`}>{s.rank}</div>
-                  <div className="rank-main">
-                    <div className="rank-title">{s.query}</div>
-                    <div className="rank-sub">{s.sub}</div>
-                  </div>
-                </div>
-              ))}
-
-              {/* One central AI question across the 3 engines */}
-              {r.seoAi && (
-                <>
-                  <div className="ai-q">שאלה במנועי AI: <b>"{r.seoAi.question}"</b></div>
-                  <div className="ai-engines">
-                    {r.seoAi.engines.map((e, i) => (
-                      <div className={`ai-eng ${e.appeared ? 'on' : 'off'}`} key={i}>
-                        <div className="eng-name">{e.name}</div>
-                        <div className="eng-rank">{e.rank}</div>
+                const googleBlock = (
+                  <>
+                    {/* Primary Google keyword */}
+                    {r.seoPrimary && (
+                      <div className="rank-row">
+                        {rankCell(r.seoPrimary)}
+                        <div className="rank-main">
+                          <div className="rank-title">{r.seoPrimary.query}</div>
+                          <div className="rank-sub">{r.seoPrimary.sub}</div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Demand sparkline for the primary keyword */}
+                    {r.demand && r.demand.series.length >= 3 && (
+                      <div className="demand">
+                        <div className="demand-head"><b>{r.demand.label}</b> · "{r.demand.keyword}"</div>
+                        <DemandSpark series={r.demand.series} />
+                      </div>
+                    )}
+                    {/* Up to 2 more expressions (total ≤ 3) */}
+                    {(r.seoExtras || []).map((s, i) => (
+                      <div className="rank-row" key={i}>
+                        {rankCell(s)}
+                        <div className="rank-main">
+                          <div className="rank-title">{s.query}</div>
+                          <div className="rank-sub">{s.sub}</div>
+                        </div>
                       </div>
                     ))}
-                  </div>
-                </>
-              )}
+                  </>
+                )
+
+                const aiBlock = r.seoAi ? (
+                  <>
+                    <div className="ai-q">שאלה במנועי AI: <b>"{r.seoAi.question}"</b></div>
+                    <div className="ai-engines">
+                      {r.seoAi.engines.map((e, i) => (
+                        <div className={`ai-eng ${e.appeared ? 'on' : 'off'}`} key={i}>
+                          <div className="eng-name">{e.name}</div>
+                          <div className="eng-rank">{e.rank}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null
+
+                // AI-first when the client has no Google rank but shows in AI engines.
+                return r.seoAiFirst
+                  ? <>{aiBlock}{googleBlock}</>
+                  : <>{googleBlock}{aiBlock}</>
+              })()}
 
               {/* Legacy fallback for older snapshots (no focused fields) */}
               {!r.seoPrimary && !r.seoAi && r.seo.map((s, i) => (

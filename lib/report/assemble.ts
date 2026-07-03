@@ -53,9 +53,10 @@ export interface ReportData {
   // Legacy flat list — kept so older snapshots still render. New reports populate
   // the focused fields below and leave this empty.
   seo: Array<{ rank: string; title: string; sub: string; badge?: { kind: 'up' | 'down' | 'flat'; text: string }; warn?: boolean }>
-  seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean } | null
+  seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean } | null
   seoAi?: { question: string; engines: Array<{ name: string; rank: string; appeared: boolean }> } | null
-  seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean }>
+  seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean }>
+  seoAiFirst?: boolean   // lead with the AI block when the client has no Google rank but shows in AI
   demand?: { keyword: string; series: number[]; label: string } | null
   trends: Array<{ title: string; sub: string; badge: { kind: 'up' | 'down' | 'flat'; text: string }; hot?: boolean }>
   conferences: Array<{ title: string; sub: string; side: string; pill?: string }>
@@ -208,7 +209,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   if (geoPos != null) metrics.push({ num: `#${geoPos}`, label: 'מיקום בהמלצות AI<br>(ChatGPT, Gemini)', hot: geoPos <= 3 })
   if (openTenders.length) metrics.push({ num: String(openTenders.length), label: 'מכרזים רלוונטיים<br>פתוחים כרגע' })
   if (leadsSorted.length) metrics.push({ num: String(leadsSorted.length), label: 'שותפים פוטנציאליים<br>שזוהו' })
-  if (upcomingConfs.length) metrics.push({ num: String(upcomingConfs.length), label: 'כנסים רלוונטיים<br>קרובים', badge: { kind: 'flat', text: 'קרובים' } })
+  if (upcomingConfs.length) metrics.push({ num: String(upcomingConfs.length), label: 'כנסים רלוונטיים<br>קרובים' })
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   // STEP 3 traffic-light discipline: RED (urgent) ONLY for real near-deadline
@@ -309,6 +310,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     return {
       query: v.query as string,
       rank: pos != null ? String(pos) : '—',
+      unranked: pos == null,   // not found in Google (beyond top 100)
       sub: `גוגל${vol ? ` · ${vol.toLocaleString('he-IL')} חיפושים בחודש` : ''}`,
       warn: pos != null && pos > 5,
     }
@@ -317,13 +319,13 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const primaryVariant = rankedSeo.find((v) => v.appeared && num(v.position) != null) || rankedSeo[0] || null
   const seoPrimaryRow = primaryVariant ? toSeoRow(primaryVariant) : null
   const seoPrimary: ReportData['seoPrimary'] = seoPrimaryRow
-    ? { query: `"${seoPrimaryRow.query}"`, rank: seoPrimaryRow.rank, sub: seoPrimaryRow.sub, warn: seoPrimaryRow.warn }
+    ? { query: `"${seoPrimaryRow.query}"`, rank: seoPrimaryRow.rank, sub: seoPrimaryRow.sub, warn: seoPrimaryRow.warn, unranked: seoPrimaryRow.unranked }
     : null
   // Up to 2 more expressions (total ≤ 3), excluding the primary.
   const seoExtras: ReportData['seoExtras'] = rankedSeo
     .filter((v) => v !== primaryVariant)
     .slice(0, 2)
-    .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn } })
+    .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked } })
 
   // ONE central AI question across the 3 engines side by side.
   const engObj = (geoRanking?.engines ?? {}) as any
@@ -341,6 +343,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         ],
       }
     : null
+
+  // FIX 1: lead with the AI block when the client has NO Google rank across the
+  // shown queries but DOES appear in an AI engine (that's where they shine).
+  const hasGoogleRank = (seoPrimary != null && !seoPrimary.unranked) || (seoExtras || []).some((e) => !e.unranked)
+  const hasAiPresence = !!seoAi && seoAi.engines.some((e) => e.appeared)
+  const seoAiFirst = !hasGoogleRank && hasAiPresence
 
   // Legacy flat list left empty — the focused fields above drive the new render.
   const seoOut: ReportData['seo'] = []
@@ -404,12 +412,22 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const periodStart = periodEnd ? new Date(periodEnd.getTime() - 6 * 86400000) : null
   const period = periodStart && periodEnd ? `${heDay(periodStart.toISOString())}–${heDay(periodEnd.toISOString())}` : ''
 
+  // FIX 2: the next-scan date must be a REAL future date. next_sync_at is
+  // sometimes missing or not advanced past the current scan — never show a date
+  // ≤ the current scan date; fall back to scan date + 7 days.
+  const dayOf = (d: Date) => d.toISOString().split('T')[0]
+  const scanRef = periodEnd || new Date()
+  let nextScanDate = company?.next_sync_at ? new Date(company.next_sync_at) : null
+  if (!nextScanDate || isNaN(nextScanDate.getTime()) || dayOf(nextScanDate) <= dayOf(scanRef)) {
+    nextScanDate = new Date(scanRef.getTime() + 7 * 86400000)
+  }
+
   return {
     companyName: company?.name || 'העסק שלך',
     scanDate,
     period,
     area,
-    nextScan: heDate(company?.next_sync_at),
+    nextScan: heDate(nextScanDate.toISOString()),
     achievement,
     thesis: { big: thesisBig, sub: thesisSub },
     metrics,
@@ -422,6 +440,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     seoPrimary,
     seoAi,
     seoExtras,
+    seoAiFirst,
     demand,
     trends: trendsOut,
     conferences: confsOut,
