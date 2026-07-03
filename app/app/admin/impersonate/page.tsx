@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
-  CalendarClock, Square, Plus, X, Save,
+  CalendarClock, Square, Plus, X, Save, Link2, Copy, Check,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
@@ -44,8 +44,18 @@ interface UserRow {
     next_sync_at: string | null
     sync_status: string | null
     sync_log: SyncLogEntry[] | null
+    report_token?: string | null
   } | null
 }
+
+interface ReportSnapshot {
+  id: string
+  snapshot_token: string
+  label: string | null
+  created_at: string
+}
+
+const REPORT_BASE = 'https://www.nsradar.co.il'
 
 type ModuleState = 'idle' | 'running' | 'ok' | 'error'
 
@@ -144,6 +154,10 @@ export default function ImpersonatePage() {
   const [distChannelsLoading, setDistChannelsLoading] = useState(false)
   const [distChannelsSaving, setDistChannelsSaving] = useState(false)
   const [newDistChannel, setNewDistChannel] = useState("")
+  const [reportSnapshots, setReportSnapshots] = useState<ReportSnapshot[]>([])
+  const [reportSnapshotsLoading, setReportSnapshotsLoading] = useState(false)
+  const [generatingReport, setGeneratingReport] = useState(false)
+  const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
   // Snapshot restore (Layer 3)
   const [snapshotUser, setSnapshotUser] = useState<UserRow | null>(null)
@@ -428,6 +442,51 @@ export default function ImpersonatePage() {
       toast({ title: 'שגיאה בשמירת ערוצי הפצה', description: e?.message, variant: 'destructive' })
     } finally {
       setDistChannelsSaving(false)
+    }
+  }
+
+  // ── Report links + archive snapshots ──────────────────────────────────────
+  function copyLink(url: string, token: string) {
+    navigator.clipboard?.writeText(url).then(() => {
+      setCopiedToken(token)
+      setTimeout(() => setCopiedToken(prev => (prev === token ? null : prev)), 1500)
+    }).catch(() => {})
+  }
+
+  // Load the client's report snapshots when the module dialog opens.
+  useEffect(() => {
+    if (!moduleSyncUser) { setReportSnapshots([]); return }
+    let cancelled = false
+    setReportSnapshotsLoading(true)
+    fetch(`/api/admin/report-snapshots?company_id=${moduleSyncUser.id}`)
+      .then(res => res.json())
+      .then(data => { if (!cancelled) setReportSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []) })
+      .catch(() => { if (!cancelled) setReportSnapshots([]) })
+      .finally(() => { if (!cancelled) setReportSnapshotsLoading(false) })
+    return () => { cancelled = true }
+  }, [moduleSyncUser])
+
+  // "צור דוח עדכני" — assemble CURRENT stored data into a fresh snapshot NOW.
+  // No scan, no AI — pure read-only assembly of what's stored.
+  async function generateFreshReport() {
+    if (!moduleSyncUser) return
+    setGeneratingReport(true)
+    try {
+      const res = await fetch('/api/admin/report-snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: moduleSyncUser.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      toast({ title: '✅ דוח עדכני נוצר', description: 'צילום מצב חדש נשמר בארכיון' })
+      // Refresh the list.
+      const list = await fetch(`/api/admin/report-snapshots?company_id=${moduleSyncUser.id}`).then(r => r.json()).catch(() => ({}))
+      setReportSnapshots(Array.isArray(list.snapshots) ? list.snapshots : reportSnapshots)
+    } catch (e: any) {
+      toast({ title: 'שגיאה ביצירת דוח', description: e?.message, variant: 'destructive' })
+    } finally {
+      setGeneratingReport(false)
     }
   }
 
@@ -751,6 +810,37 @@ export default function ImpersonatePage() {
                           <History className="h-3.5 w-3.5 ml-1" />
                           גיבויים
                         </Button>
+                        {/* Permanent client report link — copy + open */}
+                        {u.company?.report_token && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => copyLink(`${REPORT_BASE}/r/${u.company!.report_token}`, `t-${u.id}`)}
+                              title="העתק קישור לדוח הלקוח"
+                            >
+                              {copiedToken === `t-${u.id}`
+                                ? <Check className="h-3.5 w-3.5 ml-1 text-green-600" />
+                                : <Copy className="h-3.5 w-3.5 ml-1" />
+                              }
+                              קישור
+                            </Button>
+                            <Button
+                              asChild
+                              size="sm"
+                              variant="outline"
+                              title="פתח דוח לקוח בכרטיסייה חדשה"
+                            >
+                              <a
+                                href={`${REPORT_BASE}/r/${u.company.report_token}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <Link2 className="h-3.5 w-3.5" />
+                              </a>
+                            </Button>
+                          </>
+                        )}
                         {/* Impersonate button */}
                         <Button
                           size="sm"
@@ -993,6 +1083,98 @@ export default function ImpersonatePage() {
                   </>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── דוח לקוח: קישור קבוע + היסטוריית ארכיון + צור דוח עדכני ── */}
+          {moduleSyncUser && (
+            <div className="mt-4 border-t pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  היסטוריית דוחות
+                </h4>
+                <Button
+                  size="sm"
+                  onClick={generateFreshReport}
+                  disabled={generatingReport}
+                >
+                  {generatingReport
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1.5" />
+                    : <Plus className="h-3.5 w-3.5 ml-1.5" />}
+                  צור דוח עדכני
+                </Button>
+              </div>
+
+              {/* Permanent live report link */}
+              {moduleSyncUser.company?.report_token && (
+                <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+                  <span className="font-medium shrink-0">קישור קבוע:</span>
+                  <span className="truncate text-muted-foreground" dir="ltr">
+                    {REPORT_BASE}/r/{moduleSyncUser.company.report_token}
+                  </span>
+                  <div className="mr-auto flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      onClick={() => copyLink(`${REPORT_BASE}/r/${moduleSyncUser.company!.report_token}`, 'perm')}
+                      title="העתק קישור קבוע"
+                    >
+                      {copiedToken === 'perm'
+                        ? <Check className="h-3.5 w-3.5 text-green-600" />
+                        : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                    <Button asChild size="sm" variant="ghost" className="h-7 w-7 p-0" title="פתח">
+                      <a href={`${REPORT_BASE}/r/${moduleSyncUser.company.report_token}`} target="_blank" rel="noopener noreferrer">
+                        <Link2 className="h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Archive snapshots — newest first */}
+              {reportSnapshotsLoading ? (
+                <div className="flex items-center justify-center py-3 text-xs text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin ml-2" />
+                  טוען היסטוריה...
+                </div>
+              ) : reportSnapshots.length === 0 ? (
+                <p className="py-2 text-center text-xs text-muted-foreground">
+                  אין דוחות בארכיון עדיין. יווצר אוטומטית בסיום סריקה, או לחץ "צור דוח עדכני".
+                </p>
+              ) : (
+                <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                  {reportSnapshots.map(s => {
+                    const label = s.label || (s.created_at ? new Date(s.created_at).toLocaleDateString('he-IL') : '')
+                    const url = `${REPORT_BASE}/r/a/${s.snapshot_token}`
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
+                        <span className="font-medium">📁 {label}</span>
+                        <div className="mr-auto flex shrink-0 items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            onClick={() => copyLink(url, s.snapshot_token)}
+                            title="העתק קישור ארכיון"
+                          >
+                            {copiedToken === s.snapshot_token
+                              ? <Check className="h-3.5 w-3.5 text-green-600" />
+                              : <Copy className="h-3.5 w-3.5" />}
+                          </Button>
+                          <Button asChild size="sm" variant="ghost" className="h-7 w-7 p-0" title="פתח דוח ארכיון">
+                            <a href={url} target="_blank" rel="noopener noreferrer">
+                              <Link2 className="h-3.5 w-3.5" />
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 

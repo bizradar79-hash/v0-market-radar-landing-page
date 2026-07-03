@@ -11,6 +11,7 @@ import {
 } from '@/lib/scan/breaker'
 import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
 import { channelsSig } from '@/lib/leads/channels-sig'
+import { createReportSnapshot } from '@/lib/report/snapshot'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -498,6 +499,9 @@ export async function POST(request: Request) {
 
       finalStatus = 'done'
       await finishScan(adminDb, companyId!, 'done')
+      // Archive: freeze this completed scan's report into a snapshot (stable
+      // /r/a/<token> URL). Best-effort — never fails the scan (no AI, read-only).
+      try { await createReportSnapshot(adminDb, companyId!) } catch { /* best-effort */ }
     } catch (e: any) {
       if (e instanceof ScanChainSignal) {
         // TIME fix — soft deadline hit. Leave scan_control 'running' (do NOT
