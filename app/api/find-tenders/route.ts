@@ -5,6 +5,7 @@ import { getFullContext } from '@/lib/context'
 import { scrapeMrGov } from '@/lib/tenders-scraper'
 import { getEngineTendersForCompany } from '@/lib/tenders/from-engine'
 import { validateUrl } from '@/lib/ai'
+import { filterInsertRows } from '@/lib/admin/hidden'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -251,9 +252,16 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
     }
 
     // ── Save to DB ────────────────────────────────────────────────────────
+    // Respect admin-hidden items: a hidden tender must never be re-added.
+    const rowsToSave = await filterInsertRows(ctx.user.id, 'tender', allRows, (r: any) => r.title)
     await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
-    const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(allRows).select()
+    if (rowsToSave.length === 0) {
+      await cost.flush()
+      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })
+    }
+
+    const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(rowsToSave).select()
 
     if (insertError) {
       steps.db = { ok: false, error: insertError.message }

@@ -7,6 +7,7 @@ import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 import { norm, wordsOf, wordHit, buildCoreModel, type KwInfo } from '@/lib/match/hebrew-core'
+import { filterInsertRows } from '@/lib/admin/hidden'
 
 export const maxDuration = 60
 
@@ -131,8 +132,13 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
     company_id: ctx.user.id,
   }))
 
+  // Respect admin-hidden items: a hidden conference must never be re-added.
+  const rowsToSave = await filterInsertRows(ctx.user.id, 'conference', rows, (r: any) => r.name)
   await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
-  const { data: saved, error: insertError } = await ctx.supabase.from('conferences').insert(rows).select()
+  if (rowsToSave.length === 0) {
+    return NextResponse.json({ success: true, conferences: [], count: 0, steps })
+  }
+  const { data: saved, error: insertError } = await ctx.supabase.from('conferences').insert(rowsToSave).select()
   if (insertError) {
     steps.db = { ok: false, error: insertError.message }
     return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })

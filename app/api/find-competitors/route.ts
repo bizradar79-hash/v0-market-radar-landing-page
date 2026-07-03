@@ -5,6 +5,7 @@ import { effectiveKeywords } from '@/lib/keywords'
 import { createClient } from '@/lib/supabase/server'
 import { extractDomain } from '@/lib/dedup'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
+import { filterInsertRows } from '@/lib/admin/hidden'
 import { getPlaceDetails } from '@/lib/google-places'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
@@ -287,7 +288,7 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
 
     // Only ADD discovered competitors not already stored (by domain or name),
     // capped to the remaining gap.
-    const toAdd = mapped
+    const candidatesToAdd = mapped
       .filter((c: any) => {
         const domain = extractDomain(c.website || '')
         const name = (c.name || '').toLowerCase().trim()
@@ -296,6 +297,9 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation. Start with 
         return true
       })
       .slice(0, gap)
+
+    // Respect admin-hidden competitors: a hidden competitor must never be re-added.
+    const toAdd = await filterInsertRows(userId, 'competitor', candidatesToAdd, (c: any) => c.name || '')
 
     if (toAdd.length === 0) {
       return NextResponse.json({ success: true, added: 0, count: existingTotal, message: 'nothing_new', steps })

@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
-  CalendarClock, Square, Plus, X, Save, Link2, Copy, Check,
+  CalendarClock, Square, Plus, X, Save, Link2, Copy, Check, EyeOff,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
@@ -54,6 +54,17 @@ interface ReportSnapshot {
   label: string | null
   created_at: string
 }
+
+// Admin soft-hide (impersonate-only): remove specific items from a client's view.
+type HiddenItemType = 'tender' | 'conference' | 'lead' | 'news' | 'competitor' | 'channel' | 'trend'
+interface ClientItem { label: string; sub: string }
+interface HiddenItem { id: string; item_type: HiddenItemType; item_key: string; label: string | null; reason: string | null; hidden_at: string }
+
+const HIDE_TYPE_LABELS: Record<HiddenItemType, string> = {
+  tender: 'מכרזים', conference: 'כנסים', lead: 'לידים', news: 'חדשות',
+  competitor: 'מתחרים', channel: 'ערוצי הפצה', trend: 'מגמות מפתח',
+}
+const HIDE_TYPE_ORDER: HiddenItemType[] = ['tender', 'conference', 'lead', 'news', 'competitor', 'channel', 'trend']
 
 const REPORT_BASE = 'https://www.nsradar.co.il'
 
@@ -158,6 +169,13 @@ export default function ImpersonatePage() {
   const [reportSnapshotsLoading, setReportSnapshotsLoading] = useState(false)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
+
+  // Admin soft-hide (content management) dialog
+  const [contentUser, setContentUser] = useState<UserRow | null>(null)
+  const [clientItems, setClientItems] = useState<Record<HiddenItemType, ClientItem[]> | null>(null)
+  const [hiddenItems, setHiddenItems] = useState<HiddenItem[]>([])
+  const [contentLoading, setContentLoading] = useState(false)
+  const [hidingKey, setHidingKey] = useState<string | null>(null)
 
   // Snapshot restore (Layer 3)
   const [snapshotUser, setSnapshotUser] = useState<UserRow | null>(null)
@@ -490,6 +508,69 @@ export default function ImpersonatePage() {
     }
   }
 
+  // ── Admin soft-hide (content management) ───────────────────────────────────
+  async function loadContent(companyId: string) {
+    setContentLoading(true)
+    try {
+      const [itemsRes, hiddenRes] = await Promise.all([
+        fetch(`/api/admin/client-items?company_id=${companyId}`).then(r => r.json()).catch(() => ({})),
+        fetch(`/api/admin/hidden-items?company_id=${companyId}`).then(r => r.json()).catch(() => ({})),
+      ])
+      setClientItems(itemsRes?.items ?? null)
+      setHiddenItems(Array.isArray(hiddenRes?.hidden) ? hiddenRes.hidden : [])
+    } finally {
+      setContentLoading(false)
+    }
+  }
+
+  function openContent(u: UserRow) {
+    setContentUser(u)
+    setClientItems(null)
+    setHiddenItems([])
+    loadContent(u.id)
+  }
+
+  async function hideItem(itemType: HiddenItemType, label: string) {
+    if (!contentUser) return
+    const reason = window.prompt(`להסתיר "${label}" מהתצוגה של הלקוח?\nסיבה (אופציונלי):`, '')
+    if (reason === null) return // cancelled
+    const busyKey = `${itemType}:${label}`
+    setHidingKey(busyKey)
+    try {
+      const res = await fetch('/api/admin/hidden-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: contentUser.id, item_type: itemType, label, reason: reason || undefined }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+      toast({ title: '👁️ הוסתר', description: `"${label}" לא יופיע ללקוח ולא יחזור בסריקות` })
+      await loadContent(contentUser.id)
+    } catch (e: any) {
+      toast({ title: 'שגיאה בהסתרה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setHidingKey(null)
+    }
+  }
+
+  async function restoreHidden(id: string) {
+    if (!contentUser) return
+    setHidingKey(id)
+    try {
+      const res = await fetch('/api/admin/hidden-items', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+      toast({ title: '↩️ שוחזר', description: 'הפריט חזר לתצוגת הלקוח' })
+      await loadContent(contentUser.id)
+    } catch (e: any) {
+      toast({ title: 'שגיאה בשחזור', description: e?.message, variant: 'destructive' })
+    } finally {
+      setHidingKey(null)
+    }
+  }
+
   async function openSnapshots(u: UserRow) {
     setSnapshotUser(u)
     setSnapshots([])
@@ -809,6 +890,16 @@ export default function ImpersonatePage() {
                         >
                           <History className="h-3.5 w-3.5 ml-1" />
                           גיבויים
+                        </Button>
+                        {/* Content management — admin soft-hide of client items */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openContent(u)}
+                          title="הסתרת פריטים מתצוגת הלקוח"
+                        >
+                          <EyeOff className="h-3.5 w-3.5 ml-1" />
+                          תוכן
                         </Button>
                         {/* Permanent client report link — copy + open */}
                         {u.company?.report_token && (
@@ -1275,6 +1366,108 @@ export default function ImpersonatePage() {
                 סנכרן עכשיו
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Content management — admin soft-hide (impersonate only) ── */}
+      <Dialog open={!!contentUser} onOpenChange={open => { if (!open) setContentUser(null) }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <EyeOff className="h-5 w-5" />
+              ניהול תוכן — {contentUser?.company?.name || contentUser?.email}
+            </DialogTitle>
+            <p className="text-xs text-muted-foreground">
+              הסתרת פריטים מתצוגת הלקוח. הפריט נעלם מהאתר, מהדוח ומהסריקות הבאות — הלקוח לא רואה דבר. ניתן לשחזר בכל עת.
+            </p>
+          </DialogHeader>
+
+          {contentLoading ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin ml-2" />
+              טוען תוכן...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Hidden items block */}
+              {hiddenItems.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
+                  <h4 className="mb-2 text-sm font-semibold text-amber-900">
+                    פריטים מוסתרים ({hiddenItems.length})
+                  </h4>
+                  <div className="space-y-1.5">
+                    {HIDE_TYPE_ORDER.map(type => {
+                      const group = hiddenItems.filter(h => h.item_type === type)
+                      if (!group.length) return null
+                      return (
+                        <div key={type}>
+                          <div className="text-[11px] font-medium text-amber-700">{HIDE_TYPE_LABELS[type]}</div>
+                          {group.map(h => (
+                            <div key={h.id} className="flex items-center gap-2 py-0.5 text-xs">
+                              <span className="truncate">{h.label || h.item_key}</span>
+                              {h.reason && <span className="truncate text-muted-foreground">· {h.reason}</span>}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="mr-auto h-6 shrink-0 px-2 text-xs"
+                                disabled={hidingKey === h.id}
+                                onClick={() => restoreHidden(h.id)}
+                              >
+                                {hidingKey === h.id
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <><RotateCcw className="h-3 w-3 ml-1" />שחזר</>}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Live items per type — each with a הסתר action */}
+              {clientItems && HIDE_TYPE_ORDER.map(type => {
+                const items = clientItems[type] || []
+                if (!items.length) return null
+                return (
+                  <div key={type}>
+                    <h4 className="mb-1.5 text-sm font-semibold">{HIDE_TYPE_LABELS[type]} ({items.length})</h4>
+                    <div className="space-y-1">
+                      {items.map((it, i) => {
+                        const busy = hidingKey === `${type}:${it.label}`
+                        return (
+                          <div key={`${type}-${i}`} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs">
+                            <span className="truncate font-medium">{it.label}</span>
+                            {it.sub && <span className="truncate text-muted-foreground">· {it.sub}</span>}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mr-auto h-6 shrink-0 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                              disabled={busy}
+                              onClick={() => hideItem(type, it.label)}
+                            >
+                              {busy
+                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                : <><EyeOff className="h-3 w-3 ml-1" />הסתר</>}
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {clientItems && HIDE_TYPE_ORDER.every(t => !(clientItems[t] || []).length) && hiddenItems.length === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">אין פריטים להצגה עדיין (הרץ סריקה).</p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setContentUser(null)}>סגור</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

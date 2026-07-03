@@ -4,6 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { search } from '@/lib/search'
 import { callModel } from '@/lib/call-model'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
+import { filterInsertRows } from '@/lib/admin/hidden'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -157,9 +158,14 @@ export async function POST(request: Request) {
         steps.aiParsed = { count: newsItems.length }
 
         if (newsItems.length > 0) {
+          // Respect admin-hidden items: a hidden news item must never be re-added.
+          const keptNews = await filterInsertRows(ctx.user.id, 'news', newsItems, (n: any) => n.title || '')
           await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+          if (keptNews.length === 0) {
+            return NextResponse.json({ success: true, news: [], count: 0, steps })
+          }
           const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
-            newsItems.map((n: any) => ({
+            keptNews.map((n: any) => ({
               title: n.title || '',
               source: n.source || '',
               url: n.url || '',
@@ -252,10 +258,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, news: [], count: 0, kept_existing: true, steps })
     }
 
+    // Respect admin-hidden items: a hidden news item must never be re-added.
+    const keptList = await filterInsertRows(ctx.user.id, 'news', list, (n: any) => n.title || '')
+    if (keptList.length === 0) {
+      await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+      return NextResponse.json({ success: true, news: [], count: 0, steps })
+    }
+
     await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
 
     const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
-      list.map((n: any) => ({
+      keptList.map((n: any) => ({
         title: n.title || '',
         source: n.source || '',
         url: n.url || '',

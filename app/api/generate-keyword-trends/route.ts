@@ -6,6 +6,7 @@ import {
   fetchSearchVolume, fetchKeywordSuggestions, matchKeywordsToRows,
   type SearchVolumeEntry, type KeywordSuggestion, type Competition,
 } from '@/lib/seo/dataforseo'
+import { loadHiddenKeys, isHidden } from '@/lib/admin/hidden'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -377,8 +378,17 @@ export async function POST(request: Request) {
       ? { ...(company.keyword_trends as Record<string, any>) }
       : {} as Record<string, any>
 
+    // Respect admin-hidden trend keywords: never re-add, and drop any that are
+    // already present (so a hide sticks even if the keyword persists in the map).
+    const hiddenTrendKeys = await loadHiddenKeys(ctx.user.id, 'trend')
+    for (const key of Object.keys(existing)) {
+      const kwLabel = existing[key]?.keyword || key
+      if (isHidden(hiddenTrendKeys, 'trend', kwLabel)) delete existing[key]
+    }
+
     let updatedCount = 0
     for (const kw of keywords) {
+      if (isHidden(hiddenTrendKeys, 'trend', kw)) continue
       const fresh = built[kw]
       if (fresh) {
         existing[kw] = fresh

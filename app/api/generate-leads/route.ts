@@ -5,6 +5,7 @@ import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { validateUrl } from '@/lib/ai'
 import { findRealUrl } from '@/lib/call-model'
 import { channelsSig } from '@/lib/leads/channels-sig'
+import { loadHiddenKeys, isHidden, filterHidden } from '@/lib/admin/hidden'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -103,10 +104,14 @@ export async function POST(request: Request) {
     // Manual/admin distribution channels are explicit intent — when present they
     // DRIVE the search: per channel (category), find REAL companies of that type
     // in the client's area. Each lead is tagged with its source channel.
+    // Respect admin-hidden channels + leads (never drive search on, or re-add, a hidden item).
+    const hiddenChannelKeys = await loadHiddenKeys(ctx.user.id, 'channel')
+    const hiddenLeadKeys = await loadHiddenKeys(ctx.user.id, 'lead')
     const channels: string[] = Array.isArray(businessProfile?.distributionChannels)
       ? businessProfile!.distributionChannels!
           .filter((c) => typeof c === 'string' && c.trim().length >= 2)
           .map((c) => c.trim())
+          .filter((c) => !isHidden(hiddenChannelKeys, 'channel', c))
           .slice(0, MAX_CHANNELS)
       : []
 
@@ -210,7 +215,9 @@ export async function POST(request: Request) {
         return null // unverified → drop (no fake links)
       })
     )
-    const list = verified.filter((l): l is NonNullable<typeof l> => l !== null)
+    const verifiedList = verified.filter((l): l is NonNullable<typeof l> => l !== null)
+    // Respect admin-hidden leads: a hidden lead must never be re-added.
+    const list = filterHidden(verifiedList, 'lead', hiddenLeadKeys, (l: any) => l.name || '')
     steps.verified = { in: candidates.length, kept: list.length }
 
     steps.db = 'starting'

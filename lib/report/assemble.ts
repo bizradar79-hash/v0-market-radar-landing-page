@@ -2,6 +2,11 @@
 // scan results. NO AI calls, NO generation — pure deterministic reading of what
 // the scan already produced. Missing modules → the field is empty and the page
 // hides that section.
+//
+// Admin-hidden items (admin_hidden_items) are filtered out here so they never
+// appear in the client web report OR in snapshots (snapshots reuse this fn).
+
+import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 
 const FIELD_SEP = '␟'
 
@@ -53,14 +58,24 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const area = city || geoArea.join(', ') || 'ישראל'
   const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: competitors }, { data: tenders }, { data: leads }, { data: conferences }, { data: news }] =
+  const [[{ data: competitorsRaw }, { data: tendersRaw }, { data: leadsRaw }, { data: conferencesRaw }, { data: newsRaw }], hiddenKeys] =
     await Promise.all([
-      db.from('competitors').select('name, website, threat_score, positioning, trend, services, google_rating, google_review_count').eq('company_id', companyId),
-      db.from('tenders').select('title, organization, deadline, budget, link, relevance_score, description, created_at').eq('company_id', companyId),
-      db.from('leads').select('name, website, industry, reason, score, source, location').eq('company_id', companyId),
-      db.from('conferences').select('name, date, location, description, url, category').eq('company_id', companyId),
-      db.from('news').select('title, source, url, summary, category, published_at').eq('company_id', companyId).order('published_at', { ascending: false }),
+      Promise.all([
+        db.from('competitors').select('name, website, threat_score, positioning, trend, services, google_rating, google_review_count').eq('company_id', companyId),
+        db.from('tenders').select('title, organization, deadline, budget, link, relevance_score, description, created_at').eq('company_id', companyId),
+        db.from('leads').select('name, website, industry, reason, score, source, location').eq('company_id', companyId),
+        db.from('conferences').select('name, date, location, description, url, category').eq('company_id', companyId),
+        db.from('news').select('title, source, url, summary, category, published_at').eq('company_id', companyId).order('published_at', { ascending: false }),
+      ]),
+      loadHiddenKeys(companyId, undefined, db),
     ])
+
+  // Drop admin-hidden items before anything is computed/shown.
+  const competitors = filterHidden(competitorsRaw as any[], 'competitor', hiddenKeys, (c: any) => c.name)
+  const tenders = filterHidden(tendersRaw as any[], 'tender', hiddenKeys, (t: any) => t.title)
+  const leads = filterHidden(leadsRaw as any[], 'lead', hiddenKeys, (l: any) => l.name)
+  const conferences = filterHidden(conferencesRaw as any[], 'conference', hiddenKeys, (c: any) => c.name)
+  const news = filterHidden(newsRaw as any[], 'news', hiddenKeys, (n: any) => n.title)
 
   // ── SEO ────────────────────────────────────────────────────────────────────
   const seoRanking = (company?.seo_ranking ?? null) as any
@@ -83,9 +98,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
 
   // ── Trends (real changePct from keyword_trends) ─────────────────────────────
   const ktMap = (company?.keyword_trends ?? {}) as Record<string, any>
-  const trendEntries = Object.values(ktMap)
-    .filter((k: any) => k && typeof k.searchVolume === 'number')
-    .sort((a: any, b: any) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
+  const trendEntries = filterHidden(
+    Object.values(ktMap).filter((k: any) => k && typeof k.searchVolume === 'number'),
+    'trend', hiddenKeys, (k: any) => k.keyword || '',
+  ).sort((a: any, b: any) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
 
   // ── Tenders (open, by match) ────────────────────────────────────────────────
   const openTenders = (tenders || [])
