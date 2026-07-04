@@ -5,6 +5,7 @@ import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { validateUrl } from '@/lib/ai'
 import { findRealUrl } from '@/lib/call-model'
 import { channelsSig } from '@/lib/leads/channels-sig'
+import { deriveArea } from '@/lib/geo/area'
 import { loadHiddenKeys, isHidden, filterHidden } from '@/lib/admin/hidden'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -94,11 +95,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Explicit client area for geo-targeting (city → geographic_area → country).
-    const city = (ctx.company?.city || '').trim()
-    const area = (Array.isArray(ctx.company?.geographic_area) ? ctx.company.geographic_area : [])
-      .filter(Boolean).join(', ')
-    const areaLabel = city || area || 'ישראל'
+    // Client area for geo-targeting — single source of truth (geographic_scope).
+    const areaLabel = deriveArea(ctx.company, businessProfile).search
 
     // ── PRIORITY: channel-driven partner search ───────────────────────────────
     // Manual/admin distribution channels are explicit intent — when present they

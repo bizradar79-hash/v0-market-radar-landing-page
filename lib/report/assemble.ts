@@ -8,6 +8,7 @@
 
 import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
+import { deriveArea } from '@/lib/geo/area'
 
 const FIELD_SEP = '␟'
 
@@ -67,9 +68,8 @@ const num = (v: any): number | null => (typeof v === 'number' && isFinite(v) ? v
 
 export async function assembleReport(db: any, companyId: string, company: any): Promise<ReportData> {
   const bp = (company?.business_profile ?? {}) as any
-  const city = (company?.city || '').trim()
-  const geoArea: string[] = Array.isArray(company?.geographic_area) ? company.geographic_area.filter(Boolean) : []
-  const area = city || geoArea.join(', ') || 'ישראל'
+  // Single source of truth for the "אזור פעילות" label (from geographic_scope).
+  const area = deriveArea(company, bp).display
   const today = new Date().toISOString().split('T')[0]
 
   const [[{ data: competitorsRaw }, { data: tendersRaw }, { data: leadsRaw }, { data: conferencesRaw }, { data: newsRaw }], hiddenKeys] =

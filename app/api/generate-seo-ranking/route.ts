@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { deriveArea } from '@/lib/geo/area'
 import { analyzeBusinessForSearch } from '@/lib/analyze-business'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { fetchSerp, findPosition, baseDomain as dfsBaseDomain, fetchSearchVolume, matchKeywordsToRows, type Competition } from '@/lib/seo/dataforseo'
@@ -58,13 +59,6 @@ function isOwnResult(r: any, companyName: string, companyDomain: string): boolea
 
   console.log(`[SEO isOwnResult] company="${companyName}" domain="${domain}" base="${base}" | result="${r.name}" url="${r.url}" resultBase="${resultBase}" → ${match}`)
   return match
-}
-
-function isLocalBusiness(overview: string, city: string, geoArea: string[]): boolean {
-  if (!geoArea || geoArea.length === 0) return false
-  if (geoArea.includes('כל הארץ') || geoArea.length > 2) return false
-  const localKeywords = ['מקומי', 'באזור', 'בעיר', city].filter(Boolean)
-  return geoArea.length <= 1 || localKeywords.some(k => overview.includes(k))
 }
 
 async function runSeoQuery(
@@ -310,15 +304,13 @@ export async function POST(request: Request) {
     const city = ctx.company?.city || ''
     const industry = ctx.company?.industry || ''
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
-    const geoArea: string[] = ctx.company?.geographic_area || []
     const keywords: string[] = ctx.company?.keywords || []
-    const scopes: string[] = Array.isArray(ctx.company?.geographic_scope)
-      ? ctx.company.geographic_scope
-      : [ctx.company?.geographic_scope || 'national']
 
-    const isLocal = scopes.includes('local') || isLocalBusiness(overview, city, geoArea)
-    const isInternational = scopes.includes('international')
-    const scopeLocation = isLocal ? (city || 'ישראל') : isInternational ? 'ישראל ועולם' : 'ישראל'
+    // Single source of truth (geographic_scope) — no more raw city/geo_area guards.
+    const areaInfo = deriveArea(ctx.company, ctx.company?.business_profile)
+    const isLocal = areaInfo.isLocal
+    const isInternational = areaInfo.isInternational
+    const scopeLocation = isLocal ? areaInfo.display : isInternational ? 'ישראל ועולם' : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null

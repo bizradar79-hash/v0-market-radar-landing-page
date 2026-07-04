@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { getFullContext } from '@/lib/context'
+import { deriveArea } from '@/lib/geo/area'
 import { logKeptExisting } from '@/lib/scan/guard'
 import { fetchOpenAIGeoRaw, parseBusinessList } from '@/lib/geo/openai-engine'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
@@ -416,22 +417,14 @@ export async function POST(request: Request) {
 
     const companyName = ctx.company?.name || ''
     const website = ctx.company?.website || ''
-    const city = ctx.company?.city || ''
     const industry = ctx.company?.industry || ''
     const overview = ctx.company?.business_overview || ctx.company?.description || ''
-    const geoArea: string[] = ctx.company?.geographic_area || []
-    const scopes: string[] = Array.isArray(ctx.company?.geographic_scope)
-      ? ctx.company.geographic_scope
-      : [ctx.company?.geographic_scope || 'national']
 
-    const isLocal = scopes.includes('local') || !!(
-      geoArea.length > 0 &&
-      !geoArea.includes('כל הארץ') &&
-      geoArea.length <= 2 &&
-      (geoArea.length === 1 || ['מקומי', 'באזור', 'בעיר', city].filter(Boolean).some(k => overview.includes(k)))
-    )
-    const isInternational = scopes.includes('international')
-    const scopeLocation = isLocal ? (city || 'ישראל') : isInternational ? 'ישראל ועולם' : 'ישראל'
+    // Single source of truth (geographic_scope) — no more raw city/geo_area guards.
+    const areaInfo = deriveArea(ctx.company, ctx.company?.business_profile)
+    const isLocal = areaInfo.isLocal
+    const isInternational = areaInfo.isInternational
+    const scopeLocation = isLocal ? areaInfo.display : isInternational ? 'ישראל ועולם' : 'ישראל'
     const scope = isLocal ? `חיפוש מקומי — ${scopeLocation}` : isInternational ? 'חיפוש בינלאומי' : 'חיפוש ארצי'
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
@@ -474,7 +467,7 @@ export async function POST(request: Request) {
       try {
         const coreDesc = businessProfile.coreActivity || overview.slice(0, 120)
         const productName = (businessProfile.products as any[])?.[0]?.name || ''
-        const areaHint = isLocal && city ? ` באזור ${city}` : ' בישראל'
+        const areaHint = isLocal ? ` באזור ${areaInfo.display}` : ' בישראל'
         const avoidHint = existing.length > 0
           ? `\nאל תחזור על השאלות הקיימות הבאות (צור שאלות שונות): ${existing.map((q) => `"${q}"`).join(', ')}.`
           : ''

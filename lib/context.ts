@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { scrapeWebsite } from './scrape'
 import { effectiveKeywords } from './keywords'
+import { deriveArea } from '@/lib/geo/area'
 import type { BusinessProfile } from '@/types/business-profile'
 
 function parseDomain(url: string): string {
@@ -69,7 +70,6 @@ export async function getFullContext() {
   // Build rich company profile from DB data + scraped website content
   const keywords: string[] = company?.keywords || []
   const primaryKeywords = keywords.slice(0, 3).join(' ') || company?.industry || ''
-  const geographicArea: string[] = company?.geographic_area || []
   const targetCustomers: string[] = company?.target_customers || []
 
   const companyProfile = {
@@ -83,21 +83,19 @@ export async function getFullContext() {
     // Use first 2 keywords as products proxy, rest as target customers proxy
     products: keywords.slice(0, 2).join(', ') || company?.description?.slice(0, 80) || '',
     targetCustomers: targetCustomers.length > 0 ? targetCustomers.join(', ') : (keywords.slice(2, 4).join(', ') || company?.industry || ''),
-    geographicArea: geographicArea.join(', '),
+    geographicArea: deriveArea(company, company?.business_profile).display,
   }
 
-  const scopes: string[] = Array.isArray(company?.geographic_scope)
-    ? company.geographic_scope
-    : [company?.geographic_scope || 'national']
-
+  // Geographic context from the single source of truth (geographic_scope).
+  const areaInfo = deriveArea(company, company?.business_profile)
   const geoContext = [
-    scopes.includes('local') && company?.city && company.city !== 'כל הארץ'
-      ? `העסק פעיל מקומית באזור ${company.city}.`
+    areaInfo.isLocal
+      ? `העסק פעיל מקומית באזור ${areaInfo.display}.`
       : null,
-    scopes.includes('national')
+    (!areaInfo.isLocal && !areaInfo.isInternational)
       ? 'העסק פעיל בכל רחבי ישראל.'
       : null,
-    scopes.includes('international')
+    areaInfo.isInternational
       ? 'העסק פעיל גם בשווקים בינלאומיים מחוץ לישראל — כלול תוצאות גלובליות רלוונטיות.'
       : null,
   ].filter(Boolean).join(' ')
@@ -112,7 +110,7 @@ export async function getFullContext() {
 גודל: ${company?.size}
 תיאור: ${company?.description}
 מוצרים/שירותים/מילות מפתח: ${keywords.join(', ')}
-אזור גיאוגרפי: ${geographicArea.length > 0 ? geographicArea.join(', ') : company?.city || 'לא צוין'}
+אזור גיאוגרפי: ${areaInfo.display}
 היקף גיאוגרפי: ${geoContext}
 לקוחות יעד: ${targetCustomers.length > 0 ? targetCustomers.join(', ') : 'לא צוין'}
 מתחרים ידועים: ${competitors?.map((c: any) => `${c.name} (${c.website})`).join(', ') || 'לא צוינו'}

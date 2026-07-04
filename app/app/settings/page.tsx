@@ -92,6 +92,7 @@ interface CompanyData {
   website: string
   description: string
   geographicScope: string
+  city: string
 }
 
 interface UserData {
@@ -127,6 +128,7 @@ export default function SettingsPage() {
     website: "",
     description: "",
     geographicScope: "national",
+    city: "",
   })
 
   const [userData, setUserData] = useState<UserData>({
@@ -185,6 +187,7 @@ export default function SettingsPage() {
             website: company.website || "",
             description: company.description || "",
             geographicScope: scope,
+            city: (company.city && company.city !== 'כל הארץ') ? company.city : "",
           })
           if (company.keywords && Array.isArray(company.keywords)) {
             setKeywords(company.keywords)
@@ -245,7 +248,10 @@ export default function SettingsPage() {
           website: companyData.website,
           description: companyData.description,
           geographic_scope: [companyData.geographicScope],
-        })
+          // Real location for LOCAL businesses (feeds report + lead geo-targeting
+          // via deriveArea). Cleared when not local so it can't become stale.
+          city: companyData.geographicScope === 'local' ? (companyData.city.trim() || null) : null,
+        } as any)
         .eq('id', user.id)
     }
     setIsSaving(false)
@@ -473,6 +479,19 @@ export default function SettingsPage() {
                   </Select>
                   {companyData.geographicScope === 'international' && (
                     <p className="text-xs text-teal-600">הניתוחים יכללו גם שווקים בינלאומיים</p>
+                  )}
+                  {companyData.geographicScope === 'local' && (
+                    <div className="space-y-1.5 pt-1">
+                      <Label htmlFor="city">עיר / אזור פעילות</Label>
+                      <Input
+                        id="city"
+                        value={companyData.city}
+                        onChange={(e) => setCompanyData({ ...companyData, city: e.target.value })}
+                        className="border-border bg-input"
+                        placeholder="לדוגמה: דימונה והדרום"
+                      />
+                      <p className="text-xs text-muted-foreground">משפיע על חיפוש שותפים, ההקשר של הניתוחים, והדוח.</p>
+                    </div>
                   )}
                 </div>
               </div>

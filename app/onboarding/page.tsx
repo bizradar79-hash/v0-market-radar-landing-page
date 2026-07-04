@@ -160,6 +160,7 @@ export default function OnboardingPage() {
   const [description, setDescription] = useState('')
   const [ownerRole, setOwnerRole] = useState('')
   const [geographicScope, setGeographicScope] = useState('national')
+  const [city, setCity] = useState('')
 
   // Errors
   const [analysisError, setAnalysisError] = useState<string | null>(null)
@@ -366,6 +367,8 @@ export default function OnboardingPage() {
         description,
         onboarding_completed: true,
         geographic_scope: [geographicScope],
+        // Real location for LOCAL businesses (feeds report + lead geo-targeting).
+        city: geographicScope === 'local' ? (city.trim() || null) : null,
         business_profile: updatedProfile,
         keywords: [...wPrimaryKw, ...wSecondaryKw, ...wIndustryTags],
         modules: ['competitors', 'leads', 'tenders', 'trends', 'news', 'conferences'],
@@ -596,6 +599,18 @@ export default function OnboardingPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {geographicScope === 'local' && (
+                    <div className="space-y-1.5 pt-2">
+                      <Label>עיר / אזור פעילות</Label>
+                      <Input
+                        value={city}
+                        onChange={e => setCity(e.target.value)}
+                        placeholder="לדוגמה: דימונה והדרום"
+                        className="bg-background"
+                      />
+                      <p className="text-xs text-muted-foreground">משפיע על חיפוש שותפים, ההקשר של הניתוחים, והדוח.</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 sm:col-span-2">
