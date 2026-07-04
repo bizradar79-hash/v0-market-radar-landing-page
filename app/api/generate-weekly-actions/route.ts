@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
+import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -69,6 +70,19 @@ export async function POST(request: Request) {
       ctx.supabase.from('conferences').select('name, date, location, url, description').eq('company_id', ctx.user.id).order('date', { ascending: true }).limit(5),
     ])
 
+    // Respect admin-hidden items: regenerated actions must not recommend a hidden
+    // tender/lead/conference/news item. Filter inputs before the prompt is built.
+    const [hTender, hLead, hConf, hNews] = await Promise.all([
+      loadHiddenKeys(ctx.user.id, 'tender'),
+      loadHiddenKeys(ctx.user.id, 'lead'),
+      loadHiddenKeys(ctx.user.id, 'conference'),
+      loadHiddenKeys(ctx.user.id, 'news'),
+    ])
+    const tendersV = filterHidden(tenders as any[], 'tender', hTender, (t: any) => t.title)
+    const leadsV = filterHidden(leads as any[], 'lead', hLead, (l: any) => l.name)
+    const confsV = filterHidden(conferences as any[], 'conference', hConf, (c: any) => c.name)
+    const newsV = filterHidden(news as any[], 'news', hNews, (n: any) => n.title)
+
     // Keyword trends — NEW DataForSEO shape (Record<keyword, StoredKeyword>) via
     // the shared summarizer so weekly-actions + niche-opportunities can't diverge.
     const kwTrends = companyRow?.keyword_trends as Record<string, any> | null
@@ -107,19 +121,19 @@ export async function POST(request: Request) {
 
     const competitorNames = ctx.competitors?.map((c: any) => c.name).filter(Boolean) || []
 
-    const tenderLines = (tenders || []).map((t: any) =>
+    const tenderLines = (tendersV || []).map((t: any) =>
       `"${t.title}" | ${t.organization || ''} | דדליין: ${t.deadline ? new Date(t.deadline).toLocaleDateString('he-IL') : '?'}${t.link ? ` | ${t.link}` : ''}`
     )
 
-    const newsLines = (news || []).map((n: any) =>
+    const newsLines = (newsV || []).map((n: any) =>
       `"${n.title}" | ${n.source || ''} | ${n.published_at ? n.published_at.split('T')[0] : '?'}${n.url ? ` | ${n.url}` : ''}`
     )
 
-    const leadLines = (leads || []).map((l: any) =>
+    const leadLines = (leadsV || []).map((l: any) =>
       `"${l.name}" | ${l.industry || ''} | ${l.location || ''} | ציון ${l.score || 0}`
     )
 
-    const conferenceLines = (conferences || []).map((c: any) =>
+    const conferenceLines = (confsV || []).map((c: any) =>
       `"${c.name}" | ${c.date ? new Date(c.date).toLocaleDateString('he-IL') : '?'} | ${c.location || ''}${c.url ? ` | ${c.url}` : ''}`
     )
 

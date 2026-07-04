@@ -131,7 +131,24 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     .sort((a: any, b: any) => parseConfDesc(b.description).score! - parseConfDesc(a.description).score! || 0)
 
   // ── Weekly actions ──────────────────────────────────────────────────────────
-  const waActions: any[] = Array.isArray(company?.weekly_actions?.actions) ? company.weekly_actions.actions : []
+  // Actions are a SNAPSHOT from scan time, so a since-hidden item (e.g. a hidden
+  // Haifa tender) can still sit in them. Filter out any action whose text
+  // references a hidden item's normalized key — conservative substring match on
+  // the action's title+summary+signals (better to drop a real match than to show
+  // a recommendation for a hidden item). Applies to live report AND snapshots.
+  const waAll: any[] = Array.isArray(company?.weekly_actions?.actions) ? company.weekly_actions.actions : []
+  const hiddenKeyList = [...hiddenKeys]
+    .map((k) => k.split(FIELD_SEP)[1] || '')
+    .filter((k) => k.length >= 4) // avoid trivial/over-broad matches
+  const actionRefsHidden = (a: any): boolean => {
+    if (!hiddenKeyList.length) return false
+    const text = norm([
+      a?.title, a?.summary, a?.details,
+      ...(Array.isArray(a?.signals) ? a.signals.map((s: any) => s?.label) : []),
+    ].filter(Boolean).join(' '))
+    return hiddenKeyList.some((hk) => text.includes(hk))
+  }
+  const waActions = waAll.filter((a) => !actionRefsHidden(a))
   const sortedActions = [
     ...waActions.filter((a) => a.priority === 'גבוהה'),
     ...waActions.filter((a) => a.priority !== 'גבוהה'),

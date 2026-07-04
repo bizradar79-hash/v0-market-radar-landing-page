@@ -168,6 +168,7 @@ export default function ImpersonatePage() {
   const [reportSnapshots, setReportSnapshots] = useState<ReportSnapshot[]>([])
   const [reportSnapshotsLoading, setReportSnapshotsLoading] = useState(false)
   const [generatingReport, setGeneratingReport] = useState(false)
+  const [regenActions, setRegenActions] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
   // Admin soft-hide (content management) dialog
@@ -493,11 +494,16 @@ export default function ImpersonatePage() {
       const res = await fetch('/api/admin/report-snapshots', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: moduleSyncUser.id }),
+        body: JSON.stringify({ company_id: moduleSyncUser.id, regenerate_actions: regenActions }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      toast({ title: '✅ דוח עדכני נוצר', description: 'צילום מצב חדש נשמר בארכיון' })
+      toast({
+        title: '✅ דוח עדכני נוצר',
+        description: regenActions
+          ? (data.actionsRegenerated ? 'המלצות רועננו + צילום מצב חדש נשמר' : 'צילום מצב נשמר (רענון ההמלצות נכשל)')
+          : 'צילום מצב חדש נשמר בארכיון',
+      })
       // Refresh the list.
       const list = await fetch(`/api/admin/report-snapshots?company_id=${moduleSyncUser.id}`).then(r => r.json()).catch(() => ({}))
       setReportSnapshots(Array.isArray(list.snapshots) ? list.snapshots : reportSnapshots)
@@ -1185,17 +1191,31 @@ export default function ImpersonatePage() {
                   <FileText className="h-4 w-4" />
                   היסטוריית דוחות
                 </h4>
-                <Button
-                  size="sm"
-                  onClick={generateFreshReport}
-                  disabled={generatingReport}
-                >
-                  {generatingReport
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1.5" />
-                    : <Plus className="h-3.5 w-3.5 ml-1.5" />}
-                  צור דוח עדכני
-                </Button>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={regenActions}
+                      onChange={(e) => setRegenActions(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-teal-600"
+                    />
+                    רענן גם המלצות
+                  </label>
+                  <Button
+                    size="sm"
+                    onClick={generateFreshReport}
+                    disabled={generatingReport}
+                  >
+                    {generatingReport
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1.5" />
+                      : <Plus className="h-3.5 w-3.5 ml-1.5" />}
+                    צור דוח עדכני
+                  </Button>
+                </div>
               </div>
+              {regenActions && (
+                <p className="text-[11px] text-amber-600 -mt-1">רענון המלצות מבצע קריאת מודל אחת (איטי יותר) ומעדכן את "מה לעשות השבוע" לפי הנתונים העדכניים, ללא פריטים מוסתרים.</p>
+              )}
 
               {/* Permanent live report link */}
               {moduleSyncUser.company?.report_token && (

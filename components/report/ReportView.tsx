@@ -106,6 +106,9 @@ const REPORT_CSS = `
   .rpt .spark{display:flex;align-items:flex-end;gap:3px;height:56px}
   .rpt .spark .bar{flex:1;background:linear-gradient(180deg,var(--teal-bright),var(--teal));border-radius:3px 3px 0 0;min-height:3px}
   .rpt .spark .bar.last{background:linear-gradient(180deg,var(--gold),var(--amber))}
+  .rpt .spark-labels{display:flex;gap:3px;margin-top:5px}
+  .rpt .spark-labels span{flex:1;text-align:center;font-size:9.5px;color:var(--ink-faint);line-height:1.2;overflow:hidden}
+  @media (max-width:560px){.rpt .spark-labels span:nth-child(even){visibility:hidden}}
   .rpt .next{background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;border-radius:16px;padding:28px 28px;margin:46px 0 0;position:relative;overflow:hidden}
   .rpt .next::after{content:'';position:absolute;inset-inline-start:-60px;bottom:-60px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(16,185,129,.18),transparent 65%)}
   .rpt .next h2{color:#fff;margin-bottom:8px;font-size:20px}
@@ -126,21 +129,35 @@ const STAR_SVG = (
   </svg>
 )
 
+const HE_MONTHS_SHORT = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ']
+
 // Inline demand sparkline — no chart library. Bars read oldest→newest (dir=ltr),
-// last month highlighted. Heights scale to the series max.
+// last month highlighted, with aligned Hebrew month labels (last bar = current
+// month, counting backwards). Heights scale to the series max.
 function DemandSpark({ series }: { series: number[] }) {
-  const max = Math.max(...series, 1)
   const bars = series.slice(-12)
+  const max = Math.max(...bars, 1)
+  const now = new Date()
+  const labels = bars.map((_, i) => {
+    const monthsAgo = bars.length - 1 - i
+    const d = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1)
+    return HE_MONTHS_SHORT[d.getMonth()]
+  })
   return (
-    <div className="spark" dir="ltr">
-      {bars.map((v, i) => (
-        <div
-          key={i}
-          className={`bar${i === bars.length - 1 ? ' last' : ''}`}
-          style={{ height: `${Math.max(6, Math.round((v / max) * 100))}%` }}
-          title={String(v)}
-        />
-      ))}
+    <div dir="ltr">
+      <div className="spark">
+        {bars.map((v, i) => (
+          <div
+            key={i}
+            className={`bar${i === bars.length - 1 ? ' last' : ''}`}
+            style={{ height: `${Math.max(6, Math.round((v / max) * 100))}%` }}
+            title={`${labels[i]}: ${v.toLocaleString('he-IL')}`}
+          />
+        ))}
+      </div>
+      <div className="spark-labels">
+        {labels.map((m, i) => <span key={i}>{m}</span>)}
+      </div>
     </div>
   )
 }

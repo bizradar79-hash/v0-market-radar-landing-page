@@ -58,9 +58,31 @@ export async function POST(request: Request) {
   const companyId = body.company_id
   if (!companyId) return NextResponse.json({ error: 'Missing company_id' }, { status: 400 })
 
+  // Optional: regenerate the weekly actions first (ONE model call) so they reflect
+  // current data (fresh leads) and exclude admin-hidden items, before we freeze the
+  // snapshot. Default path stays model-call-free (pure assemble of stored data).
+  let actionsRegenerated = false
+  if (body.regenerate_actions === true) {
+    try {
+      const origin = new URL(request.url).origin
+      const res = await fetch(`${origin}/api/generate-weekly-actions?force=true`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-user-id': companyId,
+          'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        },
+        body: JSON.stringify({ force: true }),
+      })
+      actionsRegenerated = res.ok
+    } catch (e: any) {
+      console.warn('[report-snapshots] actions regen failed:', e?.message)
+    }
+  }
+
   const adminDb = getAdminSupabase()
   const token = await createReportSnapshot(adminDb, companyId)
   if (!token) return NextResponse.json({ error: 'snapshot_failed' }, { status: 500 })
 
-  return NextResponse.json({ success: true, snapshot_token: token })
+  return NextResponse.json({ success: true, snapshot_token: token, actionsRegenerated })
 }
