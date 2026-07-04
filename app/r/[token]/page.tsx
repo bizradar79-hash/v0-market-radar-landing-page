@@ -28,7 +28,7 @@ export default async function ReportPage({ params }: { params: Promise<{ token: 
   try {
     const { data } = await adminDb()
       .from('companies')
-      .select('id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, business_profile')
+      .select('id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, competitor_trends, business_profile')
       .eq('report_token', token)
       .single()
     company = data

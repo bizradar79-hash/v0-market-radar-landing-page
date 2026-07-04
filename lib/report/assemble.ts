@@ -48,7 +48,10 @@ export interface ReportData {
   metrics: Array<{ num: string; badge?: { kind: 'up' | 'down' | 'flat' | 'new'; text: string }; label: string; hot?: boolean }>
   actions: Array<{ title: string; why: string; src: string; chip: { kind: 'urgent' | 'watch' | 'go'; text: string }; kind: 'urgent' | 'watch' | '' }>
   competitors: Array<{ name: string; sub: string; deltas: Array<{ kind: 'good' | 'bad' | 'neutral'; text: string }>; hot?: boolean }>
-  competitorsNote?: string | null   // calm line when no competitor changed this scan
+  competitorsNote?: string | null   // calm line / intro when no competitor changed this scan
+  // Evergreen filler when no changes this scan: top stored competitor-trends,
+  // each with an optional amber "opportunity-for-you" line.
+  competitorTrends?: Array<{ name: string; topic: string; opportunity?: string }>
   tenders: Array<{ title: string; sub: string; side: string; pill?: { kind: 'teal' | 'amber'; text: string }; hot?: boolean; deadline?: boolean }>
   leadGroups: Array<{ channel: string; leads: Array<{ title: string; sub: string; matchTag?: { kind: 'high' | 'good'; text: string }; website?: string; score?: number; hot?: boolean }> }>
   // Legacy flat list — kept so older snapshots still render. New reports populate
@@ -271,10 +274,34 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     const sub = c.positioning || c.services || ''
     return { name: c.name || '', sub, deltas, hot: i === 0 && c.trend === 'growing' }
   })
-  // Calm line only when there ARE competitors on file but none moved this scan.
-  const competitorsNote = competitorsOut.length === 0 && allComp.length > 0
-    ? 'לא זוהו שינויים מהותיים אצל המתחרים השבוע'
-    : null
+  // Three-level competitors assembly (read-only — NO model calls):
+  //  (a) real changes → the list above.
+  //  (b) no changes BUT stored competitor-trends → intro line + top trends, each
+  //      with an optional amber "opportunity-for-you".
+  //  (c) neither → the calm line alone.
+  let competitorsNote: string | null = null
+  let competitorTrends: ReportData['competitorTrends'] = []
+  if (competitorsOut.length === 0) {
+    const ctData: any[] = Array.isArray(company?.competitor_trends?.competitor_data)
+      ? company.competitor_trends.competitor_data
+      : []
+    const storedTrends = ctData
+      .filter((c: any) => c && (c.new_activity || (Array.isArray(c.trending_topics) && c.trending_topics.length)))
+      .slice(0, 3)
+      .map((c: any) => ({
+        name: (c.competitor_name || '').trim(),
+        topic: (c.new_activity || (Array.isArray(c.trending_topics) ? c.trending_topics[0] : '') || '').trim(),
+        opportunity: c.has_opportunity && typeof c.opportunity === 'string' && c.opportunity.trim()
+          ? c.opportunity.trim() : undefined,
+      }))
+      .filter((t: any) => t.name && t.topic)
+    if (storedTrends.length) {
+      competitorsNote = 'לא זוהו שינויים מהותיים השבוע — אבל הנה מה שקורה אצל המתחרים:'
+      competitorTrends = storedTrends
+    } else if (allComp.length > 0) {
+      competitorsNote = 'לא זוהו שינויים מהותיים אצל המתחרים השבוע'
+    }
+  }
 
   // ── Tenders section ─────────────────────────────────────────────────────────
   const tendersOut: ReportData['tenders'] = openTenders.slice(0, 3).map((t: any, i: number) => {
@@ -451,6 +478,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     actions,
     competitors: competitorsOut,
     competitorsNote,
+    competitorTrends,
     tenders: tendersOut,
     leadGroups,
     seo: seoOut,

@@ -89,6 +89,8 @@ const REPORT_CSS = `
   .rpt .rank-sub{font-size:13px;color:var(--ink-soft)}
   .rpt .channel-tag{font-size:12.5px;font-weight:800;color:var(--teal-deep);letter-spacing:.02em;padding:15px 22px 5px}
   .rpt .calm-note{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;color:var(--ink-soft);font-size:14.5px;box-shadow:0 2px 10px -4px rgba(20,33,45,.06)}
+  .rpt .comp-intro{padding:16px 22px;border-bottom:1px solid var(--line);color:var(--ink-soft);font-size:14.5px;background:#f8fbfa}
+  .rpt .opp-text{font-size:13px;color:var(--amber);line-height:1.5}
   .rpt .lead-link{font-size:12.5px;font-weight:700;color:var(--teal-deep);text-decoration:none}
   .rpt .lead-link:hover{text-decoration:underline}
   .rpt .ai-engines{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 22px;border-bottom:1px solid var(--line)}
@@ -257,6 +259,25 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
                       <div className="comp-change">
                         {c.deltas.map((d, j) => <span className={`delta ${d.kind}`} key={j}>{d.text}</span>)}
                       </div>
+                    </div>
+                  </div>
+                ))}
+                <a className="more-link" href="/app/competitors">לניתוח המתחרים המלא במערכת ←</a>
+              </div>
+            ) : (r.competitorTrends && r.competitorTrends.length > 0) ? (
+              <div className="card">
+                <div className="comp-intro">{r.competitorsNote}</div>
+                {r.competitorTrends.map((t, i) => (
+                  <div className="row" key={i}>
+                    <div className="row-main">
+                      <div className="row-title">{t.name}</div>
+                      {t.topic && <div className="row-sub">{t.topic}</div>}
+                      {t.opportunity && (
+                        <div className="comp-change">
+                          <span className="pill amber">נקודה למחשבה</span>
+                          <span className="opp-text">{t.opportunity}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
