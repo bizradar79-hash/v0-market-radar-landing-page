@@ -15,6 +15,16 @@ function extractXaiText(data: any): string {
 }
 
 export async function scrapePublicCompanies(source?: TenderSource): Promise<TenderPoolItem[]> {
+  // GATED OFF by default. This source uses Grok web_search to GENERATE tender
+  // rows — the URLs are model-produced and often invented/dead. Now that a real
+  // public-body adapter works (רכבת ישראל via its internal JSON endpoint), we stop
+  // AI-invented tenders from entering the pool. The code is retained; re-enable by
+  // setting ENABLE_AI_PUBLIC_TENDERS=true (e.g. to cover bodies with no adapter yet).
+  if (process.env.ENABLE_AI_PUBLIC_TENDERS !== 'true') {
+    console.log('[public-companies] disabled by default (AI-invented source). Set ENABLE_AI_PUBLIC_TENDERS=true to re-enable.')
+    return []
+  }
+
   const apiKey = process.env.XAI_API_KEY
   if (!apiKey) {
     console.warn('[public-companies] XAI_API_KEY not set, skipping')

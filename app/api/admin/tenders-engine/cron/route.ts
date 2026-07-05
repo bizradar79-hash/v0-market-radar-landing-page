@@ -6,6 +6,7 @@ import { createServerClient } from '@supabase/ssr'
 import { scrapeMrGov } from '@/lib/tender-scrapers/mr-gov'
 import { scrapeMashcalPdfs } from '@/lib/tender-scrapers/mashcal-pdf'
 import { scrapePublicCompanies } from '@/lib/tender-scrapers/public-companies'
+import { scrapePublicTenderUrls } from '@/lib/tender-scrapers/public-tender-urls'
 import type { TenderSource, TenderPoolItem } from '@/lib/tender-scrapers/types'
 
 function createServiceClient() {
@@ -28,6 +29,10 @@ function runScraper(source: TenderSource): Promise<TenderPoolItem[]> {
       return scrapeMrGov()
     case 'mashcal_pdf':
       return scrapeMashcalPdfs()
+    // Real internal-endpoint adapters (e.g. רכבת ישראל) run through here so the
+    // SCHEDULED pool refresh gets them too — previously only the manual scan did.
+    case 'public_tender_urls':
+      return scrapePublicTenderUrls(source)
     case 'ai_search':
       return scrapePublicCompanies(source)
     default:
