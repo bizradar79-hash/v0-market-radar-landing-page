@@ -350,7 +350,7 @@ export default function LandingPage() {
             >
               <div className="absolute left-1/2 top-0 z-10 h-5 w-32 -translate-x-1/2 rounded-b-2xl bg-gray-900" />
               <iframe
-                src="/r/demo"
+                src="/r/demo?embed=1"
                 title="דוח לדוגמה"
                 loading="lazy"
                 className="h-full w-full rounded-[1.5rem] bg-white"

@@ -7,6 +7,15 @@ export function AccessibilityWidget() {
   const [contrast, setContrast] = useState(false)
   const [highlight, setHighlight] = useState(false)
   const [noAnim, setNoAnim] = useState(false)
+  // Hide ONLY in the embedded landing preview (?embed=1 / framed). On every real
+  // page — including the full /r/* report opened in its own tab — it stays.
+  const [embedded, setEmbedded] = useState(false)
+  useEffect(() => {
+    setEmbedded(
+      new URLSearchParams(window.location.search).get('embed') === '1'
+        || window.self !== window.top,
+    )
+  }, [])
 
   // Apply / remove CSS classes on <html>
   useEffect(() => {
@@ -50,6 +59,8 @@ export function AccessibilityWidget() {
     setHighlight(false)
     setNoAnim(false)
   }
+
+  if (embedded) return null
 
   return (
     <>

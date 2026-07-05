@@ -12,6 +12,12 @@ export default function WhatsAppButton() {
   const [hovered, setHovered] = useState(false)
 
   useEffect(() => {
+    // Not on report pages (/r/*) — those are client deliverables, not marketing —
+    // and never inside the embedded landing preview (?embed=1 / framed).
+    const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1'
+      || window.self !== window.top
+    const isReportPage = window.location.pathname.startsWith('/r/')
+    if (isEmbed || isReportPage) return
     try {
       if (localStorage.getItem(STORAGE_KEY) === 'true') return
     } catch {
