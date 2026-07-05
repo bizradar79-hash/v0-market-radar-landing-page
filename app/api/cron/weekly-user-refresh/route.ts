@@ -73,6 +73,7 @@ async function handleRequest(req: Request) {
     .select('id, name, next_sync_at, last_sync_at, sync_status')
     .or(`next_sync_at.is.null,next_sync_at.lte.${now}`)
     .neq('sync_status', 'running')
+    .neq('is_demo', true) // demo company data stays frozen — never auto-scanned
     .order('next_sync_at', { ascending: true, nullsFirst: true })
 
   if (error) {

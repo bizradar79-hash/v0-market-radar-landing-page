@@ -4,7 +4,7 @@
 // fetching, no AI. Design copied verbatim from report-design-reference.html.
 import type { ReportData } from '@/lib/report/assemble'
 
-const REPORT_CSS = `
+export const REPORT_CSS = `
   :root{--ink:#14212d;--ink-soft:#485866;--ink-faint:#84939f;--bg:#f4f7f6;--card:#ffffff;--line:#e0e7e4;--teal:#0d9488;--teal-bright:#10b981;--teal-deep:#0a6b62;--teal-wash:#e0f2ef;--teal-glow:#ccfbf1;--navy:#0f2033;--navy-2:#16304a;--amber:#d97706;--amber-wash:#fef3c7;--red:#dc2626;--red-wash:#fee2e2;--green:#16a34a;--green-wash:#dcfce7;--gold:#f59e0b;}
   .rpt *{margin:0;padding:0;box-sizing:border-box}
   .rpt{font-family:'Heebo',sans-serif;background:var(--bg);color:var(--ink);line-height:1.65;font-size:16px;min-height:100vh}
@@ -164,7 +164,7 @@ function DemandSpark({ series }: { series: number[] }) {
   )
 }
 
-export default function ReportView({ data: r, archive }: { data: ReportData; archive?: { label: string } }) {
+export default function ReportView({ data: r, archive, example }: { data: ReportData; archive?: { label: string }; example?: { label: string } }) {
   return (
     <div className="rpt" dir="rtl">
       <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -178,6 +178,7 @@ export default function ReportView({ data: r, archive }: { data: ReportData; arc
             <span className="brand-name">NORTH STAR RADAR · מודיעין שוק לעסק שלך</span>
           </div>
           {archive && <div className="archive-badge">📁 דוח ארכיון{archive.label ? ` · ${archive.label}` : ''}</div>}
+          {example && <div className="archive-badge">🧪 דוח לדוגמה — {example.label}</div>}
           <h1>הדוח השבועי של {r.companyName}</h1>
           <div className="report-meta">
             {r.scanDate && <span>סריקה מ־<b>{r.scanDate}</b></span>}

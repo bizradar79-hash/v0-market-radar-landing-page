@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
+import { REPORT_CSS } from "@/components/report/ReportView"
+import { DEMO_REPORT } from "@/lib/report/demo-data"
 
 // ── Scroll-aware header ───────────────────────────────────────────────────
 
@@ -25,7 +27,7 @@ function Header() {
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
-          <a href="#modules" className="hover:text-gray-900 transition-colors">מודולים</a>
+          <a href="#report" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
           <a href="#how" className="hover:text-gray-900 transition-colors">איך זה עובד</a>
           <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
           <a href="#faq" className="hover:text-gray-900 transition-colors">שאלות</a>
@@ -48,92 +50,93 @@ function Header() {
   )
 }
 
-// ── Dashboard preview ─────────────────────────────────────────────────────
+// ── Live report fragments (rendered with the REAL report CSS — never drift) ──
+// Injects the report stylesheet once, then renders `.rpt`-scoped fragments from
+// the same demo data that powers /r/demo.
 
-function DashboardPreview() {
+function ReportFragments() {
+  const a = DEMO_REPORT.actions[0]
+  const t = DEMO_REPORT.tenders[0]
+  const g = DEMO_REPORT.leadGroups[0]
+  const ai = DEMO_REPORT.seoAi!
+
   return (
-    <div className="mt-14 mx-auto w-full max-w-3xl rounded-2xl p-6 shadow-2xl" style={{ background: "#0F172A" }}>
-      <div className="mb-4 flex items-center gap-2">
-        <div className="h-3 w-3 rounded-full bg-red-400" />
-        <div className="h-3 w-3 rounded-full bg-yellow-400" />
-        <div className="h-3 w-3 rounded-full bg-green-400" />
-        <span className="mr-2 text-xs text-gray-500">North Star Radar — Dashboard</span>
-      </div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        {[
-          { label: "הזדמנויות חדשות", value: "5", color: "#0D9488" },
-          { label: "פוטנציאל הכנסה", value: "₪42K", color: "#6366F1" },
-          { label: "פעולות השבוע", value: "3", color: "#F59E0B" },
-        ].map((m) => (
-          <div key={m.label} className="rounded-lg p-3" style={{ background: "rgba(255,255,255,0.06)" }}>
-            <div className="text-xs text-gray-400 mb-1">{m.label}</div>
-            <div className="text-xl font-bold" style={{ color: m.color }}>{m.value}</div>
+    <div className="rpt" dir="rtl" style={{ background: "transparent" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+      <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
+
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Action card with the red deadline chip */}
+        <div>
+          <p className="mb-2 text-sm font-semibold text-gray-500">פעולה עם דדליין — מסומנת באדום</p>
+          <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
+            <div className="action-num">1</div>
+            <div className="action-body">
+              <div className="action-title">{a.title}</div>
+              <div className="action-why">{a.why}</div>
+              <div className="action-src">{a.src}</div>
+            </div>
+            <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
           </div>
-        ))}
-      </div>
-      <div className="space-y-2">
-        {[
-          { type: "📈 טרנד", title: "עלייה בביקוש לשירותי AI בתחום הרפואה", score: 92 },
-          { type: "📋 מכרז", title: "מכרז עירייה לשירותי ייעוץ — ₪120,000", score: 88 },
-          { type: "🤝 ליד", title: "חברת טכנולוגיה מחפשת שותף שיווקי", score: 81 },
-        ].map((s) => (
-          <div
-            key={s.title}
-            className="flex items-center justify-between rounded-lg px-3 py-2.5"
-            style={{ background: "rgba(255,255,255,0.05)" }}
-          >
-            <span className="text-xs text-gray-300 truncate flex-1">{s.type} · {s.title}</span>
-            <span
-              className="mr-3 shrink-0 rounded-full px-2 py-0.5 text-xs font-bold"
-              style={{ background: "rgba(13,148,136,0.2)", color: "#0D9488" }}
-            >
-              {s.score}
-            </span>
+        </div>
+
+        {/* Tender row */}
+        <div>
+          <p className="mb-2 text-sm font-semibold text-gray-500">מכרז רלוונטי — ממקור רשמי, לינק מאומת</p>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <div className={`row${t.hot ? " hot-row" : ""}`}>
+              <div className="row-main">
+                <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
+                <div className="row-sub">{t.sub}</div>
+              </div>
+              <div className="row-side"><span className="deadline">{t.side}</span></div>
+            </div>
           </div>
-        ))}
+        </div>
+
+        {/* Partners-by-channel block */}
+        <div>
+          <p className="mb-2 text-sm font-semibold text-gray-500">שותפים לפי ערוץ הפצה</p>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <div className="channel-tag">{g.channel}</div>
+            {g.leads.map((l, i) => (
+              <div className="row" key={i}>
+                <div className="row-main">
+                  <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
+                  <div className="row-sub">{l.sub}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* AI-ranking block */}
+        <div>
+          <p className="mb-2 text-sm font-semibold text-gray-500">הדירוג שלך במנועי ה־AI</p>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <div className="ai-q">שאלה במנועי AI: <b>"{ai.question}"</b></div>
+            <div className="ai-engines">
+              {ai.engines.map((e, i) => (
+                <div className={`ai-eng ${e.appeared ? "on" : "off"}`} key={i}>
+                  <div className="eng-name">{e.name}</div>
+                  <div className="eng-rank">{e.rank}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Module groups ─────────────────────────────────────────────────────────
-
-const moduleGroups = [
-  {
-    icon: "🚀",
-    title: "מנוע צמיחה",
-    color: "#0D9488",
-    modules: ["דשבורד", "פרופיל עסקי", "ערוצי הפצה", "מרכז הזדמנויות"],
-  },
-  {
-    icon: "📊",
-    title: "מודיעין שוק",
-    color: "#6366F1",
-    modules: ["ניתוח מתחרים", "טרנדים", "דירוג SEO/GEO"],
-  },
-  {
-    icon: "🤝",
-    title: "פיתוח עסקי",
-    color: "#F59E0B",
-    modules: ["מכרזים", "כנסים", "חדשות ועדכונים"],
-  },
-  {
-    icon: "⚙️",
-    title: "ניהול מערכת",
-    color: "#EC4899",
-    modules: ["פריטים שמורים", "דוחות", "הגדרות"],
-  },
-]
-
-// ── FAQ ────────────────────────────────────────────────────────────────────
-
 const faqs = [
-  { q: "למי מתאים North Star Radar?", a: "לכל עסק קטן או בינוני שרוצה לצמוח: יועצים, קבלנים, רופאים, שיווק, טכנולוגיה ועוד." },
-  { q: "כמה זמן עד לתוצאות?", a: "רוב המשתמשים מוצאים הזדמנות ראשונה תוך 48 שעות מהרשמה." },
-  { q: "האם צריך ידע טכנולוגי?", a: "בכלל לא. הממשק פשוט ובעברית מלאה." },
-  { q: "מה ההבדל מחיפוש ב-Google?", a: "Google מחזיר מידע כללי. הרדאר מנתח את השוק הספציפי שלך ומייצר פעולות מותאמות אישית." },
-  { q: "האם המידע מתעדכן?", a: "כן, הרדאר סורק את השוק כל שבוע ומעדכן אוטומטית." },
-  { q: "מה כולל המנוי?", a: "כל המודולים: מנוע צמיחה, מודיעין שוק, פיתוח עסקי וניהול מערכת — הכל ב-79 ₪ בחודש." },
+  { q: "מה בעצם מקבלים?", a: "דוח שוק שבועי אחד, מותאם לעסק שלך: מכרזים רלוונטיים, שותפים פוטנציאליים, מה קורה אצל המתחרים, והדירוג שלך בגוגל ובמנועי AI — עם פעולות ברורות לשבוע." },
+  { q: "מאיפה מגיע המידע?", a: "מכרזים ממקורות רשמיים (למשל רכבת ישראל דרך ה-API שלה), נתוני חיפוש אמיתיים, ובדיקת דירוג בגוגל ובמנועי AI. כל הלינקים מאומתים — לא מומצאים." },
+  { q: "כמה זמן עד הדוח הראשון?", a: "הסריקה הראשונית רצה תוך כשעה מההרשמה, ואז מקבלים דוח שבועי קבוע." },
+  { q: "האם צריך ידע טכנולוגי?", a: "בכלל לא. נרשמים, מגדירים את העסק בכמה שדות, והדוח מגיע אוטומטית. הכל בעברית." },
+  { q: "מה ההבדל מחיפוש ב-Google?", a: "Google מחזיר מידע כללי. הרדאר מנתח את השוק הספציפי שלך פעם בשבוע ומרכז הכל לדוח אחד עם פעולות מותאמות." },
+  { q: "מה המחיר וההתחייבות?", a: "79 ₪ לחודש, כל המודולים כלולים, ביטול בכל רגע." },
 ]
 
 function FaqItem({ q, a }: { q: string; a: string }) {
@@ -159,139 +162,129 @@ export default function LandingPage() {
     <div dir="rtl" className="min-h-screen bg-white text-gray-900">
       <Header />
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="mx-auto max-w-6xl px-4 pt-16 pb-4 sm:px-6 text-center">
-        <div
-          className="mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium"
-          style={{ borderColor: "#0D9488", color: "#0D9488", background: "#F0FDFA" }}
-        >
-          🚀 מודיעין עסקי מבוסס AI לשוק הישראלי
-        </div>
+      {/* ── HERO ─────────────────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-6xl px-4 pt-14 pb-8 sm:px-6">
+        <div className="grid items-center gap-10 lg:grid-cols-2">
+          <div className="text-center lg:text-right">
+            <div
+              className="mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium"
+              style={{ borderColor: "#0D9488", color: "#0D9488", background: "#F0FDFA" }}
+            >
+              📡 מודיעין שוק לעסק שלך — בדוח אחד
+            </div>
+            <h1 className="text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl" style={{ color: "#0F172A" }}>
+              כל מה שקורה בשוק שלך —<br />
+              <span style={{ color: "#0D9488" }}>בדוח אחד שבועי</span>
+            </h1>
+            <p className="mx-auto mt-6 max-w-xl text-lg text-gray-500 leading-relaxed lg:mx-0">
+              מכרזים רלוונטיים, שותפים חדשים, מה קורה אצל המתחרים, והדירוג שלך בגוגל ובמנועי AI —
+              מרוכז לדוח אחד, כל שבוע, מותאם לעסק שלך.
+            </p>
 
-        <h1 className="mx-auto max-w-3xl text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl lg:text-6xl" style={{ color: "#0F172A" }}>
-          הרדאר העסקי שמכוון אותך<br />
-          <span style={{ color: "#0D9488" }}>להזדמנויות הנכונות</span>
-        </h1>
+            <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row lg:justify-start">
+              <Link
+                href="/signup"
+                className="rounded-xl px-8 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
+                style={{ backgroundColor: "#0D9488" }}
+              >
+                התחל עכשיו ←
+              </Link>
+              <a
+                href="/r/demo"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl border-2 px-8 py-3.5 text-base font-bold transition-all hover:scale-105 hover:bg-gray-50"
+                style={{ borderColor: "#0F172A", color: "#0F172A" }}
+              >
+                צפה בדוח לדוגמה →
+              </a>
+            </div>
+            <p className="mt-4 text-sm text-gray-400">
+              דוח לדוגמה של עסק להמחשה — ללא הרשמה
+            </p>
+          </div>
 
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-500 leading-relaxed">
-          North Star Radar סורק את השוק הישראלי ומציג לך מכרזים, טרנדים, מתחרים ולידים — כל שבוע, מותאם לעסק שלך.
-        </p>
-
-        <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Link
-            href="/signup"
-            className="rounded-xl px-8 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
-            style={{ backgroundColor: "#0D9488" }}
-          >
-            הצטרף עכשיו — 79 ₪/חודש ←
-          </Link>
-          <a
-            href="#modules"
-            className="rounded-xl border-2 px-8 py-3.5 text-base font-bold transition-all hover:scale-105 hover:bg-gray-50"
-            style={{ borderColor: "#0F172A", color: "#0F172A" }}
-          >
-            גלה את המודולים
-          </a>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-gray-500">
-          {["מותאם לשוק הישראלי", "ממשק בעברית מלאה", "כל הפיצ'רים כלולים"].map((t) => (
-            <span key={t} className="flex items-center gap-1.5">
-              <span style={{ color: "#0D9488" }}>✓</span> {t}
-            </span>
-          ))}
-        </div>
-
-        <DashboardPreview />
-      </section>
-
-      {/* ── Stats strip ──────────────────────────────────────────────────── */}
-      <section className="mt-16 w-full py-10" style={{ backgroundColor: "#0D9488" }}>
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 text-center">
-          <p className="mb-6 text-lg font-semibold text-white">הרדאר העסקי שמכוון אותך להזדמנויות הנכונות</p>
-          <div className="flex flex-wrap justify-center gap-8 sm:gap-16">
-            {[
-              { value: "2–5", label: "הזדמנויות בחודש" },
-              { value: "₪15K–₪100K", label: "פוטנציאל" },
-              { value: "40+ שעות", label: "חיסכון במחקר" },
-              { value: "79 ₪", label: "בחודש הכל כלול" },
-            ].map((s) => (
-              <div key={s.label} className="text-center">
-                <div className="text-2xl font-extrabold text-white">{s.value}</div>
-                <div className="text-sm text-teal-100">{s.label}</div>
-              </div>
-            ))}
+          {/* Phone-frame mockup showing the REAL demo report (iframe, never drifts) */}
+          <div className="flex justify-center">
+            <div
+              className="relative w-full max-w-[360px] overflow-hidden rounded-[2.2rem] border-[10px] border-gray-900 bg-gray-900 shadow-2xl"
+              style={{ aspectRatio: "9 / 17" }}
+            >
+              <div className="absolute left-1/2 top-0 z-10 h-5 w-32 -translate-x-1/2 rounded-b-2xl bg-gray-900" />
+              <iframe
+                src="/r/demo"
+                title="דוח לדוגמה"
+                loading="lazy"
+                className="h-full w-full rounded-[1.5rem] bg-white"
+              />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── Module groups ────────────────────────────────────────────────── */}
-      <section id="modules" className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-        <h2 className="mb-4 text-center text-3xl font-extrabold" style={{ color: "#0F172A" }}>
-          ארבעה מנועים. תמונה שלמה.
+      {/* ── TRUST STRIP ──────────────────────────────────────────────────── */}
+      <section className="border-y border-gray-100 bg-gray-50 py-4">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-x-8 gap-y-2 px-4 text-center text-sm text-gray-500 sm:px-6">
+          <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> מכרזים ממקורות רשמיים</span>
+          <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> כל הלינקים מאומתים</span>
+          <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> נתוני חיפוש אמיתיים</span>
+        </div>
+      </section>
+
+      {/* ── PAIN ─────────────────────────────────────────────────────────── */}
+      <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
+        <h2 className="mb-10 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
+          כמה מזה מוכר לך?
         </h2>
-        <p className="mb-14 text-center text-gray-500 max-w-xl mx-auto">
-          כל המודולים כלולים במנוי אחד. לא צריך לבחור — מקבלים הכל.
-        </p>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {moduleGroups.map((g) => (
-            <div
-              key={g.title}
-              className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-200 hover:shadow-lg hover:-translate-y-1"
-              style={{ borderTop: `4px solid ${g.color}` }}
-            >
-              <div className="mb-3 text-3xl">{g.icon}</div>
-              <h3 className="mb-4 text-base font-bold" style={{ color: "#0F172A" }}>{g.title}</h3>
-              <ul className="space-y-2">
-                {g.modules.map((m) => (
-                  <li key={m} className="flex items-center gap-2 text-sm text-gray-600">
-                    <span style={{ color: g.color }}>✓</span> {m}
-                  </li>
-                ))}
-              </ul>
+        <div className="grid gap-6 sm:grid-cols-3">
+          {[
+            { icon: "🗂️", t: "לבדוק 5 אתרים ידנית", d: "מכרזים, מתחרים, טרנדים — כל אחד באתר אחר, כל שבוע מחדש." },
+            { icon: "🤷", t: "לנחש לגבי המתחרים", d: "מה הם השיקו? איפה הם חזקים? בלי מעקב מסודר — לא באמת יודעים." },
+            { icon: "⌛", t: "לגלות מכרז אחרי שנסגר", d: "ההזדמנות הייתה שם, אבל היא עברה לפני שהספקת לראות אותה." },
+          ].map((p) => (
+            <div key={p.t} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+              <div className="mb-3 text-3xl">{p.icon}</div>
+              <h3 className="mb-2 text-base font-bold" style={{ color: "#0F172A" }}>{p.t}</h3>
+              <p className="text-sm text-gray-500 leading-relaxed">{p.d}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ── Features highlight ───────────────────────────────────────────── */}
-      <section className="bg-gray-50 py-20">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <h2 className="mb-16 text-center text-3xl font-extrabold" style={{ color: "#0F172A" }}>
-            מה תקבל כל שבוע
+      {/* ── REPORT SHOWCASE (live fragments, real report components/CSS) ──── */}
+      <section id="report" className="bg-gray-50 py-16">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <h2 className="mb-3 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
+            ככה נראה הדוח שלך
           </h2>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              { icon: "📋", title: "מכרזים ממשלתיים ועירוניים", desc: "סריקה שוטפת של מכרזים רלוונטיים לתחום שלך, כולל תקציב ותאריך הגשה." },
-              { icon: "📈", title: "טרנדים חמים בשוק", desc: "זיהוי כיוונים צומחים בשוק הישראלי לפני שהם הופכים לרווים." },
-              { icon: "🔍", title: "ניתוח מתחרים", desc: "מה המתחרים שלך עושים, איפה הם חלשים ואיפה אתה יכול להיות טוב יותר." },
-              { icon: "🤝", title: "לידים לשיתופי פעולה", desc: "עסקים ישראליים שמחפשים שותפים בדיוק בתחום שלך." },
-              { icon: "🎯", title: "פעולות לשבוע", desc: "AI מייצר רשימת פעולות מדויקת — לא הנחיות כלליות, פעולות ספציפיות לעסק." },
-              { icon: "⭐", title: "מרכז הזדמנויות", desc: "Pipeline עסקי שמנהל ועוקב אחרי כל הזדמנות שמצאת, מהתחלה ועד סגירה." },
-            ].map((b) => (
-              <div
-                key={b.title}
-                className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:border-teal-200"
-              >
-                <div className="mb-3 text-3xl">{b.icon}</div>
-                <h3 className="mb-2 text-base font-bold" style={{ color: "#0F172A" }}>{b.title}</h3>
-                <p className="text-sm text-gray-500 leading-relaxed">{b.desc}</p>
-              </div>
-            ))}
+          <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
+            לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
+          </p>
+          <ReportFragments />
+          <div className="mt-10 text-center">
+            <a
+              href="/r/demo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block rounded-xl border-2 px-8 py-3.5 text-base font-bold transition-all hover:scale-105 hover:bg-white"
+              style={{ borderColor: "#0D9488", color: "#0D9488" }}
+            >
+              צפה בדוח המלא לדוגמה →
+            </a>
           </div>
         </div>
       </section>
 
-      {/* ── How it works ─────────────────────────────────────────────────── */}
+      {/* ── HOW IT WORKS ─────────────────────────────────────────────────── */}
       <section id="how" className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <h2 className="mb-16 text-center text-3xl font-extrabold" style={{ color: "#0F172A" }}>
           איך זה עובד?
         </h2>
         <div className="flex flex-col gap-12 lg:flex-row">
           {[
-            { num: "1", icon: "🏢", title: "מוסיפים את העסק", desc: "מזינים שם העסק, תחום ועיר. פחות מ-2 דקות." },
-            { num: "2", icon: "🤖", title: "AI סורק את השוק", desc: "הרדאר סורק מתחרים, טרנדים, מכרזים ולידים בזמן אמת." },
-            { num: "3", icon: "🎯", title: "מקבלים הזדמנויות לפעולה", desc: "רשימה ברורה: מה לעשות השבוע כדי לצמוח ולהרוויח יותר." },
+            { num: "1", icon: "🏢", title: "נרשמים ומגדירים את העסק", desc: "שם, תחום ואזור פעילות. פחות משתי דקות." },
+            { num: "2", icon: "🤖", title: "סריקה ראשונית תוך שעה", desc: "הרדאר סורק מכרזים, שותפים, מתחרים ודירוג — ומרכיב את הדוח." },
+            { num: "3", icon: "📩", title: "דוח ראשון + דוח שבועי קבוע", desc: "מקבלים דוח מלא, ואז עדכון אוטומטי כל שבוע — בלי לחפש כלום." },
           ].map((step, i) => (
             <div key={step.num} className="relative flex flex-1 flex-col items-center text-center">
               <div
@@ -304,36 +297,14 @@ export default function LandingPage() {
               <h3 className="mb-2 text-lg font-bold" style={{ color: "#0F172A" }}>{step.title}</h3>
               <p className="text-sm text-gray-500 leading-relaxed max-w-xs">{step.desc}</p>
               {i < 2 && (
-                <div className="absolute left-0 top-7 hidden w-8 text-2xl text-gray-300 lg:block" style={{ left: "-1rem" }}>
-                  ←
-                </div>
+                <div className="absolute top-7 hidden text-2xl text-gray-300 lg:block" style={{ left: "-1rem" }}>←</div>
               )}
             </div>
           ))}
         </div>
       </section>
 
-      {/* ── ROI ──────────────────────────────────────────────────────────── */}
-      <section className="py-20" style={{ backgroundColor: "#0F172A" }}>
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 text-center">
-          <h2 className="mb-12 text-3xl font-extrabold text-white">כמה שווה לעסק שלך?</h2>
-          <div className="grid gap-6 sm:grid-cols-3">
-            {[
-              { value: "2–5", label: "הזדמנויות חדשות בחודש" },
-              { value: "₪15,000–₪100,000", label: "פוטנציאל הכנסה נוסף" },
-              { value: "40+", label: "שעות מחקר שנחסכות" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-2xl p-8" style={{ background: "rgba(255,255,255,0.06)" }}>
-                <div className="mb-2 text-4xl font-extrabold" style={{ color: "#0D9488" }}>{s.value}</div>
-                <div className="text-sm text-gray-400">{s.label}</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-8 text-sm text-gray-500">הכל מבוסס על נתוני שוק אמיתיים ולא הערכות גנריות</p>
-        </div>
-      </section>
-
-      {/* ── Pricing ──────────────────────────────────────────────────────── */}
+      {/* ── PRICING ──────────────────────────────────────────────────────── */}
       <section id="pricing" className="bg-gray-50 py-20">
         <div className="mx-auto max-w-xl px-4 sm:px-6">
           <div className="text-center mb-12">
@@ -341,10 +312,7 @@ export default function LandingPage() {
             <p className="mt-3 text-gray-500">מסלול אחד. כל המודולים. ללא הפתעות.</p>
           </div>
 
-          <div
-            className="relative rounded-2xl bg-white p-10 shadow-xl"
-            style={{ border: "2px solid #0D9488" }}
-          >
+          <div className="relative rounded-2xl bg-white p-10 shadow-xl" style={{ border: "2px solid #0D9488" }}>
             <div
               className="absolute -top-3 right-8 rounded-full px-4 py-1 text-xs font-bold text-white"
               style={{ backgroundColor: "#0D9488" }}
@@ -361,13 +329,12 @@ export default function LandingPage() {
 
             <ul className="space-y-3 mb-8">
               {[
-                "🚀 מנוע צמיחה מלא (דשבורד, פרופיל, ערוצי הפצה, מרכז הזדמנויות)",
-                "📊 מודיעין שוק (מתחרים, טרנדים, דירוג SEO/GEO)",
-                "🤝 פיתוח עסקי (מכרזים, כנסים, חדשות)",
-                "⚙️ ניהול מערכת (פריטים שמורים, דוחות, הגדרות)",
-                "עדכון שבועי אוטומטי",
-                "ממשק בעברית מלאה",
-                "תמיכה בעברית",
+                "דוח שוק שבועי מלא, מותאם לעסק",
+                "מכרזים רלוונטיים ממקורות רשמיים",
+                "שותפים ולידים לפי ערוצי הפצה",
+                "מעקב מתחרים + הזדמנויות",
+                "דירוג בגוגל ובמנועי AI + טרנדים",
+                "פעולות ברורות לכל שבוע",
               ].map((feat) => (
                 <li key={feat} className="flex items-start gap-2 text-sm text-gray-700">
                   <span className="mt-0.5 shrink-0" style={{ color: "#0D9488" }}>✓</span>
@@ -381,27 +348,9 @@ export default function LandingPage() {
               className="block w-full rounded-xl py-4 text-center text-base font-bold text-white transition-all hover:opacity-90 hover:scale-105"
               style={{ backgroundColor: "#0D9488" }}
             >
-              הצטרף עכשיו ←
+              התחל עכשיו ←
             </Link>
             <p className="mt-4 text-center text-xs text-gray-400">ביטול בכל רגע · תשלום מאובטח</p>
-          </div>
-        </div>
-      </section>
-
-      {/* ── CTA ──────────────────────────────────────────────────────────── */}
-      <section className="py-20">
-        <div className="mx-auto max-w-2xl px-4 sm:px-6 text-center">
-          <div className="rounded-3xl p-12 shadow-xl" style={{ background: "linear-gradient(135deg, #0D9488 0%, #0891B2 100%)" }}>
-            <h2 className="mb-4 text-3xl font-extrabold text-white">מוכן לנווט בשוק חכם יותר?</h2>
-            <p className="mb-8 text-teal-100">הצטרף ותראה הזדמנויות עסקיות אמיתיות תוך 48 שעות.</p>
-            <Link
-              href="/signup"
-              className="inline-block rounded-xl bg-white px-8 py-4 text-base font-extrabold transition-all hover:scale-105 hover:shadow-lg"
-              style={{ color: "#0D9488" }}
-            >
-              הצטרף עכשיו — 79 ₪/חודש ←
-            </Link>
-            <p className="mt-6 text-sm text-teal-100">ביטול בכל רגע · אין התחייבות · תמיכה בעברית</p>
           </div>
         </div>
       </section>
@@ -414,22 +363,32 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Final CTA ────────────────────────────────────────────────────── */}
+      {/* ── CLOSING CTA ──────────────────────────────────────────────────── */}
       <section className="py-24" style={{ backgroundColor: "#0F172A" }}>
         <div className="mx-auto max-w-3xl px-4 sm:px-6 text-center">
           <h2 className="mb-5 text-4xl font-extrabold text-white leading-tight">
-            התחל לנווט את העסק שלך עם North Star Radar
+            כל השוק שלך — בדוח אחד, כל שבוע
           </h2>
-          <p className="mb-8 text-lg text-gray-400">הצטרף לעסקים שכבר מוצאים הזדמנויות חדשות כל שבוע</p>
-          <Link
-            href="/signup"
-            className="inline-block rounded-xl px-10 py-4 text-lg font-extrabold text-white shadow-lg transition-all hover:scale-105 hover:opacity-90"
-            style={{ backgroundColor: "#0D9488" }}
-          >
-            הצטרף עכשיו ←
-          </Link>
+          <p className="mb-8 text-lg text-gray-400">הפסק לחפש בעשרה מקומות. תן לרדאר לרכז לך את זה.</p>
+          <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Link
+              href="/signup"
+              className="inline-block rounded-xl px-10 py-4 text-lg font-extrabold text-white shadow-lg transition-all hover:scale-105 hover:opacity-90"
+              style={{ backgroundColor: "#0D9488" }}
+            >
+              התחל עכשיו ←
+            </Link>
+            <a
+              href="/r/demo"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block rounded-xl border-2 border-gray-600 px-10 py-4 text-lg font-bold text-gray-200 transition-all hover:scale-105 hover:border-gray-400"
+            >
+              צפה בדוח לדוגמה →
+            </a>
+          </div>
           <p className="mt-6 text-sm text-gray-500">
-            ✓ 79 ₪ לחודש &nbsp;·&nbsp; ✓ ביטול בכל רגע &nbsp;·&nbsp; ✓ כל הפיצ'רים כלולים
+            ✓ 79 ₪ לחודש &nbsp;·&nbsp; ✓ ביטול בכל רגע &nbsp;·&nbsp; ✓ ללא התחייבות
           </p>
         </div>
       </section>
@@ -440,11 +399,12 @@ export default function LandingPage() {
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
             <div>
               <Image src="/whitelogo.png" alt="North Star Radar" width={200} height={56} className="h-12 w-auto object-contain mb-1" unoptimized />
-              <p className="text-xs text-gray-400">הרדאר העסקי שמכוון אותך להזדמנויות הנכונות</p>
+              <p className="text-xs text-gray-400">מודיעין שוק לעסק שלך — בדוח אחד שבועי</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
-              <a href="#modules" className="hover:text-gray-900 transition-colors">מודולים</a>
+              <a href="#report" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
+              <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">דוח לדוגמה</a>
               <a href="mailto:support@nsradar.co.il" className="hover:text-gray-900 transition-colors">צור קשר</a>
               <Link href="/terms" className="hover:text-gray-900 transition-colors">תנאי שימוש</Link>
               <Link href="/privacy" className="hover:text-gray-900 transition-colors">מדיניות פרטיות</Link>
