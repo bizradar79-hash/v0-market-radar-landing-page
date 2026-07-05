@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-const WA_URL = 'https://wa.me/972559137417'
+const WA_URL = 'https://wa.me/972559137417?text=' + encodeURIComponent('היי, אשמח לשמוע פרטים על North Star Radar')
 const STORAGE_KEY = 'wa_btn_dismissed'
 
 export default function WhatsAppButton() {

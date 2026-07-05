@@ -136,7 +136,7 @@ const HE_MONTHS_SHORT = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יו
 // Inline demand sparkline — no chart library. Bars read oldest→newest (dir=ltr),
 // last month highlighted, with aligned Hebrew month labels (last bar = current
 // month, counting backwards). Heights scale to the series max.
-function DemandSpark({ series }: { series: number[] }) {
+export function DemandSpark({ series }: { series: number[] }) {
   const bars = series.slice(-12)
   const max = Math.max(...bars, 1)
   const now = new Date()

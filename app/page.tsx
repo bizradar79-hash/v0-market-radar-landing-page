@@ -1,10 +1,14 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { REPORT_CSS } from "@/components/report/ReportView"
+import { REPORT_CSS, DemandSpark } from "@/components/report/ReportView"
 import { DEMO_REPORT } from "@/lib/report/demo-data"
+
+// WhatsApp demo-call CTA (prefilled Hebrew).
+const WA_DEMO = "https://wa.me/972559137417?text=" +
+  encodeURIComponent("היי! אשמח לקבוע שיחת דמו קצרה על North Star Radar לעסק שלי")
 
 // ── Scroll-aware header ───────────────────────────────────────────────────
 
@@ -50,83 +54,213 @@ function Header() {
   )
 }
 
-// ── Live report fragments (rendered with the REAL report CSS — never drift) ──
+// ── Live report showcase (rendered with the REAL report CSS — never drifts) ──
 // Injects the report stylesheet once, then renders `.rpt`-scoped fragments from
-// the same demo data that powers /r/demo.
+// the same demo data that powers /r/demo. All 8 intelligence modules, compact.
 
-function ReportFragments() {
+// Scoped wrapper: report CSS applies, but neutralize the full-page base rules
+// (min-height:100vh / page bg) so fragments sit inside the landing cards.
+function Rpt({ children }: { children: ReactNode }) {
+  return (
+    <div className="rpt" dir="rtl" style={{ minHeight: 0, background: "transparent", fontSize: "16px" }}>
+      {children}
+    </div>
+  )
+}
+
+// One rank cell, matching ReportView (unranked → calm muted label, not a bare dash).
+function RankCell({ rank, warn, unranked }: { rank: string; warn?: boolean; unranked?: boolean }) {
+  return unranked
+    ? <div className="rank-unranked">לא מדורג<br />עדיין</div>
+    : <div className={`rank-num${warn ? " warn" : ""}`}>{rank}</div>
+}
+
+function ModuleCard({ title, caption, children }: { title: string; caption: string; children: ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <div className="mb-1 text-base font-bold" style={{ color: "#0F172A" }}>{title}</div>
+      <p className="mb-4 text-sm text-gray-500">{caption}</p>
+      {children}
+    </div>
+  )
+}
+
+function ReportShowcase() {
   const a = DEMO_REPORT.actions[0]
   const t = DEMO_REPORT.tenders[0]
   const g = DEMO_REPORT.leadGroups[0]
+  const ct = DEMO_REPORT.competitorTrends![0]
+  const seoP = DEMO_REPORT.seoPrimary!
+  const seoX = DEMO_REPORT.seoExtras || []
   const ai = DEMO_REPORT.seoAi!
+  const demand = DEMO_REPORT.demand!
+  const trend = DEMO_REPORT.trends[0]
+  const news = DEMO_REPORT.news[0]
 
   return (
-    <div className="rpt" dir="rtl" style={{ background: "transparent" }}>
+    <>
+      {/* Inject the real report stylesheet + fonts once. */}
       <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Action card with the red deadline chip */}
-        <div>
-          <p className="mb-2 text-sm font-semibold text-gray-500">פעולה עם דדליין — מסומנת באדום</p>
-          <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
-            <div className="action-num">1</div>
-            <div className="action-body">
-              <div className="action-title">{a.title}</div>
-              <div className="action-why">{a.why}</div>
-              <div className="action-src">{a.src}</div>
+      {/* Metrics strip — the "everything at a glance" row */}
+      <Rpt>
+        <div className="metrics-grid">
+          {DEMO_REPORT.metrics.map((m, i) => (
+            <div className={`metric${m.hot ? " hot" : ""}`} key={i}>
+              <div className="num">{m.num}</div>
+              {m.badge && <div><span className={`badge ${m.badge.kind}`}>{m.badge.text}</span></div>}
+              <div className="label" dangerouslySetInnerHTML={{ __html: m.label }} />
             </div>
-            <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
-          </div>
+          ))}
         </div>
+      </Rpt>
 
-        {/* Tender row */}
-        <div>
-          <p className="mb-2 text-sm font-semibold text-gray-500">מכרז רלוונטי — ממקור רשמי, לינק מאומת</p>
-          <div className="card" style={{ marginBottom: 0 }}>
-            <div className={`row${t.hot ? " hot-row" : ""}`}>
-              <div className="row-main">
-                <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
-                <div className="row-sub">{t.sub}</div>
+      {/* 8 module cards */}
+      <div className="mt-6 grid gap-5 md:grid-cols-2">
+        {/* 1. Actions */}
+        <ModuleCard title="🎯 המלצות לפעולה" caption="כל שבוע: מה לעשות, לפי סדר דחיפות.">
+          <Rpt>
+            <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
+              <div className="action-num">1</div>
+              <div className="action-body">
+                <div className="action-title">{a.title}</div>
+                <div className="action-why">{a.why}</div>
+                <div className="action-src">{a.src}</div>
               </div>
-              <div className="row-side"><span className="deadline">{t.side}</span></div>
+              <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
             </div>
-          </div>
-        </div>
+          </Rpt>
+        </ModuleCard>
 
-        {/* Partners-by-channel block */}
-        <div>
-          <p className="mb-2 text-sm font-semibold text-gray-500">שותפים לפי ערוץ הפצה</p>
-          <div className="card" style={{ marginBottom: 0 }}>
-            <div className="channel-tag">{g.channel}</div>
-            {g.leads.map((l, i) => (
-              <div className="row" key={i}>
+        {/* 2. Tenders */}
+        <ModuleCard title="📋 מכרזים" caption="מכרזים רלוונטיים ממקורות רשמיים, לפני שהם נסגרים.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className={`row${t.hot ? " hot-row" : ""}`}>
                 <div className="row-main">
-                  <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
-                  <div className="row-sub">{l.sub}</div>
+                  <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
+                  <div className="row-sub">{t.sub}</div>
                 </div>
+                <div className="row-side"><span className="deadline">{t.side}</span></div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
 
-        {/* AI-ranking block */}
-        <div>
-          <p className="mb-2 text-sm font-semibold text-gray-500">הדירוג שלך במנועי ה־AI</p>
-          <div className="card" style={{ marginBottom: 0 }}>
-            <div className="ai-q">שאלה במנועי AI: <b>"{ai.question}"</b></div>
-            <div className="ai-engines">
-              {ai.engines.map((e, i) => (
-                <div className={`ai-eng ${e.appeared ? "on" : "off"}`} key={i}>
-                  <div className="eng-name">{e.name}</div>
-                  <div className="eng-rank">{e.rank}</div>
+        {/* 3. Partners / channels */}
+        <ModuleCard title="🤝 שותפים וערוצי הפצה" caption="שותפים אמיתיים באזור שלך, לפי הערוצים שתגדיר.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="channel-tag">{g.channel}</div>
+              {g.leads.map((l, i) => (
+                <div className="row" key={i}>
+                  <div className="row-main">
+                    <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
+                    <div className="row-sub">{l.sub}</div>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 4. Competitors — trends + amber opportunity */}
+        <ModuleCard title="🔍 מתחרים" caption="מה המתחרים עושים — ואיפה ההזדמנות שלך.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="comp-intro">לא זוהו שינויים מהותיים השבוע — אבל הנה מה שקורה אצל המתחרים:</div>
+              <div className="row">
+                <div className="row-main">
+                  <div className="row-title">{ct.name}</div>
+                  <div className="row-sub">{ct.topic}</div>
+                  {ct.opportunity && (
+                    <div className="comp-change">
+                      <span className="pill amber">נקודה למחשבה</span>
+                      <span className="opp-text">{ct.opportunity}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 5. Google ranking */}
+        <ModuleCard title="📊 דירוג בגוגל" caption="איפה אתה מדורג על המילים שחשובות, עם נפחי חיפוש אמיתיים.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="rank-row">
+                <RankCell rank={seoP.rank} warn={seoP.warn} unranked={seoP.unranked} />
+                <div className="rank-main">
+                  <div className="rank-title">{seoP.query}</div>
+                  <div className="rank-sub">{seoP.sub}</div>
+                </div>
+              </div>
+              {seoX.slice(0, 2).map((s, i) => (
+                <div className="rank-row" key={i}>
+                  <RankCell rank={s.rank} warn={s.warn} unranked={s.unranked} />
+                  <div className="rank-main">
+                    <div className="rank-title">{s.query}</div>
+                    <div className="rank-sub">{s.sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 6. AI (GEO) ranking */}
+        <ModuleCard title="🤖 דירוג במנועי AI" caption="ככה אתה נראה כשלקוחות שואלים את ChatGPT.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="ai-q">שאלה במנועי AI: <b>"{ai.question}"</b></div>
+              <div className="ai-engines">
+                {ai.engines.map((e, i) => (
+                  <div className={`ai-eng ${e.appeared ? "on" : "off"}`} key={i}>
+                    <div className="eng-name">{e.name}</div>
+                    <div className="eng-rank">{e.rank}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 7. Trends + demand sparkline */}
+        <ModuleCard title="📈 טרנדים ומילות מפתח" caption="מה עולה בשוק שלך — נתוני חיפוש אמיתיים, 12 חודשים אחורה.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="demand">
+                <div className="demand-head"><b>{demand.label}</b> · "{demand.keyword}"</div>
+                <DemandSpark series={demand.series} />
+              </div>
+              <div className={`row${trend.hot ? " hot-row" : ""}`}>
+                <div className="row-main">
+                  <div className="row-title">{trend.title}{trend.hot && <span className="pill amber">🔥 חם</span>}</div>
+                  <div className="row-sub">{trend.sub}</div>
+                </div>
+                <div className="row-side"><span className={`badge ${trend.badge.kind}`}>{trend.badge.text}</span></div>
+              </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 8. News */}
+        <ModuleCard title="📰 חדשות רלוונטיות" caption="רק החדשות שנוגעות לעסק שלך.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="row">
+                <div className="row-main">
+                  <div className="row-title">{news.title}{news.pill && <span className="pill amber">{news.pill}</span>}</div>
+                  <div className="row-sub">{news.sub}</div>
+                </div>
+              </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -181,26 +315,30 @@ export default function LandingPage() {
               מרוכז לדוח אחד, כל שבוע, מותאם לעסק שלך.
             </p>
 
-            <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row lg:justify-start">
+            <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center lg:justify-start">
               <Link
                 href="/signup"
-                className="rounded-xl px-8 py-3.5 text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
+                className="rounded-xl px-8 py-3.5 text-center text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
                 style={{ backgroundColor: "#0D9488" }}
               >
                 התחל עכשיו ←
               </Link>
               <a
-                href="/r/demo"
+                href={WA_DEMO}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-xl border-2 px-8 py-3.5 text-base font-bold transition-all hover:scale-105 hover:bg-gray-50"
-                style={{ borderColor: "#0F172A", color: "#0F172A" }}
+                className="rounded-xl border-2 px-8 py-3.5 text-center text-base font-bold transition-all hover:scale-105"
+                style={{ borderColor: "#25D366", color: "#128C4B" }}
               >
-                צפה בדוח לדוגמה →
+                קבע שיחת דמו 💬
               </a>
             </div>
             <p className="mt-4 text-sm text-gray-400">
-              דוח לדוגמה של עסק להמחשה — ללא הרשמה
+              או{" "}
+              <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="font-semibold text-gray-500 underline hover:text-gray-700">
+                צפה בדוח לדוגמה →
+              </a>{" "}
+              (עסק להמחשה, ללא הרשמה)
             </p>
           </div>
 
@@ -255,12 +393,15 @@ export default function LandingPage() {
       <section id="report" className="bg-gray-50 py-16">
         <div className="mx-auto max-w-5xl px-4 sm:px-6">
           <h2 className="mb-3 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
-            ככה נראה הדוח שלך
+            מה נכנס לדוח השבועי שלך
           </h2>
+          <p className="mb-2 text-center text-lg font-bold" style={{ color: "#0D9488" }}>
+            8 מנועי מודיעין, דוח אחד
+          </p>
           <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
             לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
           </p>
-          <ReportFragments />
+          <ReportShowcase />
           <div className="mt-10 text-center">
             <a
               href="/r/demo"
@@ -379,14 +520,21 @@ export default function LandingPage() {
               התחל עכשיו ←
             </Link>
             <a
-              href="/r/demo"
+              href={WA_DEMO}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-block rounded-xl border-2 border-gray-600 px-10 py-4 text-lg font-bold text-gray-200 transition-all hover:scale-105 hover:border-gray-400"
+              className="inline-block rounded-xl border-2 px-10 py-4 text-lg font-bold transition-all hover:scale-105"
+              style={{ borderColor: "#25D366", color: "#4ade80" }}
             >
-              צפה בדוח לדוגמה →
+              קבע שיחת דמו 💬
             </a>
           </div>
+          <p className="mt-5 text-sm text-gray-500">
+            או{" "}
+            <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-300">
+              צפה בדוח לדוגמה →
+            </a>
+          </p>
           <p className="mt-6 text-sm text-gray-500">
             ✓ 79 ₪ לחודש &nbsp;·&nbsp; ✓ ביטול בכל רגע &nbsp;·&nbsp; ✓ ללא התחייבות
           </p>
