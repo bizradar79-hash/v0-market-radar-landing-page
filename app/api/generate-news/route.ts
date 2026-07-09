@@ -5,6 +5,7 @@ import { search } from '@/lib/search'
 import { callModel } from '@/lib/call-model'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { filterInsertRows } from '@/lib/admin/hidden'
+import { effectiveKeywords } from '@/lib/keywords'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -103,7 +104,8 @@ export async function POST(request: Request) {
     if (activePrompt) {
       steps.aiPath = { provider: activePrompt.model_provider, model: activePrompt.model_name }
       const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
-      const keywords: string[] = ctx.company?.keywords || []
+      // Unified keyword source (settings-editable, with legacy primaryKeywords fallback).
+      const keywords: string[] = effectiveKeywords(ctx.company, bp)
 
       const coreActivity = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
       const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
@@ -198,13 +200,23 @@ export async function POST(request: Request) {
     const industry = ctx.company?.industry || ''
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
 
-    // Build queries dynamically from business profile
-    const heQuery = businessProfile
-      ? `${businessProfile.industryTags.slice(0, 2).join(' ')} חדשות ישראל`
-      : `${industry} חדשות ישראל`
-    const enQuery = businessProfile
-      ? `${businessProfile.searchQueries[0] || industry} trends news`
-      : `${industry} trends news`
+    // Build queries KEYWORD-FIRST from the unified source (settings-editable, with
+    // legacy primaryKeywords fallback). industryTags/searchQueries are demoted to a
+    // fallback only — used just when the client has no keywords at all (so no client
+    // ever gets zero queries). This is what connects settings edits → news search.
+    const kws = effectiveKeywords(ctx.company, businessProfile)
+    const kwHe = kws.slice(0, 3).join(' ')
+    const kwTop = kws[0] || ''
+    const heQuery = kwHe
+      ? `${kwHe} חדשות ישראל`
+      : businessProfile
+        ? `${businessProfile.industryTags?.slice(0, 2).join(' ') || industry} חדשות ישראל`
+        : `${industry} חדשות ישראל`
+    const enQuery = kwTop
+      ? `${kwTop} news`
+      : businessProfile
+        ? `${businessProfile.searchQueries?.[0] || industry} trends news`
+        : `${industry} trends news`
 
     let list = await fetchNewsFromTavily(heQuery, enQuery)
     steps.tavily = { count: list.length }
