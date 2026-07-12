@@ -264,6 +264,67 @@ function ReportShowcase() {
   )
 }
 
+// ── Hero visual: industry-NEUTRAL animated alert stack ──────────────────────
+// CSS-only sequential fade/slide-in loop, pause-on-hover, reduced-motion safe.
+// Cards deliberately span different modules/industries so no niche association.
+
+const HERO_ALERTS = [
+  { icon: "📋", title: "מכרז חדש רלוונטי אליך — נסגר בעוד 7 ימים", src: "מקור: מכרזים ממשלתיים", chip: "דדליין", color: "#dc2626", chipBg: "#dc2626" },
+  { icon: "🤖", title: "העסק שלך במקום 2 בהמלצות צ'אט ג'י.פי.טי", src: "מקור: דירוג במנועי AI", chip: "הישג", color: "#16a34a", chipBg: "#16a34a" },
+  { icon: "👀", title: "מתחרה עדכן מחירים השבוע", src: "מקור: מעקב מתחרים", chip: "שינוי אצל מתחרה", color: "#d97706", chipBg: "#d97706" },
+  { icon: "🤝", title: "3 שותפים פוטנציאליים חדשים באזור שלך", src: "מקור: ערוצי הפצה", chip: "הזדמנות", color: "#0d9488", chipBg: "#0d9488" },
+  { icon: "📈", title: "מילת מפתח בתחום שלך עלתה 18% החודש", src: "מקור: מגמות מפתח", chip: "טרנד", color: "#0d9488", chipBg: "#0d9488" },
+]
+
+const HERO_ALERT_CSS = `
+  .halert-stack{display:flex;flex-direction:column;gap:12px;max-width:420px;width:100%}
+  .halert-card{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #e5e7eb;border-inline-start-width:5px;border-radius:14px;padding:14px 16px;box-shadow:0 6px 20px -8px rgba(15,23,42,.18);
+    opacity:0;transform:translateY(16px) scale(.98);animation:halertCycle 12s ease-in-out infinite}
+  .halert-stack:hover .halert-card{animation-play-state:paused}
+  .halert-card:nth-child(1){animation-delay:0s}
+  .halert-card:nth-child(2){animation-delay:2.2s}
+  .halert-card:nth-child(3){animation-delay:4.4s}
+  .halert-card:nth-child(4){animation-delay:6.6s}
+  .halert-card:nth-child(5){animation-delay:8.8s}
+  .halert-icon{flex:none;font-size:22px;line-height:1}
+  .halert-body{flex:1;min-width:0}
+  .halert-title{font-weight:700;font-size:14.5px;color:#0f172a;line-height:1.35}
+  .halert-src{font-size:11.5px;color:#94a3b8;margin-top:3px}
+  .halert-chip{flex:none;font-size:11px;font-weight:800;color:#fff;border-radius:20px;padding:4px 11px;white-space:nowrap}
+  @keyframes halertCycle{
+    0%{opacity:0;transform:translateY(16px) scale(.98)}
+    5%{opacity:1;transform:translateY(0) scale(1)}
+    9%{transform:translateY(0) scale(1.025)}
+    15%{transform:translateY(0) scale(1)}
+    90%{opacity:1;transform:translateY(0) scale(1)}
+    100%{opacity:0;transform:translateY(16px) scale(.98)}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .halert-card{opacity:1;transform:none;animation:none}
+  }
+`
+
+function HeroAlertStack() {
+  return (
+    <div className="flex flex-col items-center lg:items-start">
+      <style dangerouslySetInnerHTML={{ __html: HERO_ALERT_CSS }} />
+      <div className="halert-stack" dir="rtl">
+        {HERO_ALERTS.map((c) => (
+          <div className="halert-card" key={c.title} style={{ borderInlineStartColor: c.color }}>
+            <div className="halert-icon">{c.icon}</div>
+            <div className="halert-body">
+              <div className="halert-title">{c.title}</div>
+              <div className="halert-src">{c.src}</div>
+            </div>
+            <span className="halert-chip" style={{ background: c.chipBg }}>{c.chip}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-sm text-gray-400">התראות מתוך הדוח השבועי</p>
+    </div>
+  )
+}
+
 const faqs = [
   { q: "מה בעצם מקבלים?", a: "דוח שוק שבועי אחד, מותאם לעסק שלך: מכרזים רלוונטיים, שותפים פוטנציאליים, מה קורה אצל המתחרים, והדירוג שלך בגוגל ובמנועי AI — עם פעולות ברורות לשבוע." },
   { q: "מאיפה מגיע המידע?", a: "מכרזים ממקורות רשמיים (למשל רכבת ישראל דרך ה-API שלה), נתוני חיפוש אמיתיים, ובדיקת דירוג בגוגל ובמנועי AI. כל הלינקים מאומתים — לא מומצאים." },
@@ -342,20 +403,9 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Phone-frame mockup showing the REAL demo report (iframe, never drifts) */}
-          <div className="flex justify-center">
-            <div
-              className="relative w-full max-w-[360px] overflow-hidden rounded-[2.2rem] border-[10px] border-gray-900 bg-gray-900 shadow-2xl"
-              style={{ aspectRatio: "9 / 17" }}
-            >
-              <div className="absolute left-1/2 top-0 z-10 h-5 w-32 -translate-x-1/2 rounded-b-2xl bg-gray-900" />
-              <iframe
-                src="/r/demo?embed=1"
-                title="דוח לדוגמה"
-                loading="lazy"
-                className="h-full w-full rounded-[1.5rem] bg-white"
-              />
-            </div>
+          {/* Industry-neutral animated alert stack — the product's value moment */}
+          <div className="flex justify-center lg:justify-end">
+            <HeroAlertStack />
           </div>
         </div>
       </section>
@@ -401,6 +451,34 @@ export default function LandingPage() {
           <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
             לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
           </p>
+
+          {/* Phone-frame demo report — loudly labeled as a fictional example */}
+          <div className="mb-14 flex flex-col items-center">
+            <div className="relative w-full max-w-[340px]">
+              <span
+                className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-lg"
+                style={{ backgroundColor: "#d97706" }}
+              >
+                🧪 דוח לדוגמה — עסק פיקטיבי להמחשה
+              </span>
+              <div
+                className="relative overflow-hidden rounded-[2.2rem] border-[10px] border-gray-900 bg-gray-900 shadow-2xl"
+                style={{ aspectRatio: "9 / 17" }}
+              >
+                <div className="absolute left-1/2 top-0 z-10 h-5 w-32 -translate-x-1/2 rounded-b-2xl bg-gray-900" />
+                <iframe
+                  src="/r/demo?embed=1"
+                  title="דוח לדוגמה — עסק פיקטיבי להמחשה"
+                  loading="lazy"
+                  className="h-full w-full rounded-[1.5rem] bg-white"
+                />
+              </div>
+            </div>
+            <p className="mt-7 max-w-md text-center text-base font-semibold text-gray-600">
+              ככה נראה הדוח שמגיע אליך בוואטסאפ, כל שבוע
+            </p>
+          </div>
+
           <ReportShowcase />
           <div className="mt-10 text-center">
             <a
