@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { extractXaiCitations, validateAgainstCitations } from '@/lib/xai-citations'
 import { guardWrite, logKeptExisting } from '@/lib/scan/guard'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
@@ -95,6 +96,7 @@ ${businessContext}
 - מצא עד 8 טרנדים ספציפיים עם עובדות אמיתיות
 - לכל טרנד — ציין ראיה ספציפית (סטטיסטיקה, ציטוט, מאמר) שמצאת בחיפוש
 - ציין את המקור (שם אתר, פלטפורמה) לכל ראיה
+- source_url: כתובת ה-URL המלאה של דף המקור — אך ורק URL של דף שביקרת בו בחיפוש. אם אין — השאר ריק
 - week_data: 4 מספרים 0-100 המייצגים מגמה שבועית (למשל [40,55,70,85] לטרנד עולה)
 - region: "ישראל" לטרנד ישראלי, "עולם" לטרנד בינלאומי
 
@@ -106,6 +108,7 @@ ${businessContext}
       "direction": "rising",
       "evidence": "עובדה ספציפית שמצאת, למשל: גידול של 40% בחיפושים",
       "source": "שם האתר/מקור",
+      "source_url": "https://... (רק דף אמיתי מהחיפוש, אחרת \"\")",
       "week_data": [50, 60, 70, 80],
       "confidence": 75,
       "region": "ישראל"
@@ -145,6 +148,10 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
       .map((c: any) => c.text)
       .join('')
 
+    // REAL grounding citations from this web_search call — used to VALIDATE any
+    // model-proposed source_url (a URL not present in the citations is dropped).
+    const citations = extractXaiCitations(raw)
+
     const parsed = extractJSON(text)
     if (!parsed?.trends) {
       // COST LEAK FIX: PERSIST the empty result with a fetchedAt so the 12h cache
@@ -177,6 +184,8 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
         direction: ['rising', 'stable', 'declining'].includes(t.direction) ? t.direction : 'stable',
         evidence: String(t.evidence || ''),
         source: String(t.source || ''),
+        // Kept ONLY if it matches a real grounding citation — never invented.
+        source_url: validateAgainstCitations(t.source_url, citations) || undefined,
         week_data: Array.isArray(t.week_data) ? t.week_data.slice(0, 4).map(Number) : [50, 50, 50, 50],
         confidence: typeof t.confidence === 'number' ? Math.min(100, Math.max(0, t.confidence)) : 70,
         region: t.region === 'עולם' ? 'עולם' : 'ישראל',

@@ -178,6 +178,11 @@ export function ScanProgressModal({
           </DialogTitle>
         </DialogHeader>
 
+        {/* The scan runs server-side (sync/run after()-chain) — tab-close-safe. */}
+        <p className="rounded-lg bg-teal-500/5 px-3 py-2 text-xs leading-relaxed text-teal-700">
+          הסריקה רצה ברקע — אפשר לסגור את הדף, הדוח יחכה לך כאן כשתחזור.
+        </p>
+
         {/* Summary bar */}
         <div className="flex flex-wrap items-center gap-3 text-sm border-b pb-3">
           {headerBadge}

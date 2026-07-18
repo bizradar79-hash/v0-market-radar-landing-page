@@ -27,7 +27,7 @@ export default async function DemoReportPage() {
   try {
     const { data: company } = await adminDb()
       .from('companies')
-      .select('id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, competitor_trends, business_profile')
+      .select('id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, competitor_trends, industry_trends, business_profile')
       .eq('is_demo', true)
       .limit(1)
       .single()

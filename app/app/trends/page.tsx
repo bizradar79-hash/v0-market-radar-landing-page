@@ -99,6 +99,7 @@ interface IndustryTrend {
   direction: 'rising' | 'stable' | 'declining'
   evidence: string
   source: string
+  source_url?: string
   week_data: number[]
   confidence: number
   region: 'ישראל' | 'עולם'
@@ -118,6 +119,7 @@ interface CompetitorTrendEntry {
   new_activity: string
   opportunity: string
   has_opportunity: boolean
+  sources?: string[]
 }
 interface CompetitorTrendsData {
   competitor_data: CompetitorTrendEntry[]
@@ -697,7 +699,14 @@ export default function TrendsPage() {
                           </blockquote>
                         )}
                         {t.source && (
-                          <p className="text-[10px] text-muted-foreground/60">מקור: {t.source}</p>
+                          <p className="text-[10px] text-muted-foreground/60">
+                            מקור: {t.source}
+                            {t.source_url && (
+                              <a href={t.source_url} target="_blank" rel="noopener noreferrer" className="mr-1.5 font-semibold text-primary/70 hover:text-primary hover:underline">
+                                מקור ←
+                              </a>
+                            )}
+                          </p>
                         )}
                         {/* Confidence bar */}
                         <div className="flex items-center gap-2">
@@ -786,6 +795,16 @@ export default function TrendsPage() {
                       </p>
                       <p className="text-xs text-amber-700 leading-relaxed">{c.opportunity}</p>
                     </div>
+                  )}
+                  {/* Real grounding sources (captured from the search — never invented) */}
+                  {Array.isArray(c.sources) && c.sources.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground/60">
+                      {c.sources.slice(0, 2).map((u, ui) => (
+                        <a key={ui} href={u} target="_blank" rel="noopener noreferrer" className="ml-2 font-semibold text-primary/70 hover:text-primary hover:underline">
+                          מקור {c.sources!.length > 1 ? ui + 1 : ''} ←
+                        </a>
+                      ))}
+                    </p>
                   )}
                 </CardContent>
               </Card>

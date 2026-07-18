@@ -91,6 +91,11 @@ export const DEMO_REPORT: ReportData = {
     label: 'ביקוש ב־12 החודשים האחרונים (Google)',
   },
 
+  industryTrends: [
+    { title: 'עלייה בביקוש לייעוץ מיחזור אונליין', badge: { kind: 'up', text: '▲ במגמת עלייה' } },
+    { title: 'משכנתאות ירוקות לבנייה חדשה', badge: { kind: 'up', text: '▲ במגמת עלייה' } },
+  ],
+
   trends: [
     { title: 'מיחזור משכנתא', sub: '6,600 חיפושים בחודש', badge: { kind: 'up', text: '▲ +23% מהרבעון הקודם' }, hot: true },
     { title: 'משכנתא הפוכה', sub: '2,400 חיפושים בחודש', badge: { kind: 'up', text: '▲ +11% מהרבעון הקודם' } },

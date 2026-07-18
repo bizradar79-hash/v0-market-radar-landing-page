@@ -52,7 +52,9 @@ export interface ReportData {
   competitorsNote?: string | null   // calm line / intro when no competitor changed this scan
   // Evergreen filler when no changes this scan: top stored competitor-trends,
   // each with an optional amber "opportunity-for-you" line.
-  competitorTrends?: Array<{ name: string; topic: string; opportunity?: string }>
+  competitorTrends?: Array<{ name: string; topic: string; opportunity?: string; sourceUrl?: string }>
+  // Industry hot trends (stored industry_trends) — read-only, with real source links.
+  industryTrends?: Array<{ title: string; badge: { kind: 'up' | 'down' | 'flat'; text: string }; sourceUrl?: string }>
   tenders: Array<{ title: string; sub: string; side: string; pill?: { kind: 'teal' | 'amber'; text: string }; hot?: boolean; deadline?: boolean }>
   leadGroups: Array<{ channel: string; leads: Array<{ title: string; sub: string; matchTag?: { kind: 'high' | 'good'; text: string }; website?: string; score?: number; hot?: boolean }> }>
   // Legacy flat list — kept so older snapshots still render. New reports populate
@@ -301,6 +303,8 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         topic: (c.new_activity || (Array.isArray(c.trending_topics) ? c.trending_topics[0] : '') || '').trim(),
         opportunity: c.has_opportunity && typeof c.opportunity === 'string' && c.opportunity.trim()
           ? c.opportunity.trim() : undefined,
+        sourceUrl: Array.isArray(c.sources) && typeof c.sources[0] === 'string' && /^https?:\/\//.test(c.sources[0])
+          ? c.sources[0] : undefined,
       }))
       .filter((t: any) => t.name && t.topic)
     if (storedTrends.length) {
@@ -444,6 +448,23 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     }
   })
 
+  // ── Industry hot trends (stored industry_trends — read-only, real links) ────
+  const itData: any[] = Array.isArray(company?.industry_trends?.trends) ? company.industry_trends.trends : []
+  const industryTrends: ReportData['industryTrends'] = itData
+    .filter((t: any) => t && typeof t.name === 'string' && t.name.trim())
+    .slice(0, 3)
+    .map((t: any) => ({
+      title: t.name.trim(),
+      badge: t.direction === 'rising'
+        ? { kind: 'up' as const, text: '▲ במגמת עלייה' }
+        : t.direction === 'declining'
+          ? { kind: 'down' as const, text: '▼ במגמת ירידה' }
+          : { kind: 'flat' as const, text: 'יציב' },
+      // source_url was validated against real grounding citations at generation
+      // time — shape-check again here; absent → no link rendered (never invented).
+      sourceUrl: typeof t.source_url === 'string' && /^https?:\/\/[^/]+/.test(t.source_url) ? t.source_url : undefined,
+    }))
+
   // ── Conferences (up to 2) ───────────────────────────────────────────────────
   const confsOut: ReportData['conferences'] = upcomingConfs.slice(0, 2).map((c: any) => ({
     title: c.name || '',
@@ -487,6 +508,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     competitors: competitorsOut,
     competitorsNote,
     competitorTrends,
+    industryTrends,
     tenders: tendersOut,
     leadGroups,
     seo: seoOut,

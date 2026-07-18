@@ -1047,6 +1047,12 @@ export default function OnboardingPage() {
                 </div>
                 <h2 className="text-xl font-semibold text-foreground">מאתחל את החשבון שלך</h2>
                 <p className="mt-1 text-sm text-muted-foreground">AI סורק ומנתח — עוד כמה רגעים ואתה מוכן</p>
+                {/* Honest: the initial scan runs SERVER-SIDE (sync/start → sync/run
+                    after()-chain) and survives tab close. No completion email exists
+                    yet — so we promise the report waits here, not an email. */}
+                <p className="mx-auto mt-3 max-w-sm rounded-lg bg-teal-500/5 px-4 py-2.5 text-xs leading-relaxed text-teal-700">
+                  הסריקה רצה ברקע — אפשר לסגור את הדף, הדוח יחכה לך כאן כשתחזור.
+                </p>
               </div>
 
               {/* Progress bar */}

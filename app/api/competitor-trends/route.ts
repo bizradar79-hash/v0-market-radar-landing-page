@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
+import { extractXaiCitations } from '@/lib/xai-citations'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 
@@ -22,7 +23,7 @@ async function analyzeCompetitor(
   companyIndustry: string,
   companyActivity: string,
   cost: ScanCostCollector,
-): Promise<{ trending_topics: string[]; new_activity: string; opportunity: string } | null> {
+): Promise<{ trending_topics: string[]; new_activity: string; opportunity: string; sources: string[] } | null> {
   const siteHint = competitorWebsite ? ` (אתר: ${competitorWebsite})` : ''
   const today = new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })
 
@@ -80,6 +81,9 @@ CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with 
         : [],
       new_activity: parsed.new_activity ? String(parsed.new_activity) : '',
       opportunity: parsed.opportunity ? String(parsed.opportunity) : '',
+      // REAL grounding citations from this competitor's web_search call — the
+      // honest "מקור" links. Empty when the search returned none (no link shown).
+      sources: extractXaiCitations(raw).slice(0, 3),
     }
   } catch {
     cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
@@ -156,6 +160,7 @@ export async function POST(request: Request) {
           new_activity: analysis?.new_activity ?? '',
           opportunity: analysis?.opportunity ?? '',
           has_opportunity: !!(analysis?.opportunity && analysis.opportunity.length > 10),
+          sources: analysis?.sources ?? [],
         }
       })
     )

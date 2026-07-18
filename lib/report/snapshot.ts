@@ -5,7 +5,7 @@ import { assembleReport } from './assemble'
 const SNAPSHOT_CAP = 26
 
 const COMPANY_COLS =
-  'id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, competitor_trends, business_profile'
+  'id, name, city, geographic_area, geographic_scope, next_sync_at, last_sync_at, weekly_actions, seo_ranking, geo_ranking, keyword_trends, competitor_trends, industry_trends, business_profile'
 
 /**
  * Freeze the CURRENT assembled report for a company into a report_snapshots row.

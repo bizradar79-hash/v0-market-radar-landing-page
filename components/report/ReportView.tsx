@@ -91,6 +91,8 @@ export const REPORT_CSS = `
   .rpt .calm-note{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;color:var(--ink-soft);font-size:14.5px;box-shadow:0 2px 10px -4px rgba(20,33,45,.06)}
   .rpt .comp-intro{padding:16px 22px;border-bottom:1px solid var(--line);color:var(--ink-soft);font-size:14.5px;background:#f8fbfa}
   .rpt .opp-text{font-size:13px;color:var(--amber);line-height:1.5}
+  .rpt .src-link{font-size:12px;font-weight:700;color:var(--teal-deep);text-decoration:none;white-space:nowrap}
+  .rpt .src-link:hover{text-decoration:underline}
   .rpt .lead-link{font-size:12.5px;font-weight:700;color:var(--teal-deep);text-decoration:none}
   .rpt .lead-link:hover{text-decoration:underline}
   .rpt .ai-engines{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 22px;border-bottom:1px solid var(--line)}
@@ -272,7 +274,14 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <div className="row" key={i}>
                     <div className="row-main">
                       <div className="row-title">{t.name}</div>
-                      {t.topic && <div className="row-sub">{t.topic}</div>}
+                      {t.topic && (
+                        <div className="row-sub">
+                          {t.topic}
+                          {t.sourceUrl && (
+                            <>{' '}<a className="src-link" href={t.sourceUrl} target="_blank" rel="noopener noreferrer">מקור ←</a></>
+                          )}
+                        </div>
+                      )}
                       {t.opportunity && (
                         <div className="comp-change">
                           <span className="pill amber">נקודה למחשבה</span>
@@ -429,8 +438,8 @@ export default function ReportView({ data: r, archive, example }: { data: Report
         </section>
       )}
 
-      {/* TRENDS */}
-      {r.trends.length > 0 && (
+      {/* TRENDS — keyword trends + industry hot trends (stored, with real sources) */}
+      {(r.trends.length > 0 || (r.industryTrends && r.industryTrends.length > 0)) && (
         <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">טרנדים ומילות מפתח</span></div>
@@ -445,6 +454,25 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <div className="row-side"><span className={`badge ${t.badge.kind}`}>{t.badge.text}</span></div>
                 </div>
               ))}
+              {/* Industry hot trends — source link only when a REAL captured URL exists */}
+              {(r.industryTrends || []).length > 0 && (
+                <>
+                  <div className="channel-tag">טרנדים חמים בתחום</div>
+                  {r.industryTrends!.map((t, i) => (
+                    <div className="row" key={`it-${i}`}>
+                      <div className="row-main">
+                        <div className="row-title">
+                          {t.title}
+                          {t.sourceUrl && (
+                            <>{' '}<a className="src-link" href={t.sourceUrl} target="_blank" rel="noopener noreferrer">מקור ←</a></>
+                          )}
+                        </div>
+                      </div>
+                      <div className="row-side"><span className={`badge ${t.badge.kind}`}>{t.badge.text}</span></div>
+                    </div>
+                  ))}
+                </>
+              )}
               <a className="more-link" href="/app/trends">לניתוח הטרנדים המלא ←</a>
             </div>
           </div>
