@@ -272,15 +272,16 @@ function ReportShowcase() {
 // Cards deliberately span different modules/industries so no niche association.
 
 const HERO_ALERTS = [
-  // Tender alert is feature-flagged with the module; a conference deadline keeps
-  // the "urgent red" slot honest while tenders are off.
+  // Tender alert is feature-flagged with the module (red = real deadline, only
+  // when tenders are ON). While off: a calm news card — no artificial urgency,
+  // traffic-light discipline (no red card at all).
   ...(TENDERS_ENABLED
     ? [{ icon: "📋", title: "מכרז חדש רלוונטי אליך — נסגר בעוד 7 ימים", src: "מקור: מכרזים ממשלתיים", chip: "דדליין", color: "#dc2626", chipBg: "#dc2626" }]
-    : [{ icon: "📅", title: "כנס מרכזי בתחום שלך — ההרשמה נסגרת בקרוב", src: "מקור: כנסים ואירועים", chip: "מועד קרוב", color: "#dc2626", chipBg: "#dc2626" }]),
+    : [{ icon: "📰", title: "זוהתה כתבה חדשה שרלוונטית לעסק שלך", src: "מקור: חדשות רלוונטיות", chip: "עדכון", color: "#475569", chipBg: "#475569" }]),
   { icon: "🤖", title: "העסק שלך במקום 2 בהמלצות צ'אט ג'י.פי.טי", src: "מקור: דירוג במנועי AI", chip: "הישג", color: "#16a34a", chipBg: "#16a34a" },
   { icon: "👀", title: "מתחרה עדכן מחירים השבוע", src: "מקור: מעקב מתחרים", chip: "שינוי אצל מתחרה", color: "#d97706", chipBg: "#d97706" },
   { icon: "🤝", title: "3 שותפים פוטנציאליים חדשים באזור שלך", src: "מקור: ערוצי הפצה", chip: "הזדמנות", color: "#0d9488", chipBg: "#0d9488" },
-  { icon: "📈", title: "מילת מפתח בתחום שלך עלתה 18% החודש", src: "מקור: מגמות מפתח", chip: "טרנד", color: "#0d9488", chipBg: "#0d9488" },
+  { icon: "📈", title: "מילת מפתח בתחום שלך עלתה 18% מהרבעון הקודם", src: "מקור: מגמות מפתח", chip: "טרנד", color: "#0d9488", chipBg: "#0d9488" },
 ]
 
 const HERO_ALERT_CSS = `
