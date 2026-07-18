@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { TENDERS_ENABLED } from "@/lib/flags"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -364,7 +365,10 @@ export default function AppDashboardPage() {
 
   const kpiCards = [
     { key: "channels", label: "ערוצי הפצה", icon: Share2, href: "/app/distribution-channels", value: data?.channelsCount || 0, color: "bg-teal-100 text-teal-700" },
-    { key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" },
+    // Tenders module feature-flagged off — card hidden, nothing deleted.
+    ...(TENDERS_ENABLED
+      ? [{ key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" }]
+      : []),
     { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" },
     { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0, color: "bg-blue-100 text-blue-700" },
     { key: "conferences", label: "כנסים", icon: Calendar, href: "/app/conferences", value: data?.conferencesCount || 0, color: "bg-indigo-100 text-indigo-700" },
@@ -796,7 +800,8 @@ export default function AppDashboardPage() {
           <section>
             <GroupHeader color="bg-green-500" label="פיתוח עסקי" />
             <div className="grid gap-4 md:grid-cols-2">
-              {/* מכרזים קרובים */}
+              {/* מכרזים קרובים — feature-flagged off (hidden, not deleted) */}
+              {TENDERS_ENABLED && (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -835,6 +840,7 @@ export default function AppDashboardPage() {
                   </Link>
                 </CardContent>
               </Card>
+              )}
 
               {/* כנסים קרובים */}
               <Card>

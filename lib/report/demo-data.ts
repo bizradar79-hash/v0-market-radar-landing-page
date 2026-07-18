@@ -3,6 +3,7 @@
 // the sample can never drift from the product. Used by /r/demo and by the landing
 // page's report-fragment showcase. Clearly labeled as a fictional example.
 import type { ReportData } from './assemble'
+import { TENDERS_ENABLED } from '@/lib/flags'
 
 export const DEMO_COMPANY_NAME = 'משכנתא פלוס'
 
@@ -20,19 +21,21 @@ export const DEMO_REPORT: ReportData = {
 
   thesis: {
     big: 'הביקוש ל<em>"מיחזור משכנתא"</em> עלה ב־23% מהרבעון הקודם.',
-    sub: 'אתה מופיע במקום #2 בהמלצות מנועי ה־AI, 6 הזדמנויות חדשות זוהו השבוע.',
+    sub: `אתה מופיע במקום #2 בהמלצות מנועי ה־AI, ${TENDERS_ENABLED ? 8 : 5} הזדמנויות חדשות זוהו השבוע.`,
   },
 
   metrics: [
     { num: '2', label: 'מיקום ממוצע בגוגל<br>(4 מילות מפתח)', hot: true },
     { num: '#2', label: 'מיקום בהמלצות AI<br>(ChatGPT, Gemini)', hot: true },
-    { num: '3', label: 'מכרזים רלוונטיים<br>פתוחים כרגע' },
+    ...(TENDERS_ENABLED ? [{ num: '3', label: 'מכרזים רלוונטיים<br>פתוחים כרגע' }] : []),
     { num: '5', label: 'שותפים פוטנציאליים<br>שזוהו' },
     { num: '2', label: 'כנסים רלוונטיים<br>קרובים' },
   ],
 
   actions: [
-    { title: 'הגש הצעה למכרז ליווי פיננסי — עיריית ראשון לציון', why: 'דדליין בעוד 6 ימים, התאמה 88% לתחום הייעוץ שלך.', src: 'מקור: מכרז', chip: { kind: 'urgent', text: 'דדליין' }, kind: 'urgent' },
+    ...(TENDERS_ENABLED
+      ? [{ title: 'הגש הצעה למכרז ליווי פיננסי — עיריית ראשון לציון', why: 'דדליין בעוד 6 ימים, התאמה 88% לתחום הייעוץ שלך.', src: 'מקור: מכרז', chip: { kind: 'urgent' as const, text: 'דדליין' }, kind: 'urgent' as const }]
+      : [{ title: 'הירשם לכנס הנדל"ן והמשכנתאות — ההרשמה נסגרת בקרוב', why: 'כנס בהתאמה גבוהה לתחום שלך — הזדמנות נטוורקינג מרכזית.', src: 'מקור: כנס', chip: { kind: 'urgent' as const, text: 'מועד קרוב' }, kind: 'urgent' as const }]),
     { title: 'צור קשר עם 2 מתווכים חדשים שזוהו באזור', why: 'ערוץ הפניות ישיר ללקוחות משכנתא — התאמה גבוהה.', src: 'מקור: ליד', chip: { kind: 'watch', text: 'הזדמנות' }, kind: 'watch' },
     { title: 'פרסם תוכן על "מיחזור משכנתא" — הביקוש בעלייה', why: 'החיפושים עלו 23% ואתה כבר מדורג — הזדמנות לתפוס עוד תנועה.', src: 'מקור: טרנד', chip: { kind: 'watch', text: 'נקודה למחשבה' }, kind: 'watch' },
   ],
@@ -46,11 +49,12 @@ export const DEMO_REPORT: ReportData = {
     { name: 'כספי ייעוץ משכנתאות', topic: 'דירוג גוגל יציב, 4.8★ (212 ביקורות)' },
   ],
 
-  tenders: [
+  // Tenders feature-flagged with the module — empty when off (section hides).
+  tenders: TENDERS_ENABLED ? [
     { title: 'ליווי פיננסי לפרויקט התחדשות עירונית', sub: 'עיריית ראשון לציון · עד ₪180,000', side: '⏳ נסגר בעוד 6 ימים', pill: { kind: 'teal', text: 'התאמה 88%' }, hot: true, deadline: true },
     { title: 'שירותי ייעוץ משכנתאות לעובדי הרשות', sub: 'עיריית נס ציונה', side: 'נסגר בעוד 21 ימים', pill: { kind: 'teal', text: 'התאמה 81%' } },
     { title: 'ייעוץ כלכלי למשקי בית — תוכנית סיוע', sub: 'משרד הבינוי והשיכון', side: 'נסגר בעוד 34 ימים', pill: { kind: 'amber', text: 'התאמה 72%' } },
-  ],
+  ] : [],
 
   leadGroups: [
     { channel: 'מתווכים', leads: [

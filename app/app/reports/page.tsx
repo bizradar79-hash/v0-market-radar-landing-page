@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import {
   Download, RefreshCw, TrendingUp, TrendingDown, Minus, Users, Search, Globe,
   Zap, FileText, Calendar, Target, AlertTriangle, CheckCircle,
@@ -194,7 +195,20 @@ function LoadingSkeleton({ companyName }: { companyName: string }) {
 
 // ── Main Page ──────────────────────────────────────────────────────────────
 
+// RETIRED: the old monthly/weekly report page is superseded by the client web
+// report (/r/[token]). Client-facing entry points removed; code kept, flag-dead.
+function RetiredRedirect() {
+  const router = useRouter()
+  useEffect(() => { router.replace('/app/dashboard') }, [router])
+  return null
+}
+
 export default function ReportsPage() {
+  return <RetiredRedirect />
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyReportsPage() {
   const [report, setReport] = useState<WeeklyReport | null>(null)
   const [companyName, setCompanyName] = useState("")
   const [loading, setLoading] = useState(true)

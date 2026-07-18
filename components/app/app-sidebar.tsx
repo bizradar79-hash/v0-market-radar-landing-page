@@ -5,6 +5,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { TENDERS_ENABLED } from "@/lib/flags"
 import {
   LayoutDashboard,
   Users,
@@ -71,7 +72,10 @@ const getNavGroups = (counts: NavCounts) => [
   {
     title: "🤝 פיתוח עסקי",
     items: [
-      { href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined },
+      // Tenders module is feature-flagged off (client feedback) — hidden, not deleted.
+      ...(TENDERS_ENABLED
+        ? [{ href: "/app/tenders", label: "מכרזים", icon: FileText, badge: counts.tenders || undefined }]
+        : []),
       { href: "/app/conferences", label: "כנסים", icon: Calendar, badge: counts.conferences || undefined },
       { href: "/app/news", label: "חדשות", icon: Newspaper, badge: counts.news || undefined },
     ],
@@ -80,7 +84,7 @@ const getNavGroups = (counts: NavCounts) => [
     title: "⚙️ ניהול מערכת",
     items: [
       { href: "/app/saved", label: "פריטים שמורים", icon: Bookmark, badge: counts.saved || undefined },
-      { href: "/app/reports", label: "דוחות", icon: FileBarChart },
+      // "/app/reports" (old monthly report) retired — the web report supersedes it.
       { href: "/app/settings", label: "הגדרות", icon: Settings },
     ],
   },

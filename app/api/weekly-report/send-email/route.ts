@@ -11,6 +11,12 @@ import { generateWeeklyReportPdf } from '@/lib/pdf/weekly-report-pdf'
 import { stripMarkdownDeep } from '@/lib/text/strip-markdown'
 
 export async function POST() {
+  // RETIRED: the old report email is superseded by the client web report
+  // (/r/[token]). Code kept — revive via LEGACY_REPORT_EMAIL_ENABLED=true.
+  if (process.env.LEGACY_REPORT_EMAIL_ENABLED !== 'true') {
+    return NextResponse.json({ error: 'retired — superseded by the web report' }, { status: 410 })
+  }
+
   try {
     // 1. Auth
     const supabase = await createClient()

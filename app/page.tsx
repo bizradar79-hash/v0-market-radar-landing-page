@@ -5,6 +5,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { REPORT_CSS, DemandSpark } from "@/components/report/ReportView"
 import { DEMO_REPORT } from "@/lib/report/demo-data"
+import { TENDERS_ENABLED } from "@/lib/flags"
 
 // WhatsApp demo-call CTA (prefilled Hebrew).
 const WA_DEMO = "https://wa.me/972559137417?text=" +
@@ -87,7 +88,7 @@ function ModuleCard({ title, caption, children }: { title: string; caption: stri
 
 function ReportShowcase() {
   const a = DEMO_REPORT.actions[0]
-  const t = DEMO_REPORT.tenders[0]
+  const t = DEMO_REPORT.tenders[0] // undefined when tenders module is off (card gated below)
   const g = DEMO_REPORT.leadGroups[0]
   const ct = DEMO_REPORT.competitorTrends![0]
   const seoP = DEMO_REPORT.seoPrimary!
@@ -133,7 +134,8 @@ function ReportShowcase() {
           </Rpt>
         </ModuleCard>
 
-        {/* 2. Tenders */}
+        {/* 2. Tenders — feature-flagged off (hidden, not deleted) */}
+        {TENDERS_ENABLED && t && (
         <ModuleCard title="📋 מכרזים" caption="מכרזים רלוונטיים ממקורות רשמיים, לפני שהם נסגרים.">
           <Rpt>
             <div className="card" style={{ marginBottom: 0 }}>
@@ -147,6 +149,7 @@ function ReportShowcase() {
             </div>
           </Rpt>
         </ModuleCard>
+        )}
 
         {/* 3. Partners / channels */}
         <ModuleCard title="🤝 שותפים וערוצי הפצה" caption="שותפים אמיתיים באזור שלך, לפי הערוצים שתגדיר.">
@@ -269,7 +272,11 @@ function ReportShowcase() {
 // Cards deliberately span different modules/industries so no niche association.
 
 const HERO_ALERTS = [
-  { icon: "📋", title: "מכרז חדש רלוונטי אליך — נסגר בעוד 7 ימים", src: "מקור: מכרזים ממשלתיים", chip: "דדליין", color: "#dc2626", chipBg: "#dc2626" },
+  // Tender alert is feature-flagged with the module; a conference deadline keeps
+  // the "urgent red" slot honest while tenders are off.
+  ...(TENDERS_ENABLED
+    ? [{ icon: "📋", title: "מכרז חדש רלוונטי אליך — נסגר בעוד 7 ימים", src: "מקור: מכרזים ממשלתיים", chip: "דדליין", color: "#dc2626", chipBg: "#dc2626" }]
+    : [{ icon: "📅", title: "כנס מרכזי בתחום שלך — ההרשמה נסגרת בקרוב", src: "מקור: כנסים ואירועים", chip: "מועד קרוב", color: "#dc2626", chipBg: "#dc2626" }]),
   { icon: "🤖", title: "העסק שלך במקום 2 בהמלצות צ'אט ג'י.פי.טי", src: "מקור: דירוג במנועי AI", chip: "הישג", color: "#16a34a", chipBg: "#16a34a" },
   { icon: "👀", title: "מתחרה עדכן מחירים השבוע", src: "מקור: מעקב מתחרים", chip: "שינוי אצל מתחרה", color: "#d97706", chipBg: "#d97706" },
   { icon: "🤝", title: "3 שותפים פוטנציאליים חדשים באזור שלך", src: "מקור: ערוצי הפצה", chip: "הזדמנות", color: "#0d9488", chipBg: "#0d9488" },
@@ -326,8 +333,8 @@ function HeroAlertStack() {
 }
 
 const faqs = [
-  { q: "מה בעצם מקבלים?", a: "דוח שוק שבועי אחד, מותאם לעסק שלך: מכרזים רלוונטיים, שותפים פוטנציאליים, מה קורה אצל המתחרים, והדירוג שלך בגוגל ובמנועי AI — עם פעולות ברורות לשבוע." },
-  { q: "מאיפה מגיע המידע?", a: "מכרזים ממקורות רשמיים (למשל רכבת ישראל דרך ה-API שלה), נתוני חיפוש אמיתיים, ובדיקת דירוג בגוגל ובמנועי AI. כל הלינקים מאומתים — לא מומצאים." },
+  { q: "מה בעצם מקבלים?", a: "דוח שוק שבועי אחד, מותאם לעסק שלך: שותפים פוטנציאליים, מה קורה אצל המתחרים, טרנדים של השוק, והדירוג שלך בגוגל ובמנועי AI — עם פעולות ברורות לשבוע." },
+  { q: "מאיפה מגיע המידע?", a: "נתוני חיפוש אמיתיים (Google), בדיקת דירוג אמיתית בגוגל ובמנועי AI, וסריקת מקורות גלויים ומאומתים. כל הלינקים מאומתים — לא מומצאים." },
   { q: "כמה זמן עד הדוח הראשון?", a: "הסריקה הראשונית רצה תוך כשעה מההרשמה, ואז מקבלים דוח שבועי קבוע." },
   { q: "האם צריך ידע טכנולוגי?", a: "בכלל לא. נרשמים, מגדירים את העסק בכמה שדות, והדוח מגיע אוטומטית. הכל בעברית." },
   { q: "מה ההבדל מחיפוש ב-Google?", a: "Google מחזיר מידע כללי. הרדאר מנתח את השוק הספציפי שלך פעם בשבוע ומרכז הכל לדוח אחד עם פעולות מותאמות." },
@@ -372,7 +379,7 @@ export default function LandingPage() {
               <span style={{ color: "#0D9488" }}>בדוח אחד שבועי</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg text-gray-500 leading-relaxed lg:mx-0">
-              מכרזים רלוונטיים, שותפים חדשים, מה קורה אצל המתחרים, והדירוג שלך בגוגל ובמנועי AI —
+              שותפים חדשים, מה קורה אצל המתחרים, טרנדים של השוק, והדירוג שלך בגוגל ובמנועי AI —
               מרוכז לדוח אחד, כל שבוע, מותאם לעסק שלך.
             </p>
 
@@ -413,7 +420,7 @@ export default function LandingPage() {
       {/* ── TRUST STRIP ──────────────────────────────────────────────────── */}
       <section className="border-y border-gray-100 bg-gray-50 py-4">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-x-8 gap-y-2 px-4 text-center text-sm text-gray-500 sm:px-6">
-          <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> מכרזים ממקורות רשמיים</span>
+          <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> הדירוג נמדד באמת בגוגל וב-AI</span>
           <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> כל הלינקים מאומתים</span>
           <span className="flex items-center gap-1.5"><span style={{ color: "#0D9488" }}>✓</span> נתוני חיפוש אמיתיים</span>
         </div>
@@ -426,9 +433,9 @@ export default function LandingPage() {
         </h2>
         <div className="grid gap-6 sm:grid-cols-3">
           {[
-            { icon: "🗂️", t: "לבדוק 5 אתרים ידנית", d: "מכרזים, מתחרים, טרנדים — כל אחד באתר אחר, כל שבוע מחדש." },
+            { icon: "🗂️", t: "לבדוק 5 אתרים ידנית", d: "מתחרים, טרנדים, חדשות ושותפים — כל אחד באתר אחר, כל שבוע מחדש." },
             { icon: "🤷", t: "לנחש לגבי המתחרים", d: "מה הם השיקו? איפה הם חזקים? בלי מעקב מסודר — לא באמת יודעים." },
-            { icon: "⌛", t: "לגלות מכרז אחרי שנסגר", d: "ההזדמנות הייתה שם, אבל היא עברה לפני שהספקת לראות אותה." },
+            { icon: "⌛", t: "לגלות הזדמנות באיחור", d: "טרנד שעלה, שותף שנכנס לאזור — כשאתה שומע על זה, זה כבר מאוחר." },
           ].map((p) => (
             <div key={p.t} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
               <div className="mb-3 text-3xl">{p.icon}</div>
@@ -446,7 +453,7 @@ export default function LandingPage() {
             מה נכנס לדוח השבועי שלך
           </h2>
           <p className="mb-2 text-center text-lg font-bold" style={{ color: "#0D9488" }}>
-            8 מנועי מודיעין, דוח אחד
+            7 מנועי מודיעין, דוח אחד
           </p>
           <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
             לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
@@ -502,7 +509,7 @@ export default function LandingPage() {
         <div className="flex flex-col gap-12 lg:flex-row">
           {[
             { num: "1", icon: "🏢", title: "נרשמים ומגדירים את העסק", desc: "שם, תחום ואזור פעילות. פחות משתי דקות." },
-            { num: "2", icon: "🤖", title: "סריקה ראשונית תוך שעה", desc: "הרדאר סורק מכרזים, שותפים, מתחרים ודירוג — ומרכיב את הדוח." },
+            { num: "2", icon: "🤖", title: "סריקה ראשונית תוך שעה", desc: "הרדאר סורק שותפים, מתחרים, דירוג וטרנדים — ומרכיב את הדוח." },
             { num: "3", icon: "📩", title: "דוח ראשון + דוח שבועי קבוע", desc: "מקבלים דוח מלא, ואז עדכון אוטומטי כל שבוע — בלי לחפש כלום." },
           ].map((step, i) => (
             <div key={step.num} className="relative flex flex-1 flex-col items-center text-center">
@@ -549,7 +556,7 @@ export default function LandingPage() {
             <ul className="space-y-3 mb-8">
               {[
                 "דוח שוק שבועי מלא, מותאם לעסק",
-                "מכרזים רלוונטיים ממקורות רשמיים",
+                "חדשות רלוונטיות לעסק שלך",
                 "שותפים ולידים לפי ערוצי הפצה",
                 "מעקב מתחרים + הזדמנויות",
                 "דירוג בגוגל ובמנועי AI + טרנדים",

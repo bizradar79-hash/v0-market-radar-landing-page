@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles } from "lucide-react"
+import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles, ChevronUp, ChevronDown } from "lucide-react"
 
 // Reusable add/remove chip editor for a string[] field, with a friendly
 // explanation and a save button. Matches the existing settings card styling.
@@ -304,6 +304,16 @@ export default function SettingsPage() {
     setKeywords(keywords.filter((k) => k !== keyword))
   }
 
+  // Reorder = priority: array order persists to company.keywords as-is; the
+  // trends module tracks the FIRST 8, other capped consumers take first-N too.
+  const moveKeyword = (index: number, dir: -1 | 1) => {
+    const target = index + dir
+    if (target < 0 || target >= keywords.length) return
+    const next = [...keywords]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setKeywords(next)
+  }
+
   // Client deletes a single GEO question. Persists the trimmed list immediately
   // via update-business-profile (deep-merge). The next GEO scan refills to 3.
   const deleteGeoQuery = async (index: number) => {
@@ -547,24 +557,44 @@ export default function SettingsPage() {
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <p className="text-xs text-muted-foreground">
+                הסדר קובע עדיפות — 8 הראשונות נכנסות למעקב הטרנדים
+              </p>
+              <div className="flex flex-col gap-1.5">
                 {keywords.length === 0 ? (
                   <p className="text-sm text-muted-foreground">לא הוגדרו מילות מפתח עדיין</p>
                 ) : (
-                  keywords.map((keyword) => (
-                    <Badge
+                  keywords.map((keyword, i) => (
+                    <div
                       key={keyword}
-                      variant="secondary"
-                      className="flex items-center gap-1 bg-primary/10 px-3 py-1.5 text-primary"
+                      className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${i < 8 ? "border-primary/30 bg-primary/5" : "border-border bg-muted/40"}`}
                     >
-                      {keyword}
+                      <span className="w-5 shrink-0 text-center text-xs font-bold text-muted-foreground">{i + 1}</span>
+                      <span className={`flex-1 truncate ${i < 8 ? "text-primary font-medium" : "text-muted-foreground"}`}>{keyword}</span>
+                      <button
+                        onClick={() => moveKeyword(i, -1)}
+                        disabled={i === 0}
+                        aria-label="העלה עדיפות"
+                        className="rounded p-1 hover:bg-primary/10 disabled:opacity-30"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => moveKeyword(i, 1)}
+                        disabled={i === keywords.length - 1}
+                        aria-label="הורד עדיפות"
+                        className="rounded p-1 hover:bg-primary/10 disabled:opacity-30"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
                       <button
                         onClick={() => removeKeyword(keyword)}
-                        className="mr-1 rounded-full hover:bg-primary/20"
+                        aria-label="הסר"
+                        className="rounded-full p-1 hover:bg-red-50 hover:text-red-600"
                       >
                         <X className="h-3 w-3" />
                       </button>
-                    </Badge>
+                    </div>
                   ))
                 )}
               </div>

@@ -4,6 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
+import { TENDERS_ENABLED } from '@/lib/flags'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -78,7 +79,10 @@ export async function POST(request: Request) {
       loadHiddenKeys(ctx.user.id, 'conference'),
       loadHiddenKeys(ctx.user.id, 'news'),
     ])
-    const tendersV = filterHidden(tenders as any[], 'tender', hTender, (t: any) => t.title)
+    // Tenders module feature-flagged off → no tender input, no tender recommendations.
+    const tendersV = TENDERS_ENABLED
+      ? filterHidden(tenders as any[], 'tender', hTender, (t: any) => t.title)
+      : []
     const leadsV = filterHidden(leads as any[], 'lead', hLead, (l: any) => l.name)
     const confsV = filterHidden(conferences as any[], 'conference', hConf, (c: any) => c.name)
     const newsV = filterHidden(news as any[], 'news', hNews, (n: any) => n.title)

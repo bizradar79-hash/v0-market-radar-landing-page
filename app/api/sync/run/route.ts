@@ -12,6 +12,7 @@ import {
 import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
 import { channelsSig } from '@/lib/leads/channels-sig'
 import { createReportSnapshot } from '@/lib/report/snapshot'
+import { TENDERS_ENABLED } from '@/lib/flags'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -389,8 +390,9 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} articles` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 7. Tenders
+    // 7. Tenders — feature-flagged off (client feedback); step skipped, code kept.
     await runStep('tenders', async () => {
+      if (!TENDERS_ENABLED) return { status: 'skipped', message: 'module disabled (TENDERS_ENABLED=false)' }
       const { count: existingTenders } = await adminDb
         .from('tenders').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
       const r = await callModule(origin, '/api/find-tenders', companyId!)
@@ -473,10 +475,10 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.opportunities?.length ?? 0} niches` : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 11. Weekly report
+    // 11. Weekly report — RETIRED (superseded by the client web report /r/[token]).
+    // Step skipped, generation route kept for admin use.
     await runStep('weekly_report', async () => {
-      const r = await callModule(origin, '/api/generate-weekly-report', companyId!)
-      return { status: r.ok ? 'ok' : 'error', message: r.ok ? (r.body?.report?.generated_at ? `generated at ${r.body.report.generated_at}` : 'generated') : (r.body?.error ?? `HTTP ${r.status}`) }
+      return { status: 'skipped', message: 'retired — superseded by the web report' }
     })
   }
 

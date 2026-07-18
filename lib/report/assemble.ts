@@ -9,6 +9,7 @@
 import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
+import { TENDERS_ENABLED } from '@/lib/flags'
 
 const FIELD_SEP = '␟'
 
@@ -89,7 +90,11 @@ export async function assembleReport(db: any, companyId: string, company: any): 
 
   // Drop admin-hidden items before anything is computed/shown.
   const competitors = filterHidden(competitorsRaw as any[], 'competitor', hiddenKeys, (c: any) => c.name)
-  const tenders = filterHidden(tendersRaw as any[], 'tender', hiddenKeys, (t: any) => t.title)
+  // Tenders module feature-flagged off → empty everywhere downstream (section,
+  // metric, achievement, opportunity count). Old snapshots keep their frozen data.
+  const tenders = TENDERS_ENABLED
+    ? filterHidden(tendersRaw as any[], 'tender', hiddenKeys, (t: any) => t.title)
+    : []
   const leads = filterHidden(leadsRaw as any[], 'lead', hiddenKeys, (l: any) => l.name)
   const conferences = filterHidden(conferencesRaw as any[], 'conference', hiddenKeys, (c: any) => c.name)
   const news = filterHidden(newsRaw as any[], 'news', hiddenKeys, (n: any) => n.title)
@@ -151,7 +156,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     ].filter(Boolean).join(' '))
     return hiddenKeyList.some((hk) => text.includes(hk))
   }
-  const waActions = waAll.filter((a) => !actionRefsHidden(a))
+  // Tenders off → stored tender recommendations also drop out of the report.
+  const waActions = waAll
+    .filter((a) => !actionRefsHidden(a))
+    .filter((a) => TENDERS_ENABLED || a?.category !== 'מכרז')
   const sortedActions = [
     ...waActions.filter((a) => a.priority === 'גבוהה'),
     ...waActions.filter((a) => a.priority !== 'גבוהה'),

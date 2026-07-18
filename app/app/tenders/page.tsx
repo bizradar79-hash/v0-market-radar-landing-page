@@ -3,6 +3,8 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { TENDERS_ENABLED } from "@/lib/flags"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -47,8 +49,11 @@ export default function TendersPage() {
   const [savedTitles, setSavedTitles] = useState<Set<string>>(new Set())
   const supabase = createClient()
   const { toast } = useToast()
+  const router = useRouter()
 
+  // Tenders module feature-flagged off — redirect home; nothing deleted.
   useEffect(() => {
+    if (!TENDERS_ENABLED) { router.replace('/app/dashboard'); return }
     fetchTenders()
     fetchSaved()
   }, [])
@@ -174,6 +179,8 @@ export default function TendersPage() {
       </div>
     )
   }
+
+  if (!TENDERS_ENABLED) return null
 
   return (
     <div className="space-y-6">
