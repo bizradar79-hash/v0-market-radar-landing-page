@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles, ChevronUp, ChevronDown } from "lucide-react"
+import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles, ChevronUp, ChevronDown, Pencil, Check } from "lucide-react"
 
 // Reusable add/remove chip editor for a string[] field, with a friendly
 // explanation and a save button. Matches the existing settings card styling.
@@ -152,6 +152,9 @@ export default function SettingsPage() {
   // regenerates them, so a removal is permanent.
   const [distChannels, setDistChannels] = useState<string[]>([])
   const [distSaving, setDistSaving] = useState(false)
+  const [newDistChannel, setNewDistChannel] = useState("")
+  const [editingDistIndex, setEditingDistIndex] = useState<number | null>(null)
+  const [editDistText, setEditDistText] = useState("")
 
   // ── business_profile fields (saved via update-business-profile deep-merge) ──
   const [directCompetitors, setDirectCompetitors] = useState<string[]>([])
@@ -335,12 +338,14 @@ export default function SettingsPage() {
     }
   }
 
-  // Client deletes a single distribution channel. Persists via
-  // update-business-profile (which mirrors the distribution_channels column).
-  // Nothing regenerates channels, so the removal is permanent.
-  const deleteDistChannel = async (index: number) => {
+  // Distribution channels are fully editable (add/edit/remove). ALL writes go
+  // through the SAME path — update-business-profile { distributionChannels } —
+  // which merges the blob AND mirrors the distribution_channels column. Because
+  // that endpoint does NOT touch leadsChannelsSig, an edit leaves the stored sig
+  // stale while the channel set changes → the next scan's channelsSig comparison
+  // detects it and regenerates leads for the new set (admin 🎯 forces immediately).
+  const persistDistChannels = async (updated: string[]) => {
     const previous = distChannels
-    const updated = distChannels.filter((_, i) => i !== index)
     setDistChannels(updated)
     setDistSaving(true)
     try {
@@ -349,12 +354,43 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ distributionChannels: updated }),
       })
-      if (!res.ok) setDistChannels(previous) // revert on failure
+      if (!res.ok) { setDistChannels(previous); return false }
+      return true
     } catch {
       setDistChannels(previous)
+      return false
     } finally {
       setDistSaving(false)
     }
+  }
+
+  const distExists = (text: string, exceptIndex = -1) =>
+    distChannels.some((c, i) => i !== exceptIndex && c.trim().toLowerCase() === text.trim().toLowerCase())
+
+  const deleteDistChannel = (index: number) =>
+    persistDistChannels(distChannels.filter((_, i) => i !== index))
+
+  const addDistChannel = async () => {
+    const text = newDistChannel.trim()
+    if (!text || distExists(text)) { setNewDistChannel(""); return }
+    const ok = await persistDistChannels([...distChannels, text])
+    if (ok) setNewDistChannel("")
+  }
+
+  const startEditDist = (index: number) => {
+    setEditingDistIndex(index)
+    setEditDistText(distChannels[index])
+  }
+  const cancelEditDist = () => { setEditingDistIndex(null); setEditDistText("") }
+
+  const saveEditDist = async (index: number) => {
+    const text = editDistText.trim()
+    // Empty edit = delete (clean behavior); duplicate = reject (keep original).
+    if (!text) { await deleteDistChannel(index); cancelEditDist(); return }
+    if (text === distChannels[index] || distExists(text, index)) { cancelEditDist(); return }
+    const updated = distChannels.map((c, i) => (i === index ? text : c))
+    await persistDistChannels(updated)
+    cancelEditDist()
   }
 
   // Save a business_profile partial via the deep-merge PATCH endpoint (same path
@@ -655,7 +691,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* Distribution channels — clients may DELETE (no add); permanent */}
+          {/* Distribution channels — fully editable (add / edit / remove) */}
           <Card className="border-border bg-card mt-6">
             <CardHeader>
               <CardTitle className="text-foreground flex items-center gap-2 text-base">
@@ -663,37 +699,104 @@ export default function SettingsPage() {
                 {distSaving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                ערוצי ההפצה שזיהינו עבורך. אפשר להסיר ערוצים שאינם רלוונטיים — הם לא יחזרו.
+                כל ערוץ הוא קטגוריה לחיפוש שותפים — כאן אפשר להוסיף, לערוך או להסיר. השינויים ייכנסו לסריקה הבאה.
               </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               {distChannels.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  לא זוהו ערוצי הפצה.
-                </p>
+                <p className="text-sm text-muted-foreground">לא זוהו ערוצי הפצה עדיין — הוסף ערוץ ראשון למטה.</p>
               ) : (
                 <ul className="space-y-2">
                   {distChannels.map((c, i) => (
                     <li
                       key={i}
-                      className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
+                      className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground"
                     >
                       <span className="text-muted-foreground shrink-0">{i + 1}.</span>
-                      <span dir="rtl" className="flex-1">{c}</span>
-                      <button
-                        type="button"
-                        onClick={() => deleteDistChannel(i)}
-                        disabled={distSaving}
-                        aria-label="מחק ערוץ"
-                        title="מחק ערוץ"
-                        className="shrink-0 text-muted-foreground hover:text-red-500 disabled:opacity-50 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
+                      {editingDistIndex === i ? (
+                        <>
+                          <Input
+                            autoFocus
+                            dir="rtl"
+                            value={editDistText}
+                            onChange={(e) => setEditDistText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEditDist(i)
+                              if (e.key === "Escape") cancelEditDist()
+                            }}
+                            className="h-8 flex-1 border-border bg-input"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => saveEditDist(i)}
+                            disabled={distSaving}
+                            aria-label="שמור ערוץ"
+                            title="שמור"
+                            className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50 transition-colors"
+                          >
+                            <Check className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditDist}
+                            disabled={distSaving}
+                            aria-label="בטל"
+                            title="בטל"
+                            className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span dir="rtl" className="flex-1 break-words">{c}</span>
+                          <button
+                            type="button"
+                            onClick={() => startEditDist(i)}
+                            disabled={distSaving}
+                            aria-label="ערוך ערוץ"
+                            title="ערוך"
+                            className="shrink-0 text-muted-foreground hover:text-primary disabled:opacity-50 transition-colors"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteDistChannel(i)}
+                            disabled={distSaving}
+                            aria-label="מחק ערוץ"
+                            title="מחק"
+                            className="shrink-0 text-muted-foreground hover:text-red-500 disabled:opacity-50 transition-colors"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
               )}
+
+              {/* Add a new channel */}
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  dir="rtl"
+                  placeholder="הוסף ערוץ חדש…"
+                  value={newDistChannel}
+                  onChange={(e) => setNewDistChannel(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addDistChannel()}
+                  disabled={distSaving}
+                  className="border-border bg-input"
+                />
+                <Button
+                  type="button"
+                  onClick={addDistChannel}
+                  disabled={distSaving || !newDistChannel.trim()}
+                  className="bg-primary text-primary-foreground shrink-0"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
