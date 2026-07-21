@@ -12,12 +12,15 @@ import type { BusinessProfile } from '@/types/business-profile'
 
 export const maxDuration = 60
 
-const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-// Channel-driven caps (env-tunable). One web_search per channel; bounded total
-// so URL verification (findRealUrl fallback) can't blow the time/cost budget.
-const MAX_CHANNELS = Math.max(1, Number(process.env.LEADS_MAX_CHANNELS) || 8)
-const LEADS_PER_CHANNEL = Math.max(1, Number(process.env.LEADS_PER_CHANNEL) || 4)
-const LEADS_TOTAL_CAP = Math.max(1, Number(process.env.LEADS_TOTAL_CAP) || 12)
+// Channel-driven caps (env-tunable), tightened for cost. Leads are ~88% of scan
+// spend, so we process only the TOP-3 channels by the client's priority order
+// (distributionChannels array order) and 3 companies each. One merged web_search
+// per channel; URL verification runs only on the capped set. Remaining channels
+// wait for a future run (channels change or admin force).
+const MAX_CHANNELS = Math.max(1, Number(process.env.LEADS_MAX_CHANNELS) || 3)
+const LEADS_PER_CHANNEL = Math.max(1, Number(process.env.LEADS_PER_CHANNEL) || 3)
+// Total kept after cap ≈ channels × per-channel; verification never exceeds this.
+const LEADS_TOTAL_CAP = Math.max(1, Number(process.env.LEADS_TOTAL_CAP) || 9)
 
 // One Grok web_search call → parsed JSON array. Shared by both paths.
 async function grokSearch(prompt: string, cost: ScanCostCollector): Promise<any[]> {
@@ -62,25 +65,29 @@ export async function POST(request: Request) {
     cost = new ScanCostCollector(ctx.user.id, 'leads')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
-    if (!force) {
-      const { data: latest } = await ctx.supabase
-        .from('leads').select('created_at').eq('company_id', ctx.user.id)
-        .order('created_at', { ascending: false }).limit(1).single()
-      if (latest?.created_at) {
-        const age = Date.now() - new Date(latest.created_at).getTime()
-        if (age < CACHE_MS) {
-          console.log('[generate-leads] cache hit, age:', Math.round(age / 3600000), 'h')
-          await cost.flush()
-          return NextResponse.json({ success: true, cached: true })
-        }
-      }
-    }
 
     const businessOverview = ctx.company?.business_overview || ctx.company?.description || ''
     const geoContext = ctx.geoContext || 'העסק פעיל בכל רחבי ישראל.'
     const isInternational = geoContext.includes('בינלאומי')
 
     const businessProfile = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+
+    // ── CHANGE-GATE (enforced on ALL paths — no time-based refresh) ────────────
+    // Run leads ONLY when: force=true (admin 🎯 button — the manual refresh),
+    // channels CHANGED since the last run, or we've NEVER run for this client.
+    // A returning client with unchanged channels SKIPS leads indefinitely (zero
+    // leads cost) — the sig marks "already processed this exact channel set", so
+    // even a 0-result run won't re-fire (fixes the old empty-leads re-run trap).
+    const currentSig = channelsSig(businessProfile?.distributionChannels)
+    const storedSig = typeof (businessProfile as any)?.leadsChannelsSig === 'string'
+      ? (businessProfile as any).leadsChannelsSig : null
+    const neverRan = storedSig === null
+    const channelsChanged = storedSig !== currentSig
+    if (!force && !neverRan && !channelsChanged) {
+      console.log('[generate-leads] skipped — channels unchanged, no force')
+      await cost.flush()
+      return NextResponse.json({ success: true, skipped: 'channels_unchanged', sig: currentSig.slice(0, 24) })
+    }
 
     // Persist the distribution-channels fingerprint so sync/run's change-gate
     // stays accurate. Computed from the RAW distributionChannels (same input the

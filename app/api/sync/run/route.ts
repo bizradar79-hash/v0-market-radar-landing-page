@@ -418,18 +418,19 @@ export async function POST(request: Request) {
     // manual admin 🎯 button calls generate-leads directly (force) and bypasses
     // this gate entirely.
     await runStep('leads', async () => {
+      // Change-gate on EVERY scan path (full/initial/weekly): run leads ONLY when
+      // channels CHANGED or we've NEVER run for this client. No time-based refresh.
+      // Uses the persisted sig as the "already processed this channel set" marker,
+      // so a 0-result client doesn't re-fire every scan (old empty-leads trap).
+      // The admin 🎯 button calls generate-leads with force=true and bypasses this.
       const { data: co } = await adminDb
         .from('companies').select('business_profile').eq('id', companyId).single()
       const bp = (co?.business_profile ?? null) as any
       const currentSig = channelsSig(bp?.distributionChannels)
       const storedSig = typeof bp?.leadsChannelsSig === 'string' ? bp.leadsChannelsSig : null
 
-      const { count: leadsCount } = await adminDb
-        .from('leads').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
-      const empty = (leadsCount ?? 0) === 0
-
-      if (!empty && storedSig === currentSig) {
-        return { status: 'skipped', message: `channels unchanged (${currentSig.slice(0, 24)})` }
+      if (storedSig !== null && storedSig === currentSig) {
+        return { status: 'skipped', message: `channels unchanged — no leads run (${currentSig.slice(0, 24)})` }
       }
       const r = await callModule(origin, '/api/generate-leads', companyId!)
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.count ?? 0} leads (${r.body?.mode ?? '?'})` : (r.body?.error ?? `HTTP ${r.status}`) }
