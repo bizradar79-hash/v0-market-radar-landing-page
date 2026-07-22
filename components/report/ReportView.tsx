@@ -101,7 +101,7 @@ export const REPORT_CSS = `
   .rpt .ai-eng .eng-rank{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:26px;line-height:1.1;margin-top:4px;color:var(--ink)}
   .rpt .ai-eng.on{background:linear-gradient(160deg,var(--teal-wash),#fff 70%);border-color:var(--teal)}
   .rpt .ai-eng.on .eng-rank{color:var(--teal-deep)}
-  .rpt .ai-eng.off .eng-rank{color:var(--ink-faint)}
+  .rpt .ai-eng.off .eng-rank{color:var(--ink-faint);font-family:'Heebo',sans-serif;font-weight:600;font-size:12.5px;margin-top:9px}
   .rpt .ai-q{font-size:13px;color:var(--ink-soft);padding:14px 22px 0}
   .rpt .ai-q b{color:var(--ink)}
   .rpt .demand{padding:16px 22px 18px;border-bottom:1px solid var(--line)}
@@ -400,17 +400,26 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   </>
                 )
 
-                const aiBlock = r.seoAi ? (
+                // Up to 3 GEO questions, each with per-engine positions (mirrors the
+                // SEO expressions). Falls back to the single seoAi for old snapshots.
+                const aiQs = (r.seoAiQuestions && r.seoAiQuestions.length > 0)
+                  ? r.seoAiQuestions
+                  : (r.seoAi ? [r.seoAi] : [])
+                const aiBlock = aiQs.length > 0 ? (
                   <>
-                    <div className="ai-q">שאלה במנועי AI: <b>"{r.seoAi.question}"</b></div>
-                    <div className="ai-engines">
-                      {r.seoAi.engines.map((e, i) => (
-                        <div className={`ai-eng ${e.appeared ? 'on' : 'off'}`} key={i}>
-                          <div className="eng-name">{e.name}</div>
-                          <div className="eng-rank">{e.rank}</div>
+                    {aiQs.slice(0, 3).map((q, qi) => (
+                      <div key={`aiq-${qi}`}>
+                        <div className="ai-q">{qi === 0 ? 'שאלה במנועי AI: ' : ''}<b>"{q.question}"</b></div>
+                        <div className="ai-engines">
+                          {q.engines.map((e, i) => (
+                            <div className={`ai-eng ${e.appeared ? 'on' : 'off'}`} key={i}>
+                              <div className="eng-name">{e.name}</div>
+                              <div className="eng-rank">{e.rank}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </>
                 ) : null
 

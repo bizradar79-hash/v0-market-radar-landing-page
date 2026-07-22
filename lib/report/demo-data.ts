@@ -81,9 +81,26 @@ export const DEMO_REPORT: ReportData = {
     engines: [
       { name: 'ChatGPT', rank: '#2', appeared: true },
       { name: 'Gemini', rank: '#3', appeared: true },
-      { name: 'Grok', rank: '—', appeared: false },
+      { name: 'Grok', rank: 'לא מופיע', appeared: false },
     ],
   },
+  seoAiQuestions: [
+    { question: 'מי יועץ המשכנתאות הכי טוב בראשון לציון?', engines: [
+      { name: 'ChatGPT', rank: '#2', appeared: true },
+      { name: 'Gemini', rank: '#3', appeared: true },
+      { name: 'Grok', rank: 'לא מופיע', appeared: false },
+    ] },
+    { question: 'איך בוחרים יועץ משכנתאות?', engines: [
+      { name: 'ChatGPT', rank: '#4', appeared: true },
+      { name: 'Gemini', rank: 'לא מופיע', appeared: false },
+      { name: 'Grok', rank: '#5', appeared: true },
+    ] },
+    { question: 'כדאי למחזר משכנתא עכשיו?', engines: [
+      { name: 'ChatGPT', rank: 'לא מופיע', appeared: false },
+      { name: 'Gemini', rank: '#6', appeared: true },
+      { name: 'Grok', rank: 'לא מופיע', appeared: false },
+    ] },
+  ],
   seoAiFirst: false,
   demand: {
     keyword: 'מיחזור משכנתא',

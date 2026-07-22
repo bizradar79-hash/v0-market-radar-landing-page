@@ -62,6 +62,9 @@ export interface ReportData {
   seo: Array<{ rank: string; title: string; sub: string; badge?: { kind: 'up' | 'down' | 'flat'; text: string }; warn?: boolean }>
   seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean } | null
   seoAi?: { question: string; engines: Array<{ name: string; rank: string; appeared: boolean }> } | null
+  // Up to 3 GEO questions, each with the client's position per engine — mirrors
+  // the SEO section's 3 expressions. seoAi (above) stays = the first, for old snapshots.
+  seoAiQuestions?: Array<{ question: string; engines: Array<{ name: string; rank: string; appeared: boolean }> }>
   seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean }>
   seoAiFirst?: boolean   // lead with the AI block when the client has no Google rank but shows in AI
   demand?: { keyword: string; series: number[]; label: string } | null
@@ -383,27 +386,56 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     .slice(0, 2)
     .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked } })
 
-  // ONE central AI question across the 3 engines side by side.
-  const engObj = (geoRanking?.engines ?? {}) as any
+  // ── GEO: up to 3 AI questions, each with the client's position per engine ────
+  // Read the AUTHORITATIVE per-question map (queryResults, keyed by question) in
+  // the persisted question order (queries), then fall back through the primary
+  // `engines`+`query` backward-compat fields, then the legacy single-question
+  // shape (userPosition/userMentioned). This is why GEO was empty: the old read
+  // only used the primary `engines` field, which is absent/empty for clients
+  // whose GEO data lives in queryResults or a legacy shape. Read-only, no AI.
   const engRank = (e: any): { rank: string; appeared: boolean } => {
     const appeared = !!e?.appeared && num(e?.position) != null
-    return { rank: appeared ? `#${e.position}` : '—', appeared }
+    return { rank: appeared ? `#${e.position}` : 'לא מופיע', appeared } // never a bare blank
   }
-  const seoAi: ReportData['seoAi'] = geoRanking?.query
-    ? {
-        question: String(geoRanking.query),
-        engines: [
-          { name: 'ChatGPT', ...engRank(engObj.chatgpt) },
-          { name: 'Gemini', ...engRank(engObj.gemini) },
-          { name: 'Grok', ...engRank(engObj.grok) },
-        ],
-      }
-    : null
+  const buildGeoQ = (question: string, engines: any) => ({
+    question: String(question),
+    engines: [
+      { name: 'ChatGPT', ...engRank(engines?.chatgpt) },
+      { name: 'Gemini', ...engRank(engines?.gemini) },
+      { name: 'Grok', ...engRank(engines?.grok) },
+    ],
+  })
+
+  const geoQueryList: string[] = Array.isArray(geoRanking?.queries)
+    ? geoRanking.queries.filter((q: any) => typeof q === 'string' && q.trim())
+    : []
+  const geoQR = (geoRanking?.queryResults && typeof geoRanking.queryResults === 'object')
+    ? geoRanking.queryResults as Record<string, any> : null
+
+  let seoAiQuestions: NonNullable<ReportData['seoAiQuestions']> = []
+  if (geoQR && geoQueryList.length) {
+    seoAiQuestions = geoQueryList.slice(0, 3).map((q) => buildGeoQ(q, geoQR[q]))
+  } else if (geoQR && Object.keys(geoQR).length) {
+    seoAiQuestions = Object.entries(geoQR).slice(0, 3).map(([q, eng]) => buildGeoQ(q, eng))
+  } else if (geoRanking?.query && geoRanking?.engines) {
+    seoAiQuestions = [buildGeoQ(geoRanking.query, geoRanking.engines)]
+  } else if (geoRanking?.query) {
+    // Legacy single-question shape — position lived on userPosition/userMentioned.
+    seoAiQuestions = [{
+      question: String(geoRanking.query),
+      engines: [
+        { name: 'ChatGPT', ...engRank({ appeared: geoRanking.userMentioned, position: geoRanking.userPosition }) },
+        { name: 'Gemini', rank: 'לא מופיע', appeared: false },
+        { name: 'Grok', rank: 'לא מופיע', appeared: false },
+      ],
+    }]
+  }
+  const seoAi: ReportData['seoAi'] = seoAiQuestions[0] ?? null // backward compat (single)
 
   // FIX 1: lead with the AI block when the client has NO Google rank across the
   // shown queries but DOES appear in an AI engine (that's where they shine).
   const hasGoogleRank = (seoPrimary != null && !seoPrimary.unranked) || (seoExtras || []).some((e) => !e.unranked)
-  const hasAiPresence = !!seoAi && seoAi.engines.some((e) => e.appeared)
+  const hasAiPresence = seoAiQuestions.some((q) => q.engines.some((e) => e.appeared))
   const seoAiFirst = !hasGoogleRank && hasAiPresence
 
   // Legacy flat list left empty — the focused fields above drive the new render.
@@ -514,6 +546,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     seo: seoOut,
     seoPrimary,
     seoAi,
+    seoAiQuestions,
     seoExtras,
     seoAiFirst,
     demand,
