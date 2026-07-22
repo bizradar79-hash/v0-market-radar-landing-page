@@ -9,6 +9,7 @@
 import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
+import { readGeoQuestions } from '@/lib/geo/read'
 import { TENDERS_ENABLED } from '@/lib/flags'
 
 const FIELD_SEP = '␟'
@@ -387,49 +388,21 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked } })
 
   // ── GEO: up to 3 AI questions, each with the client's position per engine ────
-  // Read the AUTHORITATIVE per-question map (queryResults, keyed by question) in
-  // the persisted question order (queries), then fall back through the primary
-  // `engines`+`query` backward-compat fields, then the legacy single-question
-  // shape (userPosition/userMentioned). This is why GEO was empty: the old read
-  // only used the primary `engines` field, which is absent/empty for clients
-  // whose GEO data lives in queryResults or a legacy shape. Read-only, no AI.
-  const engRank = (e: any): { rank: string; appeared: boolean } => {
-    const appeared = !!e?.appeared && num(e?.position) != null
-    return { rank: appeared ? `#${e.position}` : 'לא מופיע', appeared } // never a bare blank
-  }
-  const buildGeoQ = (question: string, engines: any) => ({
-    question: String(question),
-    engines: [
-      { name: 'ChatGPT', ...engRank(engines?.chatgpt) },
-      { name: 'Gemini', ...engRank(engines?.gemini) },
-      { name: 'Grok', ...engRank(engines?.grok) },
-    ],
-  })
-
-  const geoQueryList: string[] = Array.isArray(geoRanking?.queries)
-    ? geoRanking.queries.filter((q: any) => typeof q === 'string' && q.trim())
-    : []
-  const geoQR = (geoRanking?.queryResults && typeof geoRanking.queryResults === 'object')
-    ? geoRanking.queryResults as Record<string, any> : null
-
-  let seoAiQuestions: NonNullable<ReportData['seoAiQuestions']> = []
-  if (geoQR && geoQueryList.length) {
-    seoAiQuestions = geoQueryList.slice(0, 3).map((q) => buildGeoQ(q, geoQR[q]))
-  } else if (geoQR && Object.keys(geoQR).length) {
-    seoAiQuestions = Object.entries(geoQR).slice(0, 3).map(([q, eng]) => buildGeoQ(q, eng))
-  } else if (geoRanking?.query && geoRanking?.engines) {
-    seoAiQuestions = [buildGeoQ(geoRanking.query, geoRanking.engines)]
-  } else if (geoRanking?.query) {
-    // Legacy single-question shape — position lived on userPosition/userMentioned.
-    seoAiQuestions = [{
-      question: String(geoRanking.query),
-      engines: [
-        { name: 'ChatGPT', ...engRank({ appeared: geoRanking.userMentioned, position: geoRanking.userPosition }) },
-        { name: 'Gemini', rank: 'לא מופיע', appeared: false },
-        { name: 'Grok', rank: 'לא מופיע', appeared: false },
-      ],
-    }]
-  }
+  // Uses the SHARED reader (lib/geo/read) that mirrors the app GEO page's exact
+  // access path + lenient position check. This fixes the empty-GEO bug: the old
+  // read cast position through num() (strict number), dropping numeric-string
+  // positions the page accepts. Read-only, no AI. Questions with no engine data
+  // at all are skipped; unranked engines show "לא מופיע" (never a bare blank).
+  const seoAiQuestions: NonNullable<ReportData['seoAiQuestions']> = readGeoQuestions(geoRanking, 3)
+    .filter((q) => q.hasEngineData)
+    .map((q) => ({
+      question: q.question,
+      engines: q.engines.map((e) => ({
+        name: e.name,
+        rank: e.appeared ? `#${e.position}` : 'לא מופיע',
+        appeared: e.appeared,
+      })),
+    }))
   const seoAi: ReportData['seoAi'] = seoAiQuestions[0] ?? null // backward compat (single)
 
   // FIX 1: lead with the AI block when the client has NO Google rank across the
