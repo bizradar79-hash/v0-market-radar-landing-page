@@ -4,6 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { deriveArea } from '@/lib/geo/area'
 import { logKeptExisting } from '@/lib/scan/guard'
 import { fetchOpenAIGeoRaw, parseBusinessList } from '@/lib/geo/openai-engine'
+import { buildClientIdentity, isOwnGeoResult, type ClientIdentity } from '@/lib/geo/identity'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
@@ -40,79 +41,9 @@ function extractDomain(url: string): string {
   } catch { return (url || '').toLowerCase().replace(/^www\./, '').split('/')[0] }
 }
 
-// Normalize free text for fuzzy name comparison: lowercase, strip punctuation
-// and common legal suffixes (Hebrew "בע"מ"/"ב.ש", Latin ltd/inc/llc), collapse
-// whitespace.
-function normalizeText(s: string): string {
-  return (s || '')
-    .toLowerCase()
-    .replace(/["'’`״׳.,()|\[\]{}<>!?:;/\\_=+*&^%$#@~-]+/g, ' ')
-    .replace(/\b(בע"?מ|בעמ|בע״מ|ב\.?ש|ltd|inc|llc|co|company)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// (identity + own-result matching moved to lib/geo/identity — shared with the
+// GEO reader/reconciliation and the app GEO page so they can't drift.)
 
-// Compact form for token containment: normalized text with ALL whitespace
-// removed, so "Buy Carpet" and "buycarpet" and "buycarpet.co.il" all collapse
-// to a comparable token ("buycarpet"...).
-function compactText(s: string): string {
-  return normalizeText(s).replace(/\s+/g, '')
-}
-
-// Brand token from a domain: first label, letters/digits only.
-// "buycarpet.co.il" → "buycarpet".
-function brandTokenFromDomain(domain: string): string {
-  const first = (domain || '').split('.')[0] || ''
-  return first.replace(/[^a-z0-9֐-׿]/gi, '').toLowerCase()
-}
-
-interface ClientIdentity {
-  domain: string          // buycarpet.co.il
-  brandTokens: string[]   // compacted brand tokens (e.g. "buycarpet")
-  names: string[]         // normalized full names/aliases for fuzzy contains
-}
-
-// Derive every identity the client may appear under in engine results:
-// legal name, website domain + its brand token, explicit brandName, aliases.
-function buildClientIdentity(companyName: string, website: string, bp: any): ClientIdentity {
-  const domain = extractDomain(website).toLowerCase().trim()
-  const explicitBrand = typeof bp?.brandName === 'string' ? bp.brandName.trim() : ''
-  const aliases: string[] = Array.isArray(bp?.aliases)
-    ? bp.aliases.filter((a: any) => typeof a === 'string' && a.trim()) : []
-  const brandTokens = Array.from(new Set(
-    [brandTokenFromDomain(domain), compactText(explicitBrand), ...aliases.map(compactText)]
-      .filter((t) => t.length >= 3),
-  ))
-  const names = Array.from(new Set(
-    [companyName, explicitBrand, ...aliases]
-      .map(normalizeText)
-      .filter((n) => n.length >= 4),
-  ))
-  return { domain, brandTokens, names }
-}
-
-// True if a result is the client, matched by domain OR brand token OR fuzzy name.
-function isOwnResult(r: any, identity: ClientIdentity): boolean {
-  const resultUrl = (r.url || '').toLowerCase().trim()
-  const resultName = r.name || r.title || ''
-  const nameNorm = normalizeText(resultName)
-  const nameCompact = compactText(resultName)
-  const urlCompact = compactText(resultUrl)
-  // 1. Domain in result URL (most reliable).
-  if (identity.domain.length >= 3 && resultUrl.includes(identity.domain)) return true
-  // 2. Brand token contained in the result name or URL text
-  //    ("BuyCarpet", "Buy Carpet", "buycarpet.co.il" all contain "buycarpet").
-  for (const tok of identity.brandTokens) {
-    if (tok.length >= 3 && (nameCompact.includes(tok) || urlCompact.includes(tok))) return true
-  }
-  // 3. Fuzzy name: normalized containment in either direction.
-  if (nameNorm.length >= 3) {
-    for (const nm of identity.names) {
-      if (nm.length >= 4 && (nameNorm.includes(nm) || nm.includes(nameNorm))) return true
-    }
-  }
-  return false
-}
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -229,7 +160,7 @@ function processResults(
     results.push(r)
   }
   results.forEach((r: any) => {
-    const own = isOwnResult(r, identity)
+    const own = isOwnGeoResult(r, identity)
     r.isOwn = own
     r.isCompany = own
     const rName = (r.name || '').toLowerCase()

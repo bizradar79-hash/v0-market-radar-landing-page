@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { filterUpcomingConferences, conferenceDateLabel } from "@/lib/conferences/date"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -70,9 +71,14 @@ export default function ConferencesPage() {
       .select("*")
 
     if (!error && data) {
+      // Drop events that are definitely over (shared helper — same past/future
+      // decision the report uses). Handles free-text dates AND staleness: an
+      // event that was upcoming at scan time but has since passed disappears
+      // without waiting for a rescan.
+      const upcoming = filterUpcomingConferences(data as Conference[])
       // Rank high-to-low by relevance (tiebreak nearest date) so the best
       // matches lead — exactly like the tenders page.
-      const rows = [...data].sort((a: Conference, b: Conference) => {
+      const rows = [...upcoming].sort((a: Conference, b: Conference) => {
         const sa = parseRelevance(a.description).score ?? -1
         const sb = parseRelevance(b.description).score ?? -1
         if (sb !== sa) return sb - sa
@@ -181,7 +187,7 @@ export default function ConferencesPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Calendar className="h-4 w-4" />
-                    <span>{conference.date}</span>
+                    <span>{conferenceDateLabel(conference.date)}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4" />

@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 import { norm, wordsOf, wordHit, buildCoreModel, type KwInfo } from '@/lib/match/hebrew-core'
 import { filterInsertRows } from '@/lib/admin/hidden'
+import { isPastConference, parseConferenceDate, todayISO } from '@/lib/conferences/date'
 
 export const maxDuration = 60
 
@@ -74,10 +75,13 @@ function scoreConference(c: any, kwInfo: KwInfo[]): { score: number; tier: 'dire
 // Score → gate (drop unrelated) → sort desc → cap → store. Shared by BOTH the
 // active-prompt AI path and the xAI fallback path so they gate identically.
 async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, steps: Record<string, any>) {
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayISO()
 
-  // Future-dated only.
-  let items = rawItems.filter((c: any) => !c.date || c.date >= today)
+  // Future-dated only — via the SHARED comparable-date parser, so free-text dates
+  // ("אמצע אוגוסט 2026", "סוף 2026") are decided the same way display decides them.
+  // Unknown-precision dates ("יוכרז") are KEPT (can't disprove they're upcoming)
+  // and get labeled at display time.
+  let items = rawItems.filter((c: any) => !isPastConference(c?.date, today))
 
   // URL-dedup (only when a URL is present — conferences may legitimately lack one).
   const seen = new Set<string>()
@@ -147,10 +151,6 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
   return NextResponse.json({ success: true, conferences: saved, count: saved?.length || 0, steps })
 }
 
-function isRecentYear(dateStr: string): boolean {
-  const match = dateStr?.match(/20(2[5-9]|[3-9]\d)/)
-  return !!match
-}
 
 export async function POST(request: Request) {
   const steps: Record<string, any> = {}
@@ -278,6 +278,7 @@ export async function POST(request: Request) {
       ? `שווקים גיאוגרפיים רלוונטיים: ${businessProfile.geographicMarkets.join(', ')}.`
       : ''
 
+    const today = todayISO()
     const prompt = `בהתבסס על תחום העסק: ${businessOverview}
 ${industryTags}
 ${geoMarkets}
@@ -285,12 +286,14 @@ ${geoMarkets}
 מצא עד 10 כנסים, תערוכות או אירועים מקצועיים רלוונטיים באמת ב-2026 — מעט ואיכותי עדיף על רשימה ארוכה ורופפת, אל תרפד באירועים רחוקים.
 התמקד ב-(א) התחום הישיר של העסק, ו-(ב) מעט אירועים עסקיים רחבים (שיווק, מסחר אלקטרוני, יבוא/קמעונאות) רק אם ברור שהם מועילים לעסק.
 ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומיים גם מחוץ לישראל הרלוונטיים לתחום.' : 'כלול כנסים ואירועים בישראל בעיקר.'}
-כלול רק אירועים אמיתיים עם תאריך עתידי.
-כלול רק כנסים ואירועים עתידיים — תאריך 2026 בלבד שטרם עברו.
+כלול אך ורק אירועים שמתקיימים מהתאריך ${today} והלאה. אסור בשום אופן להחזיר אירוע שכבר התקיים — עדיף להחזיר פחות אירועים מאשר אירוע שעבר.
+בשדה "date" החזר תאריך ISO מדויק (YYYY-MM-DD) כשהוא ידוע.
+אם התאריך המדויק אינו ידוע אך ידוע שהאירוע עתידי — החזר "date": "" והוסף "datePrecision": "unknown" (נציג "מועד יוכרז").
+אם ידוע רק החודש — החזר "YYYY-MM" עם "datePrecision": "month".
 לכל כנס הוסף "relevanceReason" (משפט קצר אחד מדוע זה רלוונטי) ו-"relevance" באחת מהמילים: direct / broad / weak.
 חפש בעברית ובאנגלית. החזר את כל הטקסט בעברית.
 החזר JSON בלבד:
-[{"name": "", "date": "YYYY-MM-DD", "location": "", "website": "", "description": "", "category": "", "relevanceReason": "", "relevance": "direct"}]`
+[{"name": "", "date": "YYYY-MM-DD", "datePrecision": "day", "location": "", "website": "", "description": "", "category": "", "relevanceReason": "", "relevance": "direct"}]`
 
     steps.ai = { status: 'starting' }
     const response = await fetch('https://api.x.ai/v1/responses', {
@@ -324,7 +327,10 @@ ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומ�
 
     steps.ai = { ok: true, count: list.length }
 
-    list = list.filter((c: any) => c.date === null || isRecentYear(c.date || ''))
+    // Drop definitely-past events up front via the SHARED comparable-date parser
+    // (the old isRecentYear check passed any string containing a 20xx year, so an
+    // already-past "2026-01" survived). finalizeConferences re-checks too.
+    list = list.filter((c: any) => !isPastConference(c?.date))
 
     steps.db = 'starting'
     // Relevance-gate + cap + store (shared with the active-prompt path).

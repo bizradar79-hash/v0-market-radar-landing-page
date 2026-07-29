@@ -14,6 +14,8 @@
 // with `!= null` (NOT a strict-number cast) — engine positions come from parsed
 // LLM JSON and may be a numeric string ("2"); the page accepts those, so we do too.
 
+import { type ClientIdentity, reconcileOwnPosition } from '@/lib/geo/identity'
+
 export interface GeoEngineCell {
   id: 'chatgpt' | 'gemini' | 'grok'
   name: string
@@ -32,19 +34,24 @@ const ENGINE_TABS: Array<{ id: GeoEngineCell['id']; name: string }> = [
   { id: 'grok', name: 'Grok' },
 ]
 
-function cell(id: GeoEngineCell['id'], name: string, e: any): GeoEngineCell {
-  const appeared = !!e?.appeared && e?.position != null // EXACT page condition (lenient)
-  return { id, name, position: appeared ? e.position : null, appeared }
+// Read one engine cell. RECONCILES the stored appeared/position flag against the
+// engine's own results list: own-detection can miss at WRITE time (a badge said
+// "לא מופיע" while the list highlighted the client at #5). If identity is given
+// and the client is detectable in `results`, we trust that over a false flag —
+// so existing wrong data self-heals in the report without a rescan.
+function cell(id: GeoEngineCell['id'], name: string, e: any, identity?: ClientIdentity | null): GeoEngineCell {
+  const { appeared, position } = reconcileOwnPosition(e, identity)
+  return { id, name, position, appeared }
 }
 
 /**
  * Up to `max` GEO questions, each with the client's position per engine.
  * Reads the authoritative per-question map (queryResults keyed by question, in
  * `queries` order), falling back to the primary `engines`+`query`, then the
- * legacy single-question shape (userPosition/userMentioned) — the same shapes
- * the app page supports. Pure read, no network.
+ * legacy single-question shape (userPosition/userMentioned). Pure read, no
+ * network. Pass `identity` to enable read-time own-result reconciliation.
  */
-export function readGeoQuestions(geoRanking: any, max = 3): GeoQuestion[] {
+export function readGeoQuestions(geoRanking: any, max = 3, identity?: ClientIdentity | null): GeoQuestion[] {
   if (!geoRanking || typeof geoRanking !== 'object') return []
 
   const queries: string[] = Array.isArray(geoRanking.queries)
@@ -80,7 +87,7 @@ export function readGeoQuestions(geoRanking: any, max = 3): GeoQuestion[] {
     const hasEngineData = !!(eng.chatgpt || eng.gemini || eng.grok)
     return {
       question: String(question),
-      engines: ENGINE_TABS.map((t) => cell(t.id, t.name, eng[t.id])),
+      engines: ENGINE_TABS.map((t) => cell(t.id, t.name, eng[t.id], identity)),
       hasEngineData,
     }
   })

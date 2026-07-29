@@ -10,6 +10,7 @@ import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
 import { readGeoQuestions } from '@/lib/geo/read'
+import { filterUpcomingConferences, conferenceDateLabel, parseConferenceDate } from '@/lib/conferences/date'
 import { TENDERS_ENABLED } from '@/lib/flags'
 
 const FIELD_SEP = '␟'
@@ -140,8 +141,8 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const leadsSorted = (leads || []).slice().sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0))
 
   // ── Conferences (upcoming, verified) ────────────────────────────────────────
-  const upcomingConfs = (conferences || [])
-    .filter((c: any) => !c.date || c.date >= today)
+  // Shared past/future decision (free-text dates + staleness between scans).
+  const upcomingConfs = filterUpcomingConferences(conferences || [])
     .sort((a: any, b: any) => parseConfDesc(b.description).score! - parseConfDesc(a.description).score! || 0)
 
   // ── Weekly actions ──────────────────────────────────────────────────────────
@@ -473,7 +474,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // ── Conferences (up to 2) ───────────────────────────────────────────────────
   const confsOut: ReportData['conferences'] = upcomingConfs.slice(0, 2).map((c: any) => ({
     title: c.name || '',
-    sub: [heDay(c.date), c.location].filter(Boolean).join(' · '),
+    // Dates are free text: render a Hebrew day/month for exact ISO dates, else
+    // the original text, else "מועד יוכרז" — never a blank or a stale value.
+    sub: [
+      parseConferenceDate(c.date).precision === 'day' ? (heDay(c.date) || conferenceDateLabel(c.date)) : conferenceDateLabel(c.date),
+      c.location,
+    ].filter(Boolean).join(' · '),
     side: c.url ? 'הרשמה פתוחה' : 'פרטים בקרוב',
     pill: parseConfDesc(c.description).score != null && parseConfDesc(c.description).score! >= 70 ? 'התאמה גבוהה' : undefined,
   }))
