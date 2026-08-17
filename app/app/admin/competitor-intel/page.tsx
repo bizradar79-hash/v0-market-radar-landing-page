@@ -19,7 +19,9 @@ const SOURCE_LABELS: Record<Source, string> = {
 const MAX_COMPETITORS = 5
 
 interface Company { id: string; name: string; website?: string }
-interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; error?: string }
+interface SocialPost { caption: string; date: string; likes?: number | null; comments?: number | null; shares?: number | null; views?: number | null; hashtags?: string[]; postUrl?: string }
+interface ProfileMeta { followers?: number | null; bio?: string; name?: string }
+interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; error?: string }
 interface BriefingItem { what: string; source: Source; date?: string; kind?: string; implication?: string }
 interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; generatedAt: string }
 interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; created_at?: string }
@@ -239,7 +241,34 @@ export default function CompetitorIntelDevPage() {
                   {/* RAW (calibration) */}
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-muted-foreground">גולמי (לכיול)</p>
-                    {(run.sources || []).filter(s => s.text).map((s, si) => {
+                    {/* Dedicated-scraper sources render STRUCTURED posts (TikTok today) */}
+                    {(run.sources || []).filter(s => (s.posts || []).length > 0).map((s, si) => (
+                      <div key={`p-${si}`} className="rounded border">
+                        <div className="border-b bg-muted/40 px-2 py-1.5 text-xs font-medium">
+                          {SOURCE_LABELS[s.source]} · {s.posts!.length} פוסטים (מובנה)
+                          {s.profile?.followers != null && <span className="text-muted-foreground"> · {s.profile.followers.toLocaleString()} עוקבים</span>}
+                        </div>
+                        <div className="max-h-72 space-y-1.5 overflow-auto p-2">
+                          {s.posts!.map((p, pi) => (
+                            <div key={pi} className="rounded bg-muted/30 p-2 text-[11px] space-y-1">
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <span>{p.date ? new Date(p.date).toLocaleDateString('he-IL') : 'ללא תאריך'}</span>
+                                {p.views != null && <span>👁 {p.views.toLocaleString()}</span>}
+                                {p.likes != null && <span>❤ {p.likes.toLocaleString()}</span>}
+                                {p.comments != null && <span>💬 {p.comments.toLocaleString()}</span>}
+                                {p.shares != null && <span>↗ {p.shares.toLocaleString()}</span>}
+                              </div>
+                              {p.caption && <p className="leading-relaxed">{p.caption}</p>}
+                              {!!p.hashtags?.length && <p className="text-primary/70">{p.hashtags.slice(0, 8).map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ')}</p>}
+                              {p.postUrl && <a href={p.postUrl} target="_blank" rel="noopener noreferrer" dir="ltr" className="block truncate text-primary hover:underline">{p.postUrl}</a>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Generic Web-Unlocker sources render raw markdown */}
+                    {(run.sources || []).filter(s => s.text && !(s.posts || []).length).map((s, si) => {
                       const key = `${ri}-${si}`
                       const open = expandedRaw === key
                       return (
@@ -259,7 +288,7 @@ export default function CompetitorIntelDevPage() {
                         </div>
                       )
                     })}
-                    {(run.sources || []).every(s => !s.text) && (
+                    {(run.sources || []).every(s => !s.text && !(s.posts || []).length) && (
                       <p className="text-xs text-muted-foreground">אין נתונים גולמיים</p>
                     )}
                   </div>

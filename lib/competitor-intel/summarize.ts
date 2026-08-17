@@ -7,7 +7,7 @@
 // is reported as such, never filled in.
 
 import { callModel } from '@/lib/call-model'
-import type { SourceStatus } from '@/lib/brightdata/client'
+import type { SourceStatus, SocialPost, ProfileMeta } from '@/lib/brightdata/client'
 
 export const INTEL_SOURCES = ['website', 'instagram', 'facebook', 'linkedin', 'tiktok'] as const
 export type IntelSource = typeof INTEL_SOURCES[number]
@@ -20,7 +20,11 @@ export interface SourceResult {
   source: IntelSource
   status: SourceStatus
   url?: string
+  /** Raw markdown (generic path) OR a readable rendering of `posts` (dedicated path). */
   text?: string
+  /** Structured posts from a DEDICATED scraper (TikTok today; template for the rest). */
+  posts?: SocialPost[]
+  profile?: ProfileMeta
   error?: string
 }
 
