@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Newspaper,
   FileBarChart,
+  FlaskConical,
   Settings,
   X,
   LogOut,
@@ -269,6 +270,19 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                 >
                   <Crosshair className="h-5 w-5" />
                   <span>מנוע מכרזים</span>
+                </Link>
+                <Link
+                  href="/app/admin/competitor-intel"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname === "/app/admin/competitor-intel"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <FlaskConical className="h-5 w-5" />
+                  <span>מעקב מתחרים (פיתוח)</span>
                 </Link>
                 <Link
                   href="/app/admin/coupons"
