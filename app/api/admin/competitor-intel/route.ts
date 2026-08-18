@@ -5,7 +5,9 @@ export const maxDuration = 300
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
-import { scrapeUrl, scrapeTikTokProfile, postsToText, discoverProfileUrl, isBrightDataConfigured } from '@/lib/brightdata/client'
+// NOTE: scrapeTikTokProfile is intentionally NOT imported — TikTok was removed
+// from the active source loop (unreliable). The function remains in the client.
+import { scrapeUrl, discoverProfileUrl, isBrightDataConfigured } from '@/lib/brightdata/client'
 import { summarizeCompetitor, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
@@ -27,12 +29,11 @@ async function requireAdmin(): Promise<NextResponse | null> {
 }
 
 // Host fragment used to auto-discover a profile URL when the admin left it blank.
-const DISCOVER_HOST: Record<IntelSource, string> = {
+const DISCOVER_HOST: Partial<Record<IntelSource, string>> = {
   website: '', // never guessed — an unknown site is too risky to invent
   instagram: 'instagram.com',
   facebook: 'facebook.com',
   linkedin: 'linkedin.com/company',
-  tiktok: 'tiktok.com',
 }
 
 // GET ?company_id= → recent dev runs for that company
@@ -88,23 +89,6 @@ export async function POST(request: Request) {
         try { url = await discoverProfileUrl(name, DISCOVER_HOST[source]) } catch { url = '' }
       }
       if (!url) return { source, status: 'skipped', error: 'no_url' }
-
-      // TikTok uses the DEDICATED dataset scraper — the generic Web Unlocker
-      // returns empty for TikTok. Structured posts are stored alongside a text
-      // rendering so both the calibration view and the summarizer can use them.
-      // (This is the template the other sources will migrate to.)
-      if (source === 'tiktok') {
-        const t = await scrapeTikTokProfile(url)
-        return {
-          source,
-          status: t.status === 'processing' ? 'failed' : t.status,
-          url,
-          text: t.posts.length ? postsToText(t.posts, t.profile) : undefined,
-          posts: t.posts.length ? t.posts : undefined,
-          profile: t.profile,
-          error: t.error,
-        }
-      }
 
       const r = await scrapeUrl(url)
       return { source, status: r.status, url, text: r.text || undefined, error: r.error }

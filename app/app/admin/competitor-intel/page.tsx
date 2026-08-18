@@ -11,8 +11,10 @@ import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2, Play, ChevronDown, ChevronUp, Building2, Lightbulb, FlaskConical } from "lucide-react"
 
-const SOURCES = ['website', 'instagram', 'facebook', 'linkedin', 'tiktok'] as const
-type Source = typeof SOURCES[number]
+// TikTok removed from the ACTIVE flow (unreliable). Its label is kept so
+// previously-stored runs still render correctly.
+const SOURCES = ['website', 'instagram', 'facebook', 'linkedin'] as const
+type Source = 'website' | 'instagram' | 'facebook' | 'linkedin' | 'tiktok'
 const SOURCE_LABELS: Record<Source, string> = {
   website: 'אתר', instagram: 'אינסטגרם', facebook: 'פייסבוק', linkedin: 'לינקדאין', tiktok: 'טיקטוק',
 }
@@ -23,12 +25,19 @@ interface SocialPost { caption: string; date: string; likes?: number | null; com
 interface ProfileMeta { followers?: number | null; bio?: string; name?: string }
 interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; error?: string }
 interface BriefingItem { what: string; source: Source; date?: string; kind?: string; implication?: string }
-interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; generatedAt: string }
+interface DerivedInsights {
+  cadence?: { total: number; level: string; text: string }
+  themes?: { terms: Array<{ term: string; count: number }>; text: string }
+  topPosts?: Array<{ caption: string; source: Source; date: string; engagement: number; text: string }>
+  presence?: { source: Source; count: number; text: string }
+  followers?: Array<{ source: Source; followers: number }>
+}
+interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; generatedAt: string }
 interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; created_at?: string }
 
-interface CompetitorInput { name: string; urls: Record<Source, string> }
+interface CompetitorInput { name: string; urls: Record<string, string> }
 const emptyCompetitor = (): CompetitorInput => ({
-  name: '', urls: { website: '', instagram: '', facebook: '', linkedin: '', tiktok: '' },
+  name: '', urls: { website: '', instagram: '', facebook: '', linkedin: '' },
 })
 
 function statusBadge(s: SourceResult['status']) {
@@ -125,7 +134,7 @@ export default function CompetitorIntelDevPage() {
           מעקב מתחרים (פיתוח)
         </h1>
         <p className="text-muted-foreground">
-          סביבת בדיקה מבודדת — BrightData סורק 5 מקורות לכל מתחרה, ו-LLM מייצר תדריך שבועי. לא משפיע על סריקות הלקוחות.
+          סביבת בדיקה מבודדת — BrightData סורק 4 מקורות לכל מתחרה, ו-LLM מייצר תדריך שבועי. לא משפיע על סריקות הלקוחות.
         </p>
         {bdConfigured === false && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -317,6 +326,33 @@ export default function CompetitorIntelDevPage() {
                         ))}
                         {(run.briefing.items || []).length === 0 && (
                           <p className="text-xs text-muted-foreground">לא זוהתה פעילות חדשה במקורות שנאספו.</p>
+                        )}
+                        {/* Derived insights — computed in code from the same scrapes */}
+                        {run.briefing.insights && Object.keys(run.briefing.insights).length > 0 && (
+                          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+                            <p className="text-xs font-semibold text-primary">תובנות נוספות</p>
+                            {run.briefing.insights.cadence && (
+                              <p className="text-xs">📅 {run.briefing.insights.cadence.text}</p>
+                            )}
+                            {run.briefing.insights.presence && (
+                              <p className="text-xs">📍 {run.briefing.insights.presence.text}</p>
+                            )}
+                            {run.briefing.insights.themes && (
+                              <p className="text-xs">🏷 {run.briefing.insights.themes.text}</p>
+                            )}
+                            {(run.briefing.insights.topPosts || []).map((tp, ti) => (
+                              <p key={ti} className="text-xs">
+                                🔥 הפוסט שהכי עבד להם ({SOURCE_LABELS[tp.source] || tp.source}): {tp.caption || '(ללא כיתוב)'}
+                                <span className="text-muted-foreground"> — {tp.text}</span>
+                              </p>
+                            ))}
+                            {(run.briefing.insights.followers || []).length > 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                👥 עוקבים: {run.briefing.insights.followers!.map(f => `${SOURCE_LABELS[f.source] || f.source} ${f.followers.toLocaleString()}`).join(' · ')}
+                                <span className="opacity-70"> (צמיחה תוצג לאחר 2+ סריקות)</span>
+                              </p>
+                            )}
+                          </div>
                         )}
                         {(run.briefing.sourcesEmpty || []).length > 0 && (
                           <p className="text-[11px] text-muted-foreground">
