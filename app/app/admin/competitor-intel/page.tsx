@@ -34,7 +34,7 @@ interface DerivedInsights {
 }
 interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; generatedAt: string }
 interface RunCost {
-  brightdata: { requests: number; scrapes: number; searches: number; perRequestUSD: number; costUSD: number; precision: 'exact' }
+  brightdata: { requests: number; scrapes: number; searches: number; records?: number; perRequestUSD: number; perRecordUSD?: number; costUSD: number; precision: 'exact' }
   llm: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
   totalUSD: number
 }
@@ -139,7 +139,7 @@ export default function CompetitorIntelDevPage() {
           מעקב מתחרים (פיתוח)
         </h1>
         <p className="text-muted-foreground">
-          סביבת בדיקה מבודדת — BrightData סורק 4 מקורות לכל מתחרה, ו-LLM מייצר תדריך שבועי. לא משפיע על סריקות הלקוחות.
+          סביבת בדיקה מבודדת — BrightData סורק 4 מקורות לכל מתחרה (רשתות חברתיות דרך סקרייפרים ייעודיים, אתר דרך Web Unlocker), ו-LLM מייצר תדריך שבועי. לא משפיע על סריקות הלקוחות.
         </p>
         {bdConfigured === false && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -245,10 +245,13 @@ export default function CompetitorIntelDevPage() {
                 {run.cost && (
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-[11px]">
                     <span>
-                      BrightData: <b>{run.cost.brightdata.requests}</b> בקשות × ${run.cost.brightdata.perRequestUSD} ={' '}
-                      <b>${run.cost.brightdata.costUSD.toFixed(4)}</b>
+                      BrightData: <b>${run.cost.brightdata.costUSD.toFixed(4)}</b>
                       <Badge variant="outline" className="mr-1.5 border-green-300 text-green-700 py-0 h-4 text-[9px]">מדויק</Badge>
-                      <span className="text-muted-foreground">({run.cost.brightdata.scrapes} גרידות · {run.cost.brightdata.searches} חיפושים)</span>
+                      <span className="text-muted-foreground">
+                        ({run.cost.brightdata.requests} בקשות × ${run.cost.brightdata.perRequestUSD}
+                        {!!run.cost.brightdata.records && ` + ${run.cost.brightdata.records} רשומות × $${run.cost.brightdata.perRecordUSD}`}
+                        {' '}· {run.cost.brightdata.scrapes} אתר · {run.cost.brightdata.searches} חיפושים)
+                      </span>
                     </span>
                     {run.cost.llm && (
                       <span>

@@ -5,9 +5,10 @@ export const maxDuration = 300
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
-// NOTE: scrapeTikTokProfile is intentionally NOT imported — TikTok was removed
-// from the active source loop (unreliable). The function remains in the client.
-import { scrapeUrl, discoverProfileUrl, isBrightDataConfigured, RequestCounter, BRIGHTDATA_COST_PER_REQ } from '@/lib/brightdata/client'
+import {
+  scrapeUrl, scrapeSocialProfile, postsToText, discoverProfileUrl, isBrightDataConfigured,
+  RequestCounter, BRIGHTDATA_COST_PER_REQ, BRIGHTDATA_RECORD_COST, type SocialPlatform,
+} from '@/lib/brightdata/client'
 import { summarizeCompetitor, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
@@ -96,6 +97,23 @@ export async function POST(request: Request) {
       }
       if (!url) return { source, status: 'skipped', error: 'no_url' }
 
+      // SOCIAL sources use BrightData's DEDICATED scrapers (structured posts +
+      // engagement + followers). Only the WEBSITE stays on the generic Web
+      // Unlocker — a plain site has no dedicated scraper, and markdown is right
+      // for it.
+      if (source !== 'website') {
+        const t = await scrapeSocialProfile(source as SocialPlatform, url, counter)
+        return {
+          source,
+          status: t.status === 'processing' ? 'failed' : t.status,
+          url,
+          text: t.posts.length ? postsToText(t.posts, t.profile) : undefined,
+          posts: t.posts.length ? t.posts : undefined,
+          profile: t.profile,
+          error: t.error,
+        }
+      }
+
       const r = await scrapeUrl(url, counter)
       return { source, status: r.status, url, text: r.text || undefined, error: r.error }
     }),
@@ -113,7 +131,9 @@ export async function POST(request: Request) {
       requests: counter.total,
       scrapes: counter.scrapes,
       searches: counter.searches,
+      records: counter.records,
       perRequestUSD: BRIGHTDATA_COST_PER_REQ,
+      perRecordUSD: BRIGHTDATA_RECORD_COST,
       costUSD: counter.costUSD,
       precision: 'exact' as const,
     },

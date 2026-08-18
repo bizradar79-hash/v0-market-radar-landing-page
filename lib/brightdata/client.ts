@@ -20,10 +20,15 @@ export type SourceStatus = 'ok' | 'empty' | 'failed' | 'skipped'
 export const BRIGHTDATA_COST_PER_REQ = Number(process.env.BRIGHTDATA_COST_PER_REQ) || 0.0015
 
 export class RequestCounter {
+  /** Web Unlocker requests (website scrapes) — priced per REQUEST. */
   scrapes = 0
+  /** SERP discovery searches — also Web Unlocker requests. */
   searches = 0
+  /** Dedicated-scraper RECORDS collected (IG/FB/LinkedIn/TikTok posts). */
+  records = 0
   get total() { return this.scrapes + this.searches }
-  get costUSD() { return this.total * BRIGHTDATA_COST_PER_REQ }
+  /** Mixed pricing: per-request for Web Unlocker + per-record for datasets. */
+  get costUSD() { return this.total * BRIGHTDATA_COST_PER_REQ + this.records * BRIGHTDATA_RECORD_COST }
 }
 
 export interface ScrapeResult {
@@ -162,6 +167,19 @@ export async function discoverProfileUrl(name: string, hostFragment: string, cou
 // ───────────────────────────────────────────────────────────────────────────
 
 const DATASETS_BASE = 'https://api.brightdata.com/datasets/v3'
+
+// Platform → BrightData dataset id (trigger-by-URL Web Scraper API).
+// Confirmed ids as defaults; each overridable via env without a redeploy.
+export type SocialPlatform = 'tiktok' | 'linkedin' | 'instagram' | 'facebook'
+export const DATASET_IDS: Record<SocialPlatform, string> = {
+  tiktok: process.env.BRIGHTDATA_TIKTOK_DATASET_ID || '',
+  linkedin: process.env.BRIGHTDATA_LINKEDIN_DATASET_ID || 'gd_lyy3tktm25m4avu764',
+  instagram: process.env.BRIGHTDATA_INSTAGRAM_DATASET_ID || 'gd_lk5ns7kz21pck8jpis',
+  facebook: process.env.BRIGHTDATA_FACEBOOK_DATASET_ID || 'gd_lkaxegm826bjpoo9m5',
+}
+// Dedicated scrapers bill per RECORD collected (marketplace price), unlike the
+// Web Unlocker's per-request price. Env-tunable.
+export const BRIGHTDATA_RECORD_COST = Number(process.env.BRIGHTDATA_RECORD_COST) || 0.0025
 const POLL_TIMEOUT_MS = Number(process.env.BRIGHTDATA_POLL_TIMEOUT_MS) || 90000
 const POLL_INTERVAL_MS = Number(process.env.BRIGHTDATA_POLL_INTERVAL_MS) || 5000
 
@@ -205,30 +223,92 @@ const pick = (row: any, keys: string[]): any => {
   return undefined
 }
 
-/** Normalize one dataset row → SocialPost. Tolerant of field-name variations. */
-function toPost(row: any): SocialPost {
-  const hashtagsRaw = pick(row, ['hashtags', 'hash_tags', 'tags'])
+/**
+ * Normalize one dataset row → SocialPost, PER PLATFORM. Each dataset names its
+ * fields differently; we list every known variant per platform (most specific
+ * first) and fall back to shared aliases, so a schema tweak on BrightData's side
+ * degrades to a missing field rather than a broken source.
+ */
+const FIELD_MAP: Record<SocialPlatform, {
+  caption: string[]; date: string[]; likes: string[]; comments: string[]
+  shares: string[]; views: string[]; hashtags: string[]; video: string[]; post: string[]
+  followers: string[]; bio: string[]; name: string[]
+}> = {
+  tiktok: {
+    caption: ['description', 'caption', 'title'], date: ['create_time', 'date_posted', 'timestamp'],
+    likes: ['digg_count', 'likes'], comments: ['comment_count', 'comments'],
+    shares: ['share_count', 'shares'], views: ['play_count', 'views'],
+    hashtags: ['hashtags', 'hash_tags'], video: ['video_url', 'video'], post: ['post_url', 'web_video_url', 'url'],
+    followers: ['profile_followers', 'followers'], bio: ['profile_biography', 'biography'], name: ['profile_username', 'account_id'],
+  },
+  instagram: {
+    caption: ['caption', 'description', 'post_content'], date: ['date_posted', 'timestamp', 'taken_at'],
+    likes: ['likes', 'num_likes', 'like_count'], comments: ['num_comments', 'comments', 'comment_count'],
+    shares: ['shares'], views: ['video_play_count', 'views', 'video_view_count'],
+    hashtags: ['hashtags'], video: ['video_url'], post: ['url', 'post_url', 'permalink'],
+    followers: ['followers', 'profile_followers', 'follower_count'], bio: ['biography', 'bio'], name: ['user_posted', 'username', 'profile_name'],
+  },
+  facebook: {
+    caption: ['content', 'post_text', 'description', 'caption'], date: ['date_posted', 'timestamp', 'created_time'],
+    likes: ['likes', 'num_likes', 'reactions', 'num_reactions'], comments: ['num_comments', 'comments'],
+    shares: ['num_shares', 'shares'], views: ['video_view_count', 'views'],
+    hashtags: ['hashtags'], video: ['video_url', 'attachment_url'], post: ['url', 'post_url', 'link'],
+    followers: ['page_followers', 'followers', 'likes_count'], bio: ['page_intro', 'about', 'biography'], name: ['page_name', 'user_username_raw', 'author'],
+  },
+  linkedin: {
+    caption: ['post_text', 'headline', 'title', 'text'], date: ['date_posted', 'post_date', 'time', 'timestamp'],
+    likes: ['num_likes', 'likes', 'reactions'], comments: ['num_comments', 'comments'],
+    shares: ['num_shares', 'shares', 'reposts'], views: ['views', 'num_views'],
+    hashtags: ['hashtags', 'tagged_hashtags'], video: ['video_url'], post: ['url', 'post_url', 'link'],
+    followers: ['followers', 'company_followers', 'num_followers'], bio: ['about', 'description', 'company_about'], name: ['company_name', 'user_id', 'account_name'],
+  },
+}
+
+// Shared fallbacks tried after the platform-specific keys.
+const COMMON = {
+  caption: ['description', 'caption', 'title', 'text', 'content'],
+  date: ['date_posted', 'created_at', 'timestamp', 'date', 'time'],
+  likes: ['likes', 'like_count', 'num_likes'], comments: ['comments', 'comment_count', 'num_comments'],
+  shares: ['shares', 'share_count', 'num_shares'], views: ['views', 'view_count', 'play_count'],
+  hashtags: ['hashtags', 'tags'], video: ['video_url', 'media_url'], post: ['url', 'post_url', 'link'],
+  followers: ['followers', 'follower_count'], bio: ['biography', 'bio', 'about'], name: ['name', 'username'],
+}
+
+/** Parse any of the date shapes datasets emit: unix sec, unix ms, or ISO text. */
+function toIsoDate(v: any): string {
+  if (v == null || v === '') return ''
+  const n = typeof v === 'number' ? v : Number(v)
+  if (isFinite(n) && n > 1e9) return new Date(n > 1e12 ? n : n * 1000).toISOString()
+  const d = new Date(String(v))
+  return isNaN(d.getTime()) ? '' : d.toISOString()
+}
+
+function toPost(row: any, platform: SocialPlatform): SocialPost {
+  const m = FIELD_MAP[platform]
+  const g = (keys: string[], common: string[]) => pick(row, [...keys, ...common])
+  const hashtagsRaw = g(m.hashtags, COMMON.hashtags)
   const hashtags = Array.isArray(hashtagsRaw)
     ? hashtagsRaw.map((h: any) => (typeof h === 'string' ? h : str(h?.name || h?.hashtag))).filter(Boolean)
     : typeof hashtagsRaw === 'string' ? hashtagsRaw.split(/[,\s]+/).filter(Boolean) : []
-  const dateRaw = pick(row, ['create_time', 'created_at', 'date_posted', 'timestamp', 'post_date', 'date'])
-  let date = ''
-  if (dateRaw != null) {
-    const asNum = typeof dateRaw === 'number' ? dateRaw : Number(dateRaw)
-    // Unix seconds vs ms vs ISO string.
-    if (isFinite(asNum) && asNum > 1e9) date = new Date(asNum > 1e12 ? asNum : asNum * 1000).toISOString()
-    else { const d = new Date(String(dateRaw)); if (!isNaN(d.getTime())) date = d.toISOString() }
-  }
   return {
-    caption: str(pick(row, ['description', 'caption', 'title', 'post_text', 'text'])),
-    date,
-    likes: num(pick(row, ['digg_count', 'likes', 'like_count', 'num_likes'])),
-    comments: num(pick(row, ['comment_count', 'comments', 'num_comments'])),
-    shares: num(pick(row, ['share_count', 'shares', 'num_shares'])),
-    views: num(pick(row, ['play_count', 'views', 'view_count', 'video_view_count'])),
+    caption: str(g(m.caption, COMMON.caption)),
+    date: toIsoDate(g(m.date, COMMON.date)),
+    likes: num(g(m.likes, COMMON.likes)),
+    comments: num(g(m.comments, COMMON.comments)),
+    shares: num(g(m.shares, COMMON.shares)),
+    views: num(g(m.views, COMMON.views)),
     hashtags,
-    videoUrl: str(pick(row, ['video_url', 'video', 'media_url'])),
-    postUrl: str(pick(row, ['post_url', 'url', 'web_video_url', 'link'])),
+    videoUrl: str(g(m.video, COMMON.video)),
+    postUrl: str(g(m.post, COMMON.post)),
+  }
+}
+
+function toProfile(row: any, platform: SocialPlatform): ProfileMeta {
+  const m = FIELD_MAP[platform]
+  return {
+    followers: num(pick(row, [...m.followers, ...COMMON.followers])),
+    bio: str(pick(row, [...m.bio, ...COMMON.bio])),
+    name: str(pick(row, [...m.name, ...COMMON.name])),
   }
 }
 
@@ -247,17 +327,20 @@ async function bdFetch(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Scrape a TikTok profile's recent posts via BrightData's dedicated dataset
- * scraper. Trigger → poll → fetch results. Never hangs (hard poll timeout) and
- * never throws; returns 'processing' if the snapshot isn't ready in time so the
- * admin can simply re-run rather than seeing a false failure.
+ * Scrape a social profile's recent posts via BrightData's DEDICATED dataset
+ * scraper (trigger → poll → results). Works for TikTok, Instagram, Facebook and
+ * LinkedIn — one flow, per-platform field mapping. Never hangs (hard poll
+ * deadline) and never throws; returns 'processing' when the snapshot isn't ready
+ * in time so the admin can simply re-run instead of seeing a false failure.
  */
-export async function scrapeTikTokProfile(profileUrl: string): Promise<StructuredScrapeResult> {
+export async function scrapeSocialProfile(
+  platform: SocialPlatform, profileUrl: string, counter?: RequestCounter,
+): Promise<StructuredScrapeResult> {
   const url = (profileUrl || '').trim()
   if (!url) return { ok: false, status: 'skipped', posts: [], error: 'no_url' }
   if (!token()) return { ok: false, status: 'failed', posts: [], error: 'missing_brightdata_token', url }
-  const datasetId = process.env.BRIGHTDATA_TIKTOK_DATASET_ID
-  if (!datasetId) return { ok: false, status: 'failed', posts: [], error: 'missing_BRIGHTDATA_TIKTOK_DATASET_ID', url }
+  const datasetId = DATASET_IDS[platform]
+  if (!datasetId) return { ok: false, status: 'failed', posts: [], error: `missing_dataset_id_for_${platform}`, url }
 
   // 1. TRIGGER — collect by profile URL.
   let snapshotId = ''
@@ -312,21 +395,22 @@ export async function scrapeTikTokProfile(profileUrl: string): Promise<Structure
       rows = text.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
     }
     const valid = rows.filter((r) => r && !r.error)
+    // Cost: dedicated scrapers bill per RECORD collected.
+    if (counter) counter.records += valid.length
     if (valid.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
 
-    const posts = valid.map(toPost).filter((p) => p.caption || p.date || p.postUrl)
-    const first = valid[0]
-    const profile: ProfileMeta = {
-      followers: num(pick(first, ['profile_followers', 'followers', 'follower_count'])),
-      bio: str(pick(first, ['profile_biography', 'biography', 'bio'])),
-      name: str(pick(first, ['profile_username', 'account_id', 'author_name', 'nickname'])),
-    }
+    const posts = valid.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
+    const profile = toProfile(valid[0], platform)
     if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
     return { ok: true, status: 'ok', posts, profile, url }
   } catch (e: any) {
     return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'snapshot_timeout' : (e?.message || 'snapshot_failed'), url }
   }
 }
+
+/** Back-compat alias — TikTok goes through the same generalized function. */
+export const scrapeTikTokProfile = (profileUrl: string, counter?: RequestCounter) =>
+  scrapeSocialProfile('tiktok', profileUrl, counter)
 
 /** Render normalized posts as readable text for the LLM summarizer. */
 export function postsToText(posts: SocialPost[], profile?: ProfileMeta): string {
