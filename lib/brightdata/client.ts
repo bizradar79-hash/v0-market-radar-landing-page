@@ -171,12 +171,25 @@ const DATASETS_BASE = 'https://api.brightdata.com/datasets/v3'
 // Platform → BrightData dataset id (trigger-by-URL Web Scraper API).
 // Confirmed ids as defaults; each overridable via env without a redeploy.
 export type SocialPlatform = 'tiktok' | 'linkedin' | 'instagram' | 'facebook'
+
+// Dataset ids VERIFIED against BrightData's API docs (discover/collect-by-URL
+// endpoints that accept a PROFILE/PAGE url and return that profile's POSTS):
+//   instagram → instagram-posts-discover-by-url        gd_lk5ns7kz21pck8jpis
+//   linkedin  → linkedin-posts-discover-by-profile-url gd_lyy3tktm25m4avu764
+//   facebook  → facebook-pages-posts-collect-by-url    gd_lkaxegm826bjpoo9m5
+//     (Facebook has NO posts-discover-by-profile-url endpoint; the pages-posts
+//      collect-by-url one is what takes a page URL and returns its posts.)
 export const DATASET_IDS: Record<SocialPlatform, string> = {
   tiktok: process.env.BRIGHTDATA_TIKTOK_DATASET_ID || '',
-  linkedin: process.env.BRIGHTDATA_LINKEDIN_DATASET_ID || 'gd_lyy3tktm25m4avu764',
-  instagram: process.env.BRIGHTDATA_INSTAGRAM_DATASET_ID || 'gd_lk5ns7kz21pck8jpis',
-  facebook: process.env.BRIGHTDATA_FACEBOOK_DATASET_ID || 'gd_lkaxegm826bjpoo9m5',
+  linkedin: process.env.BRIGHTDATA_LINKEDIN_POSTS_DATASET_ID || 'gd_lyy3tktm25m4avu764',
+  instagram: process.env.BRIGHTDATA_INSTAGRAM_POSTS_DATASET_ID || 'gd_lk5ns7kz21pck8jpis',
+  facebook: process.env.BRIGHTDATA_FACEBOOK_POSTS_DATASET_ID || 'gd_lkaxegm826bjpoo9m5',
 }
+
+// Sync /scrape is preferred (returns rows directly). Facebook discovery can be
+// slow, so it gets a longer sync budget before we fall back to trigger+poll.
+const SYNC_TIMEOUT_MS = Number(process.env.BRIGHTDATA_SYNC_TIMEOUT_MS) || 180000
+
 // Dedicated scrapers bill per RECORD collected (marketplace price), unlike the
 // Web Unlocker's per-request price. Env-tunable.
 export const BRIGHTDATA_RECORD_COST = Number(process.env.BRIGHTDATA_RECORD_COST) || 0.0025
@@ -241,26 +254,34 @@ const FIELD_MAP: Record<SocialPlatform, {
     hashtags: ['hashtags', 'hash_tags'], video: ['video_url', 'video'], post: ['post_url', 'web_video_url', 'url'],
     followers: ['profile_followers', 'followers'], bio: ['profile_biography', 'biography'], name: ['profile_username', 'account_id'],
   },
+  // Docs: caption, datetime, likes, comments, post_hashtags, url, video_url,
+  //       account, followers, biography, posts_count, content_type
   instagram: {
-    caption: ['caption', 'description', 'post_content'], date: ['date_posted', 'timestamp', 'taken_at'],
-    likes: ['likes', 'num_likes', 'like_count'], comments: ['num_comments', 'comments', 'comment_count'],
+    caption: ['caption', 'description'], date: ['datetime', 'date_posted', 'timestamp'],
+    likes: ['likes'], comments: ['comments', 'num_comments'],
     shares: ['shares'], views: ['video_play_count', 'views', 'video_view_count'],
-    hashtags: ['hashtags'], video: ['video_url'], post: ['url', 'post_url', 'permalink'],
-    followers: ['followers', 'profile_followers', 'follower_count'], bio: ['biography', 'bio'], name: ['user_posted', 'username', 'profile_name'],
+    hashtags: ['post_hashtags', 'hashtags'], video: ['video_url'], post: ['url', 'post_url'],
+    followers: ['followers'], bio: ['biography'], name: ['account', 'username'],
   },
+  // Docs: content, date_posted, num_likes_type{num,type}, count_reactions_type[],
+  //       num_comments, num_shares, url, page_name, page_followers, page_category
+  //       NOTE: likes live in the OBJECT num_likes_type.num — handled in toPost.
   facebook: {
-    caption: ['content', 'post_text', 'description', 'caption'], date: ['date_posted', 'timestamp', 'created_time'],
-    likes: ['likes', 'num_likes', 'reactions', 'num_reactions'], comments: ['num_comments', 'comments'],
-    shares: ['num_shares', 'shares'], views: ['video_view_count', 'views'],
-    hashtags: ['hashtags'], video: ['video_url', 'attachment_url'], post: ['url', 'post_url', 'link'],
-    followers: ['page_followers', 'followers', 'likes_count'], bio: ['page_intro', 'about', 'biography'], name: ['page_name', 'user_username_raw', 'author'],
+    caption: ['content', 'post_text'], date: ['date_posted'],
+    likes: ['num_likes', 'likes'], comments: ['num_comments'],
+    shares: ['num_shares'], views: ['video_view_count', 'views'],
+    hashtags: ['hashtags'], video: ['video_url', 'attachment_url'], post: ['url', 'post_url'],
+    followers: ['page_followers'], bio: ['page_category', 'about'], name: ['page_name', 'user_username_raw'],
   },
+  // Docs: post_text, post_text_html, date_posted, hashtags, url, num_likes,
+  //       num_comments, user_id, user_followers, user_posts, account_type
+  //       (no "shares" field in the LinkedIn response)
   linkedin: {
-    caption: ['post_text', 'headline', 'title', 'text'], date: ['date_posted', 'post_date', 'time', 'timestamp'],
-    likes: ['num_likes', 'likes', 'reactions'], comments: ['num_comments', 'comments'],
-    shares: ['num_shares', 'shares', 'reposts'], views: ['views', 'num_views'],
-    hashtags: ['hashtags', 'tagged_hashtags'], video: ['video_url'], post: ['url', 'post_url', 'link'],
-    followers: ['followers', 'company_followers', 'num_followers'], bio: ['about', 'description', 'company_about'], name: ['company_name', 'user_id', 'account_name'],
+    caption: ['post_text', 'headline', 'title'], date: ['date_posted'],
+    likes: ['num_likes'], comments: ['num_comments'],
+    shares: ['num_shares', 'reposts'], views: ['views', 'num_views'],
+    hashtags: ['hashtags'], video: ['videos', 'video_url'], post: ['url', 'post_url'],
+    followers: ['user_followers'], bio: ['headline', 'about'], name: ['user_id', 'account_type'],
   },
 }
 
@@ -290,10 +311,12 @@ function toPost(row: any, platform: SocialPlatform): SocialPost {
   const hashtags = Array.isArray(hashtagsRaw)
     ? hashtagsRaw.map((h: any) => (typeof h === 'string' ? h : str(h?.name || h?.hashtag))).filter(Boolean)
     : typeof hashtagsRaw === 'string' ? hashtagsRaw.split(/[,\s]+/).filter(Boolean) : []
+  // Facebook nests its like count: num_likes_type = { num, type }.
+  const fbLikes = platform === 'facebook' ? num(row?.num_likes_type?.num) : null
   return {
     caption: str(g(m.caption, COMMON.caption)),
     date: toIsoDate(g(m.date, COMMON.date)),
-    likes: num(g(m.likes, COMMON.likes)),
+    likes: fbLikes ?? num(g(m.likes, COMMON.likes)),
     comments: num(g(m.comments, COMMON.comments)),
     shares: num(g(m.shares, COMMON.shares)),
     views: num(g(m.views, COMMON.views)),
@@ -326,12 +349,30 @@ async function bdFetch(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Rows come back as a JSON array, {data:[…]}, or NDJSON — accept all three. */
+function parseRows(text: string): any[] {
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) return parsed
+    if (Array.isArray(parsed?.data)) return parsed.data
+    if (parsed && typeof parsed === 'object') return [parsed]
+    return []
+  } catch {
+    return text.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  }
+}
+
 /**
- * Scrape a social profile's recent posts via BrightData's DEDICATED dataset
- * scraper (trigger → poll → results). Works for TikTok, Instagram, Facebook and
- * LinkedIn — one flow, per-platform field mapping. Never hangs (hard poll
- * deadline) and never throws; returns 'processing' when the snapshot isn't ready
- * in time so the admin can simply re-run instead of seeing a false failure.
+ * Scrape a social profile's recent POSTS via BrightData's dedicated scrapers.
+ *
+ * Endpoint/body VERIFIED against the docs — the previous version used the wrong
+ * two things, which is why LinkedIn said "Invalid input" and Instagram came back
+ * empty: the body must be {"input":[{url}]} (NOT a bare array), and these
+ * datasets are served by the SYNC POST /datasets/v3/scrape endpoint.
+ *
+ * Flow: try /scrape (returns rows directly). If it hands back a snapshot_id
+ * instead — or times out, as Facebook discovery can — fall back to the async
+ * trigger → poll → snapshot path. Never hangs, never throws.
  */
 export async function scrapeSocialProfile(
   platform: SocialPlatform, profileUrl: string, counter?: RequestCounter,
@@ -342,27 +383,65 @@ export async function scrapeSocialProfile(
   const datasetId = DATASET_IDS[platform]
   if (!datasetId) return { ok: false, status: 'failed', posts: [], error: `missing_dataset_id_for_${platform}`, url }
 
-  // 1. TRIGGER — collect by profile URL.
+  // Docs-confirmed body shape for every one of these datasets.
+  const payload = JSON.stringify({ input: [{ url }] })
+  const finish = (rows: any[]): StructuredScrapeResult => {
+    const valid = rows.filter((r) => r && !r.error && !r.warning)
+    if (counter) counter.records += valid.length  // datasets bill per record
+    if (valid.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
+    const posts = valid.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
+    const profile = toProfile(valid[0], platform)
+    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
+    return { ok: true, status: 'ok', posts, profile, url }
+  }
+
+  // ── 1. SYNC /scrape (preferred) ──────────────────────────────────────────
   let snapshotId = ''
-  for (let i = 0; i < 2; i++) { // retry once on transient errors
-    try {
-      const res = await bdFetch(
-        `${DATASETS_BASE}/trigger?dataset_id=${encodeURIComponent(datasetId)}&include_errors=true`,
-        { method: 'POST', body: JSON.stringify([{ url }]) },
-      )
-      const text = await res.text().catch(() => '')
-      if (res.ok) {
-        try { snapshotId = JSON.parse(text)?.snapshot_id || '' } catch { snapshotId = '' }
-        if (snapshotId) break
-        return { ok: false, status: 'failed', posts: [], error: `no_snapshot_id: ${text.slice(0, 160)}`, url }
+  try {
+    const res = await bdFetch(
+      `${DATASETS_BASE}/scrape?dataset_id=${encodeURIComponent(datasetId)}&format=json&include_errors=true`,
+      { method: 'POST', body: payload },
+      SYNC_TIMEOUT_MS,
+    )
+    const text = await res.text().catch(() => '')
+    if (res.ok && text.trim()) {
+      const rows = parseRows(text)
+      // Some datasets answer the sync call with a snapshot handle instead of data.
+      const handle = rows.length === 1 ? (rows[0]?.snapshot_id || rows[0]?.id) : ''
+      if (handle && !rows[0]?.url && !rows[0]?.content && !rows[0]?.caption && !rows[0]?.post_text) {
+        snapshotId = String(handle)
+      } else if (rows.length > 0) {
+        return finish(rows)
       }
-      if (i === 1) return { ok: false, status: 'failed', posts: [], error: `trigger_http_${res.status}: ${text.slice(0, 160)}`, url }
-    } catch (e: any) {
-      if (i === 1) return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'trigger_timeout' : (e?.message || 'trigger_failed'), url }
+    } else if (!res.ok && res.status !== 202) {
+      // A hard 4xx (e.g. bad input) is worth surfacing verbatim for calibration.
+      if (res.status >= 400 && res.status < 500) {
+        return { ok: false, status: 'failed', posts: [], error: `scrape_http_${res.status}: ${text.slice(0, 200)}`, url }
+      }
+    }
+  } catch { /* fall through to async */ }
+
+  // ── 2. ASYNC fallback: trigger → poll → snapshot ─────────────────────────
+  if (!snapshotId) {
+    for (let i = 0; i < 2; i++) { // retry once on transient errors
+      try {
+        const res = await bdFetch(
+          `${DATASETS_BASE}/trigger?dataset_id=${encodeURIComponent(datasetId)}&include_errors=true`,
+          { method: 'POST', body: payload },
+        )
+        const text = await res.text().catch(() => '')
+        if (res.ok) {
+          try { snapshotId = JSON.parse(text)?.snapshot_id || '' } catch { snapshotId = '' }
+          if (snapshotId) break
+          return { ok: false, status: 'failed', posts: [], error: `no_snapshot_id: ${text.slice(0, 160)}`, url }
+        }
+        if (i === 1) return { ok: false, status: 'failed', posts: [], error: `trigger_http_${res.status}: ${text.slice(0, 200)}`, url }
+      } catch (e: any) {
+        if (i === 1) return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'trigger_timeout' : (e?.message || 'trigger_failed'), url }
+      }
     }
   }
 
-  // 2. POLL progress until ready (hard deadline).
   const deadline = Date.now() + POLL_TIMEOUT_MS
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS)
@@ -380,29 +459,11 @@ export async function scrapeSocialProfile(
     return { ok: false, status: 'processing', posts: [], error: `still_processing_after_${Math.round(POLL_TIMEOUT_MS / 1000)}s (snapshot ${snapshotId}) — נסה שוב בעוד רגע`, url }
   }
 
-  // 3. RESULTS.
   try {
     const res = await bdFetch(`${DATASETS_BASE}/snapshot/${snapshotId}?format=json`, { method: 'GET' }, 45000)
     const text = await res.text().catch(() => '')
     if (!res.ok) return { ok: false, status: 'failed', posts: [], error: `snapshot_http_${res.status}: ${text.slice(0, 160)}`, url }
-
-    let rows: any[] = []
-    try {
-      const parsed = JSON.parse(text)
-      rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.data) ? parsed.data : [])
-    } catch {
-      // NDJSON fallback (datasets sometimes stream one JSON object per line).
-      rows = text.split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-    }
-    const valid = rows.filter((r) => r && !r.error)
-    // Cost: dedicated scrapers bill per RECORD collected.
-    if (counter) counter.records += valid.length
-    if (valid.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
-
-    const posts = valid.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
-    const profile = toProfile(valid[0], platform)
-    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
-    return { ok: true, status: 'ok', posts, profile, url }
+    return finish(parseRows(text))
   } catch (e: any) {
     return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'snapshot_timeout' : (e?.message || 'snapshot_failed'), url }
   }
