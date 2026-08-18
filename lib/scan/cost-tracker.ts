@@ -81,7 +81,7 @@ const PRICING = loadPricing()
 // non-zero estimate rather than silently dropping the call's cost.
 const FALLBACK_PRICE: ModelPrice = { inUSDPerM: 0.30, outUSDPerM: 1.00, webSearchUSD: 0.01 }
 
-function priceFor(model: string): ModelPrice {
+export function priceFor(model: string): ModelPrice {
   if (PRICING[model]) return PRICING[model]
   // Loose prefix match so e.g. 'gpt-5-mini-2026-01' still resolves.
   const key = Object.keys(PRICING).find(k => model.startsWith(k) || k.startsWith(model))

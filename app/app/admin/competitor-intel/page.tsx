@@ -33,7 +33,12 @@ interface DerivedInsights {
   followers?: Array<{ source: Source; followers: number }>
 }
 interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; generatedAt: string }
-interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; created_at?: string }
+interface RunCost {
+  brightdata: { requests: number; scrapes: number; searches: number; perRequestUSD: number; costUSD: number; precision: 'exact' }
+  llm: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
+  totalUSD: number
+}
+interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; cost?: RunCost | null; created_at?: string }
 
 interface CompetitorInput { name: string; urls: Record<string, string> }
 const emptyCompetitor = (): CompetitorInput => ({
@@ -226,7 +231,7 @@ export default function CompetitorIntelDevPage() {
       {/* Results */}
       {runs.length > 0 && (
         <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">3. תוצאות (גולמי + תדריך)</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-base">3. היסטוריית הרצות (6 אחרונות) — גולמי + תדריך + עלות</CardTitle></CardHeader>
           <CardContent className="space-y-5">
             {runs.map((run, ri) => (
               <div key={run.id || ri} className="rounded-lg border p-4 space-y-3">
@@ -234,6 +239,32 @@ export default function CompetitorIntelDevPage() {
                   <h3 className="font-bold">{run.competitor_name}</h3>
                   {run.created_at && <span className="text-xs text-muted-foreground">{new Date(run.created_at).toLocaleString('he-IL')}</span>}
                 </div>
+
+                {/* Per-run cost — BrightData is exact (counted requests); the
+                    model line is labeled by the precision we actually have. */}
+                {run.cost && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-[11px]">
+                    <span>
+                      BrightData: <b>{run.cost.brightdata.requests}</b> בקשות × ${run.cost.brightdata.perRequestUSD} ={' '}
+                      <b>${run.cost.brightdata.costUSD.toFixed(4)}</b>
+                      <Badge variant="outline" className="mr-1.5 border-green-300 text-green-700 py-0 h-4 text-[9px]">מדויק</Badge>
+                      <span className="text-muted-foreground">({run.cost.brightdata.scrapes} גרידות · {run.cost.brightdata.searches} חיפושים)</span>
+                    </span>
+                    {run.cost.llm && (
+                      <span>
+                        מודל ({run.cost.llm.model}): <b>{(run.cost.llm.promptTokens + run.cost.llm.completionTokens).toLocaleString()}</b> טוקנים ≈{' '}
+                        <b>${run.cost.llm.costUSD.toFixed(4)}</b>
+                        <Badge
+                          variant="outline"
+                          className={`mr-1.5 py-0 h-4 text-[9px] ${run.cost.llm.precision === 'exact' ? 'border-green-300 text-green-700' : 'border-amber-300 text-amber-700'}`}
+                        >
+                          {run.cost.llm.precision === 'exact' ? 'מדויק' : 'הערכה'}
+                        </Badge>
+                      </span>
+                    )}
+                    <span className="font-bold">סה"כ: ${run.cost.totalUSD.toFixed(4)}</span>
+                  </div>
+                )}
 
                 {/* Per-source status */}
                 <div className="flex flex-wrap gap-2">

@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 // NOTE: scrapeTikTokProfile is intentionally NOT imported — TikTok was removed
 // from the active source loop (unreliable). The function remains in the client.
-import { scrapeUrl, discoverProfileUrl, isBrightDataConfigured } from '@/lib/brightdata/client'
+import { scrapeUrl, discoverProfileUrl, isBrightDataConfigured, RequestCounter, BRIGHTDATA_COST_PER_REQ } from '@/lib/brightdata/client'
 import { summarizeCompetitor, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
@@ -29,6 +29,9 @@ async function requireAdmin(): Promise<NextResponse | null> {
 }
 
 // Host fragment used to auto-discover a profile URL when the admin left it blank.
+// Keep the last N runs per company so we can compare without re-scraping.
+const RUN_HISTORY_CAP = Number(process.env.COMPETITOR_INTEL_RUN_CAP) || 6
+
 const DISCOVER_HOST: Partial<Record<IntelSource, string>> = {
   website: '', // never guessed — an unknown site is too risky to invent
   instagram: 'instagram.com',
@@ -45,10 +48,10 @@ export async function GET(request: Request) {
 
   const { data, error } = await adminDb()
     .from('competitor_intel_dev')
-    .select('id, competitor_name, sources, briefing, created_at')
+    .select('id, competitor_name, sources, briefing, cost, created_at')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
-    .limit(25)
+    .limit(RUN_HISTORY_CAP)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true, runs: data || [], brightdata: isBrightDataConfigured() })
 }
@@ -79,6 +82,9 @@ export async function POST(request: Request) {
   ].filter(Boolean).join(' | ').slice(0, 500)
 
   const urls: Record<string, string> = competitor.urls || {}
+  // EXACT BrightData request counting for the per-run cost (see client comment:
+  // computed from OUR request count, not BrightData's billing API).
+  const counter = new RequestCounter()
 
   // Every source runs INDEPENDENTLY — one failure never blocks the others.
   const sources: SourceResult[] = await Promise.all(
@@ -86,26 +92,60 @@ export async function POST(request: Request) {
       let url = (urls[source] || '').trim()
       // Auto-discover a social profile when blank (website is never guessed).
       if (!url && DISCOVER_HOST[source]) {
-        try { url = await discoverProfileUrl(name, DISCOVER_HOST[source]) } catch { url = '' }
+        try { url = await discoverProfileUrl(name, DISCOVER_HOST[source]!, counter) } catch { url = '' }
       }
       if (!url) return { source, status: 'skipped', error: 'no_url' }
 
-      const r = await scrapeUrl(url)
+      const r = await scrapeUrl(url, counter)
       return { source, status: r.status, url, text: r.text || undefined, error: r.error }
     }),
   )
 
   const briefing = await summarizeCompetitor({ competitorName: name, clientContext, sources })
 
-  // Store raw + briefing in the ISOLATED dev table.
+  // ── Per-run cost ─────────────────────────────────────────────────────────
+  // BrightData: EXACT — we counted every request we fired (incl. retries and
+  // discovery searches) × the known per-request price. No billing API needed.
+  // Model: exact when the provider returned real token counts, else estimated.
+  const llm = briefing.llm
+  const cost = {
+    brightdata: {
+      requests: counter.total,
+      scrapes: counter.scrapes,
+      searches: counter.searches,
+      perRequestUSD: BRIGHTDATA_COST_PER_REQ,
+      costUSD: counter.costUSD,
+      precision: 'exact' as const,
+    },
+    llm: llm
+      ? { model: llm.model, promptTokens: llm.promptTokens, completionTokens: llm.completionTokens, costUSD: llm.costUSD, precision: llm.precision }
+      : null,
+    totalUSD: counter.costUSD + (llm?.costUSD || 0),
+  }
+
+  // Store raw + briefing + cost in the ISOLATED dev table (append, never overwrite).
   const { data: saved, error } = await db
     .from('competitor_intel_dev')
-    .insert({ company_id: companyId, competitor_name: name, sources, briefing })
-    .select('id, competitor_name, sources, briefing, created_at')
+    .insert({ company_id: companyId, competitor_name: name, sources, briefing, cost })
+    .select('id, competitor_name, sources, briefing, cost, created_at')
     .single()
   if (error) {
     // Still return the result so the sandbox is usable before the migration runs.
-    return NextResponse.json({ success: true, stored: false, storeError: error.message, run: { competitor_name: name, sources, briefing } })
+    return NextResponse.json({ success: true, stored: false, storeError: error.message, run: { competitor_name: name, sources, briefing, cost } })
+  }
+
+  // Keep only the latest RUN_HISTORY_CAP runs per company (same pattern as the
+  // 26-cap on report snapshots) — history for comparison without re-scraping.
+  try {
+    const { data: rows } = await db
+      .from('competitor_intel_dev').select('id').eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+    const ids = (rows || []).map((r: any) => r.id)
+    if (ids.length > RUN_HISTORY_CAP) {
+      await db.from('competitor_intel_dev').delete().in('id', ids.slice(RUN_HISTORY_CAP))
+    }
+  } catch (e: any) {
+    console.warn('[competitor-intel] prune failed:', e?.message)
   }
 
   return NextResponse.json({ success: true, stored: true, run: saved })

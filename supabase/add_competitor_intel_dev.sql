@@ -23,3 +23,10 @@ create index if not exists competitor_intel_dev_company_idx
 
 -- Service-role only (all access goes through admin routes).
 alter table competitor_intel_dev enable row level security;
+
+-- ── Added later: per-run cost breakdown ────────────────────────────────────
+-- { brightdata:{requests,scrapes,searches,perRequestUSD,costUSD,precision},
+--   llm:{model,promptTokens,completionTokens,costUSD,precision}, totalUSD }
+-- BrightData figures are EXACT (counted from the requests we fire); the model
+-- figures are exact when the provider returns token counts, else estimated.
+alter table competitor_intel_dev add column if not exists cost jsonb;

@@ -13,6 +13,19 @@ const ZONE = process.env.BRIGHTDATA_ZONE || 'web_unlocker1'
 
 export type SourceStatus = 'ok' | 'empty' | 'failed' | 'skipped'
 
+// ── EXACT request counting (for cost) ──────────────────────────────────────
+// We count the HTTP requests WE fire rather than querying BrightData's billing
+// API: it's exact for our purposes, instant, and adds no external dependency.
+// Every attempt (including a retry) is one billable Web Unlocker request.
+export const BRIGHTDATA_COST_PER_REQ = Number(process.env.BRIGHTDATA_COST_PER_REQ) || 0.0015
+
+export class RequestCounter {
+  scrapes = 0
+  searches = 0
+  get total() { return this.scrapes + this.searches }
+  get costUSD() { return this.total * BRIGHTDATA_COST_PER_REQ }
+}
+
 export interface ScrapeResult {
   ok: boolean
   status: SourceStatus
@@ -64,7 +77,7 @@ async function attempt(body: any): Promise<{ ok: boolean; text: string; status: 
  * occasionally times out on social pages), then returns a clear per-source error.
  * NEVER throws — each source must fail independently without blocking the others.
  */
-export async function scrapeUrl(url: string): Promise<ScrapeResult> {
+export async function scrapeUrl(url: string, counter?: RequestCounter): Promise<ScrapeResult> {
   const clean = (url || '').trim()
   if (!clean) return { ok: false, status: 'skipped', text: '', error: 'no_url' }
   if (!/^https?:\/\//i.test(clean)) return { ok: false, status: 'skipped', text: '', error: 'invalid_url', url: clean }
@@ -74,6 +87,7 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
 
   for (let i = 0; i < 2; i++) {
     try {
+      if (counter) counter.scrapes++   // each attempt (incl. retry) is billable
       const r = await attempt(body)
       if (r.ok) {
         const text = (r.text || '').trim()
@@ -96,7 +110,7 @@ export interface SearchHit { title: string; url: string }
  * didn't provide one (e.g. "<name> instagram"). Returns links parsed out of the
  * markdown SERP. Best-effort; empty array on any failure.
  */
-export async function searchWeb(query: string, limit = 10): Promise<SearchHit[]> {
+export async function searchWeb(query: string, limit = 10, counter?: RequestCounter): Promise<SearchHit[]> {
   const q = (query || '').trim()
   if (!q || !token()) return []
   const body = {
@@ -106,6 +120,7 @@ export async function searchWeb(query: string, limit = 10): Promise<SearchHit[]>
     data_format: 'markdown',
   }
   try {
+    if (counter) counter.searches++
     const r = await attempt(body)
     if (!r.ok || !r.text) return []
     // Markdown links: [title](url) — keep real http(s) targets, drop google's own.
@@ -128,8 +143,8 @@ export async function searchWeb(query: string, limit = 10): Promise<SearchHit[]>
 }
 
 /** Find the best profile URL for a competitor on a given platform host. */
-export async function discoverProfileUrl(name: string, hostFragment: string): Promise<string> {
-  const hits = await searchWeb(`${name} ${hostFragment}`)
+export async function discoverProfileUrl(name: string, hostFragment: string, counter?: RequestCounter): Promise<string> {
+  const hits = await searchWeb(`${name} ${hostFragment}`, 10, counter)
   const hit = hits.find((h) => h.url.toLowerCase().includes(hostFragment.toLowerCase()))
   return hit?.url || ''
 }

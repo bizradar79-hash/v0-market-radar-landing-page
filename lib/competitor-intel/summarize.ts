@@ -7,6 +7,7 @@
 // is reported as such, never filled in.
 
 import { callModel } from '@/lib/call-model'
+import { priceFor } from '@/lib/scan/cost-tracker'
 import { norm } from '@/lib/match/hebrew-core'
 import type { SourceStatus, SocialPost, ProfileMeta } from '@/lib/brightdata/client'
 
@@ -61,12 +62,23 @@ export interface DerivedInsights {
   followers?: Array<{ source: IntelSource; followers: number }>
 }
 
+/** Model usage for one summarize call. `precision` is honest about whether the
+ *  token counts are REAL (returned by the provider) or a fallback estimate. */
+export interface LlmUsage {
+  model: string
+  promptTokens: number
+  completionTokens: number
+  costUSD: number
+  precision: 'exact' | 'estimated'
+}
+
 export interface CompetitorBriefing {
   summary: string                 // one-line overall summary
   items: BriefingItem[]           // what's new/notable this period
   sourcesUsed: IntelSource[]      // sources that actually contributed
   sourcesEmpty: IntelSource[]     // scraped but nothing usable / failed
   insights?: DerivedInsights      // computed in code (zero extra scrape cost)
+  llm?: LlmUsage                  // real token usage when the provider reports it
   generatedAt: string
 }
 
@@ -288,6 +300,43 @@ export function computeInsights(
   return out
 }
 
+/**
+ * Call the model and capture REAL token usage. Gemini's generateContent returns
+ * usageMetadata.{promptTokenCount,candidatesTokenCount} — we call it directly so
+ * those numbers aren't discarded (callModel returns only the string). Any other
+ * provider falls back to callModel + a character-based ESTIMATE, clearly labeled.
+ */
+async function callWithUsage(
+  provider: string, model: string, prompt: string,
+): Promise<{ text: string; usage: LlmUsage }> {
+  const price = priceFor(model)
+  const cost = (pt: number, ct: number) => (pt / 1e6) * price.inUSDPerM + (ct / 1e6) * price.outUSDPerM
+
+  if (provider === 'gemini' && process.env.GEMINI_API_KEY) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) },
+    )
+    if (!res.ok) throw new Error(`Gemini error ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    const data = await res.json()
+    const text = data.candidates?.[0]?.content?.parts?.filter((p: any) => p.text).map((p: any) => p.text).join('') || ''
+    const u = data.usageMetadata || {}
+    const pt = Number(u.promptTokenCount) || 0
+    const ct = Number(u.candidatesTokenCount) || 0
+    // Real counts present → EXACT. Missing (rare) → fall back to an estimate.
+    if (pt > 0 || ct > 0) {
+      return { text, usage: { model, promptTokens: pt, completionTokens: ct, costUSD: cost(pt, ct), precision: 'exact' } }
+    }
+    const ept = Math.ceil(prompt.length / 4), ect = Math.ceil(text.length / 4)
+    return { text, usage: { model, promptTokens: ept, completionTokens: ect, costUSD: cost(ept, ect), precision: 'estimated' } }
+  }
+
+  // Other providers: no usage exposed through callModel → ~4 chars/token estimate.
+  const text = await callModel(provider, model, prompt)
+  const ept = Math.ceil(prompt.length / 4), ect = Math.ceil(text.length / 4)
+  return { text, usage: { model, promptTokens: ept, completionTokens: ect, costUSD: cost(ept, ect), precision: 'estimated' } }
+}
+
 function extractJson(text: string): any | null {
   const clean = (text || '').replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
   try { return JSON.parse(clean) } catch {}
@@ -358,9 +407,9 @@ ${blocks}
 {"summary":"","items":[{"what":"","source":"website|instagram|facebook|linkedin","date":"","kind":"launch|price|campaign|content|hiring|event|other","implication":""}]}`
 
   try {
-    const raw = await callModel(provider, model, prompt)
+    const { text: raw, usage } = await callWithUsage(provider, model, prompt)
     const parsed = extractJson(raw)
-    if (!parsed) return { ...base, summary: 'לא ניתן היה לנתח את הנתונים שנאספו.' }
+    if (!parsed) return { ...base, summary: 'לא ניתן היה לנתח את הנתונים שנאספו.', llm: usage }
     const items: BriefingItem[] = Array.isArray(parsed.items)
       ? parsed.items
           .filter((i: any) => i && typeof i.what === 'string' && i.what.trim())
@@ -382,7 +431,7 @@ ${blocks}
       : String(parsed.summary || '').trim()
     // Zero-extra-cost insights, computed from the SAME scrapes (no new calls).
     const insights = computeInsights(sources, recent)
-    return { ...base, summary, items: recent, insights }
+    return { ...base, summary, items: recent, insights, llm: usage }
   } catch (e: any) {
     return { ...base, summary: `שגיאה בניתוח: ${e?.message || 'unknown'}` }
   }
