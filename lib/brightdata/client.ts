@@ -187,17 +187,24 @@ export const DATASET_IDS: Record<SocialPlatform, string> = {
 }
 
 // ── Per-platform REQUEST CONFIG (verified against the API docs) ───────────
-// The bug behind "Invalid input" (LinkedIn) and "0 rows" (Instagram): discovery
-// datasets need type=discover_new&discover_by=<value> QUERY PARAMS. Without
-// them the endpoint treats a PROFILE url as a single-item collect-by-url call,
-// so it either rejects it or finds nothing.
-//   instagram → discover_by=url          (docs: instagram-posts-discover-by-url)
-//   linkedin  → discover_by=profile_url  (docs: linkedin-posts-discover-by-profile-url)
-//   facebook  → none (pages-posts COLLECT-by-url — already working)
-//   tiktok    → none (unchanged)
-const DISCOVER_PARAMS: Partial<Record<SocialPlatform, Record<string, string>>> = {
-  instagram: { type: 'discover_new', discover_by: 'url' },
-  linkedin: { type: 'discover_new', discover_by: 'profile_url' },
+// Each platform declares its MODE so one platform's fix can never alter another:
+//
+//   mode 'discover' → the dataset finds a profile's posts FROM a profile URL and
+//                     REQUIRES type=discover_new&discover_by=<value> query params
+//                     (omitting them is what caused LinkedIn "Invalid input" and
+//                     Instagram "0 rows").
+//   mode 'collect'  → the dataset takes the URL as-is and must receive NO
+//                     discovery params at all (Facebook pages-posts, TikTok).
+//
+// `input` builds the request body's per-platform fields; `collect` platforms get
+// the plain { url } body and the exact query string that was already working.
+type DatasetMode = 'discover' | 'collect'
+interface PlatformConfig {
+  mode: DatasetMode
+  /** Only for mode 'discover'. */
+  discoverBy?: string
+  /** Extra body fields beyond { url }. */
+  input?: (url: string) => Record<string, any>
 }
 
 // How many recent posts to request where the dataset supports a limit.
@@ -206,26 +213,52 @@ const IG_NUM_POSTS = Number(process.env.BRIGHTDATA_IG_NUM_POSTS) || 12
 // briefing filter so a low-frequency poster still yields rows.
 const LOOKBACK_DAYS = Number(process.env.BRIGHTDATA_LOOKBACK_DAYS) || 90
 
-/** Build the per-platform input object exactly as each dataset documents it. */
-function buildInput(platform: SocialPlatform, url: string): Record<string, any> {
-  if (platform === 'instagram') {
+const PLATFORM_CONFIG: Record<SocialPlatform, PlatformConfig> = {
+  // instagram-posts-discover-by-url
+  instagram: {
+    mode: 'discover',
+    discoverBy: 'url',
     // Docs: { url, num_of_posts?, posts_to_not_include?, start_date?, end_date?, post_type? }
     // post_type omitted on purpose so we get BOTH posts and reels.
-    return { url, num_of_posts: IG_NUM_POSTS }
-  }
-  if (platform === 'linkedin') {
+    input: (url) => ({ url, num_of_posts: IG_NUM_POSTS }),
+  },
+  // linkedin-posts-discover-by-profile-url
+  linkedin: {
+    mode: 'discover',
+    discoverBy: 'profile_url',
     // Docs: { url, start_date?, end_date?, only_authored_posts? } — ISO 8601.
-    const end = new Date()
-    const start = new Date(end.getTime() - LOOKBACK_DAYS * 86400000)
-    return { url, start_date: start.toISOString(), end_date: end.toISOString() }
-  }
-  return { url } // facebook / tiktok — plain collect-by-url
+    input: (url) => {
+      const end = new Date()
+      const start = new Date(end.getTime() - LOOKBACK_DAYS * 86400000)
+      return { url, start_date: start.toISOString(), end_date: end.toISOString() }
+    },
+  },
+  // facebook-pages-posts-COLLECT-by-url — NO discovery params (this is what
+  // works; adding them breaks it).
+  facebook: { mode: 'collect' },
+  // TikTok — unchanged from the original working call.
+  tiktok: { mode: 'collect' },
 }
 
-/** Query string for a dataset call, including discovery flags when required. */
+/** Request body for a platform: { url } plus any documented extra fields. */
+function buildInput(platform: SocialPlatform, url: string): Record<string, any> {
+  const cfg = PLATFORM_CONFIG[platform]
+  return cfg.input ? cfg.input(url) : { url }
+}
+
+/**
+ * Query string for a dataset call. 'collect' platforms get EXACTLY the params
+ * that were already working (dataset_id, format?, include_errors) and never a
+ * discovery flag; 'discover' platforms additionally get type/discover_by.
+ */
 function datasetQuery(platform: SocialPlatform, datasetId: string, extra?: Record<string, string>): string {
-  const qs = new URLSearchParams({ dataset_id: datasetId, include_errors: 'true', ...(extra || {}), ...(DISCOVER_PARAMS[platform] || {}) })
-  return qs.toString()
+  const cfg = PLATFORM_CONFIG[platform]
+  const params: Record<string, string> = { dataset_id: datasetId, ...(extra || {}), include_errors: 'true' }
+  if (cfg.mode === 'discover' && cfg.discoverBy) {
+    params.type = 'discover_new'
+    params.discover_by = cfg.discoverBy
+  }
+  return new URLSearchParams(params).toString()
 }
 
 // Sync /scrape is preferred (returns rows directly). Facebook discovery can be

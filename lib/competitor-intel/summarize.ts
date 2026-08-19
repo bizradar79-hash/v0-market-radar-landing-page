@@ -79,6 +79,7 @@ export interface CompetitorBriefing {
   sourcesEmpty: IntelSource[]     // scraped but nothing usable / failed
   insights?: DerivedInsights      // computed in code (zero extra scrape cost)
   llm?: LlmUsage                  // real token usage when the provider reports it
+  llmSkipped?: boolean            // true when COMPETITOR_INTEL_LLM_ENABLED is off
   generatedAt: string
 }
 
@@ -88,6 +89,12 @@ const MAX_CHARS_PER_SOURCE = Number(process.env.INTEL_MAX_CHARS_PER_SOURCE) || 1
 // dropped from the briefing (env-tunable). Belt-and-suspenders: the prompt also
 // asks the model to pre-filter, and this code enforces it hard.
 export const RECENCY_DAYS = Number(process.env.COMPETITOR_INTEL_RECENCY_DAYS) || 45
+
+// LLM briefing gate. OFF during source calibration so we don't burn tokens
+// summarizing incomplete scrapes. When false the summarizer makes NO model call;
+// the raw sources + the DERIVED insights (computed in code, free) still render.
+// Flip to 'true' in env to re-enable — no code change needed.
+export const LLM_ENABLED = process.env.COMPETITOR_INTEL_LLM_ENABLED === 'true'
 
 const HE_MONTHS: Array<[RegExp, number]> = [
   [/ינואר|january|jan\b/i, 1], [/פברואר|february|feb\b/i, 2], [/מרץ|מרס|march|mar\b/i, 3],
@@ -372,7 +379,19 @@ export async function summarizeCompetitor(opts: {
   }
 
   if (used.length === 0) {
-    return { ...base, summary: `לא נאספו נתונים זמינים עבור ${competitorName} במקורות שנבדקו.` }
+    return { ...base, summary: `לא נאספו נתונים זמינים עבור ${competitorName} במקורות שנבדקו.`, insights: computeInsights(sources, []) }
+  }
+
+  // LLM gated OFF (calibration): skip the model entirely. Derived insights are
+  // deterministic + free, so they're still computed and returned.
+  if (!LLM_ENABLED) {
+    return {
+      ...base,
+      summary: '',
+      items: [],
+      insights: computeInsights(sources, []),
+      llmSkipped: true,
+    }
   }
 
   const blocks = used

@@ -32,7 +32,7 @@ interface DerivedInsights {
   presence?: { source: Source; count: number; text: string }
   followers?: Array<{ source: Source; followers: number }>
 }
-interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; generatedAt: string }
+interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; llmSkipped?: boolean; generatedAt: string }
 interface RunCost {
   brightdata: { requests: number; scrapes: number; searches: number; records?: number; perRequestUSD: number; perRecordUSD?: number; costUSD: number; precision: 'exact' }
   llm: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
@@ -338,7 +338,18 @@ export default function CompetitorIntelDevPage() {
 
                   {/* Briefing */}
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground">תדריך (LLM)</p>
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      תדריך (LLM)
+                      {run.briefing?.llmSkipped && (
+                        <Badge variant="outline" className="mr-1.5 border-amber-300 text-amber-700 py-0 h-4 text-[9px]">מכובה</Badge>
+                      )}
+                    </p>
+                    {run.briefing?.llmSkipped && (
+                      <p className="rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+                        סיכום ה-LLM מכובה בזמן הכיול (COMPETITOR_INTEL_LLM_ENABLED=false) — לא בוצעה קריאת מודל.
+                        התובנות למטה מחושבות בקוד וללא עלות.
+                      </p>
+                    )}
                     {run.briefing ? (
                       <div className="space-y-2">
                         {run.briefing.summary && (
