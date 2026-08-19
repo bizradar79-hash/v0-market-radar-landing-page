@@ -30,6 +30,10 @@ export interface SourceResult {
   /** Structured posts from a DEDICATED scraper (TikTok today; template for the rest). */
   posts?: SocialPost[]
   profile?: ProfileMeta
+  /** Total posts the scraper returned (full history, shown in the raw view). */
+  postsTotal?: number
+  /** How many of those fall inside the recency window (drives the insights). */
+  postsRecent?: number
   error?: string
 }
 
@@ -60,6 +64,10 @@ export interface DerivedInsights {
   /** e. Follower counts per source — STORED NOW so future runs can show growth.
    *  Growth tracking activates once we have 2+ snapshots for the same competitor. */
   followers?: Array<{ source: IntelSource; followers: number }>
+  /** True when nothing at all falls inside the recency window. */
+  noRecentActivity?: boolean
+  /** The window these insights were computed over (days). */
+  windowDays?: number
 }
 
 /** Model usage for one summarize call. `precision` is honest about whether the
@@ -304,6 +312,10 @@ export function computeInsights(
     .map((s) => ({ source: s.source, followers: s.profile!.followers as number }))
   if (followers.length > 0) out.followers = followers
 
+  // Make the window explicit, and say plainly when nothing is recent (rather
+  // than rendering an empty insights block that looks like a bug).
+  out.windowDays = days
+  out.noRecentActivity = total === 0
   return out
 }
 
@@ -344,6 +356,31 @@ async function callWithUsage(
   return { text, usage: { model, promptTokens: ept, completionTokens: ect, costUSD: cost(ept, ect), precision: 'estimated' } }
 }
 
+/**
+ * INDEPENDENT recency layer over SCRAPED POSTS (not LLM items).
+ * Runs before insights and before any LLM call, so windowing no longer depends
+ * on the summarizer being enabled. A post with an unparseable date is DROPPED
+ * here (unlike briefing items) — structured scrapers always emit a real date,
+ * so a missing one means we can't prove it's recent.
+ */
+export function filterRecentPosts(
+  posts: SocialPost[] | undefined, days = RECENCY_DAYS, now = new Date(),
+): SocialPost[] {
+  if (!posts?.length) return []
+  const cutoff = now.getTime() - days * 86400000
+  return posts.filter((p) => {
+    const d = parseItemDate(p.date, now)
+    return d ? d.getTime() >= cutoff : false
+  })
+}
+
+/** Apply the recency layer to every source, keeping everything else intact. */
+export function withRecentPosts(
+  sources: SourceResult[], days = RECENCY_DAYS, now = new Date(),
+): SourceResult[] {
+  return sources.map((s) => (s.posts?.length ? { ...s, posts: filterRecentPosts(s.posts, days, now) } : s))
+}
+
 function extractJson(text: string): any | null {
   const clean = (text || '').replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
   try { return JSON.parse(clean) } catch {}
@@ -363,9 +400,16 @@ export async function summarizeCompetitor(opts: {
   provider?: string
   model?: string
 }): Promise<CompetitorBriefing> {
-  const { competitorName, clientContext, sources } = opts
+  const { competitorName, clientContext, sources: rawSources } = opts
   const provider = opts.provider || 'gemini'
   const model = opts.model || 'gemini-2.5-flash'
+
+  // ── INDEPENDENT RECENCY LAYER ────────────────────────────────────────────
+  // Applied to the SCRAPED POSTS up front, before insights and before any LLM
+  // call — so windowing works even while the LLM is gated off. Everything
+  // downstream (insights, prompt blocks, postsToText) sees only recent posts;
+  // the caller keeps the FULL history for the raw calibration view.
+  const sources = withRecentPosts(rawSources)
 
   const used = sources.filter((s) => s.status === 'ok' && (s.text || '').trim().length > 0)
   const empty = sources.filter((s) => s.status !== 'ok' || !(s.text || '').trim())

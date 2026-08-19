@@ -9,7 +9,7 @@ import {
   scrapeUrl, scrapeSocialProfile, postsToText, discoverProfileUrl, isBrightDataConfigured,
   RequestCounter, BRIGHTDATA_COST_PER_REQ, BRIGHTDATA_RECORD_COST, type SocialPlatform,
 } from '@/lib/brightdata/client'
-import { summarizeCompetitor, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
+import { summarizeCompetitor, filterRecentPosts, RECENCY_DAYS, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
   return createServerClient(
@@ -58,7 +58,7 @@ export async function GET(request: Request) {
     .order('created_at', { ascending: false })
     .limit(RUN_HISTORY_CAP)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ success: true, runs: data || [], brightdata: isBrightDataConfigured() })
+  return NextResponse.json({ success: true, runs: data || [], brightdata: isBrightDataConfigured(), recencyDays: RECENCY_DAYS })
 }
 
 // POST { company_id, competitor: { name, urls: {website,instagram,...} } }
@@ -107,13 +107,21 @@ export async function POST(request: Request) {
       // for it.
       if (source !== 'website') {
         const t = await scrapeSocialProfile(source as SocialPlatform, url, counter)
+        // Keep the FULL post history in `posts` for the raw calibration view;
+        // record how many fall inside the recency window so the UI can show
+        // "N סה\"כ · M ב-45 הימים האחרונים". Insights/LLM get the filtered set
+        // via the recency layer inside summarizeCompetitor.
+        const recent = filterRecentPosts(t.posts)
         return {
           source,
           status: t.status === 'processing' ? 'failed' : t.status,
           url,
-          text: t.posts.length ? postsToText(t.posts, t.profile) : undefined,
+          // Text rendering feeds the LLM → only recent posts belong here.
+          text: recent.length ? postsToText(recent, t.profile) : undefined,
           posts: t.posts.length ? t.posts : undefined,
           profile: t.profile,
+          postsTotal: t.posts.length,
+          postsRecent: recent.length,
           error: t.error,
         }
       }

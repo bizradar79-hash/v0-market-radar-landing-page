@@ -23,7 +23,7 @@ const MAX_COMPETITORS = 5
 interface Company { id: string; name: string; website?: string }
 interface SocialPost { caption: string; date: string; likes?: number | null; comments?: number | null; shares?: number | null; views?: number | null; hashtags?: string[]; postUrl?: string }
 interface ProfileMeta { followers?: number | null; bio?: string; name?: string }
-interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; error?: string }
+interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; postsTotal?: number; postsRecent?: number; error?: string }
 interface BriefingItem { what: string; source: Source; date?: string; kind?: string; implication?: string }
 interface DerivedInsights {
   cadence?: { total: number; level: string; text: string }
@@ -31,6 +31,8 @@ interface DerivedInsights {
   topPosts?: Array<{ caption: string; source: Source; date: string; engagement: number; text: string }>
   presence?: { source: Source; count: number; text: string }
   followers?: Array<{ source: Source; followers: number }>
+  noRecentActivity?: boolean
+  windowDays?: number
 }
 interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source[]; sourcesEmpty: Source[]; insights?: DerivedInsights; llmSkipped?: boolean; generatedAt: string }
 interface RunCost {
@@ -63,6 +65,7 @@ export default function CompetitorIntelDevPage() {
   const [runningAll, setRunningAll] = useState(false)
   const [expandedRaw, setExpandedRaw] = useState<string | null>(null)
   const [bdConfigured, setBdConfigured] = useState<boolean | null>(null)
+  const [recencyDays, setRecencyDays] = useState(45)
 
   useEffect(() => {
     fetch('/api/admin/companies').then(r => r.json())
@@ -73,7 +76,7 @@ export default function CompetitorIntelDevPage() {
   useEffect(() => {
     if (!companyId) { setRuns([]); return }
     fetch(`/api/admin/competitor-intel?company_id=${companyId}`).then(r => r.json())
-      .then(d => { setRuns(Array.isArray(d.runs) ? d.runs : []); setBdConfigured(!!d.brightdata) })
+      .then(d => { setRuns(Array.isArray(d.runs) ? d.runs : []); setBdConfigured(!!d.brightdata); if (d.recencyDays) setRecencyDays(d.recencyDays) })
       .catch(() => setRuns([]))
   }, [companyId])
 
@@ -288,7 +291,10 @@ export default function CompetitorIntelDevPage() {
                     {(run.sources || []).filter(s => (s.posts || []).length > 0).map((s, si) => (
                       <div key={`p-${si}`} className="rounded border">
                         <div className="border-b bg-muted/40 px-2 py-1.5 text-xs font-medium">
-                          {SOURCE_LABELS[s.source]} · {s.posts!.length} פוסטים (מובנה)
+                          {SOURCE_LABELS[s.source]} · {(s.postsTotal ?? s.posts!.length).toLocaleString()} פוסטים סה"כ
+                          {s.postsRecent != null && (
+                            <span className="text-primary"> · {s.postsRecent} ב-{recencyDays} הימים האחרונים</span>
+                          )}
                           {s.profile?.followers != null && <span className="text-muted-foreground"> · {s.profile.followers.toLocaleString()} עוקבים</span>}
                         </div>
                         <div className="max-h-72 space-y-1.5 overflow-auto p-2">
@@ -375,7 +381,17 @@ export default function CompetitorIntelDevPage() {
                         {/* Derived insights — computed in code from the same scrapes */}
                         {run.briefing.insights && Object.keys(run.briefing.insights).length > 0 && (
                           <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5">
-                            <p className="text-xs font-semibold text-primary">תובנות נוספות</p>
+                            <p className="text-xs font-semibold text-primary">
+                              תובנות נוספות
+                              <span className="mr-1.5 font-normal text-muted-foreground">
+                                ({run.briefing.insights.windowDays ?? recencyDays} הימים האחרונים)
+                              </span>
+                            </p>
+                            {run.briefing.insights.noRecentActivity && (
+                              <p className="text-xs text-muted-foreground">
+                                אין פעילות ב-{run.briefing.insights.windowDays ?? recencyDays} הימים האחרונים.
+                              </p>
+                            )}
                             {run.briefing.insights.cadence && (
                               <p className="text-xs">📅 {run.briefing.insights.cadence.text}</p>
                             )}
