@@ -62,11 +62,18 @@ export async function PUT(request: Request) {
   const name: string = (body.name || '').trim()
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
 
+  if (!isBrightDataConfigured()) {
+    return NextResponse.json({ error: 'BRIGHTDATA_API_TOKEN לא מוגדר — לא ניתן לחפש לינקים' }, { status: 400 })
+  }
+
   const counter = new RequestCounter()
-  const urls = await findCompetitorLinks(name, counter)
+  const { urls, diagnostics } = await findCompetitorLinks(name, counter)
   return NextResponse.json({
     success: true,
     urls,
+    // Surfaced in the UI so a zero-result run is never silent: shows per-platform
+    // hit counts and the actual search error when one occurred.
+    diagnostics,
     cost: { requests: counter.total, costUSD: counter.costUSD, perRequestUSD: BRIGHTDATA_COST_PER_REQ },
   })
 }

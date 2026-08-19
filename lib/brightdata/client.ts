@@ -109,15 +109,37 @@ export async function scrapeUrl(url: string, counter?: RequestCounter): Promise<
 }
 
 export interface SearchHit { title: string; url: string }
+export interface SearchResult { hits: SearchHit[]; rawLength: number; error?: string }
 
 /**
- * SERP search — used to AUTO-DISCOVER a competitor's profile URL when the admin
- * didn't provide one (e.g. "<name> instagram"). Returns links parsed out of the
- * markdown SERP. Best-effort; empty array on any failure.
+ * Google wraps SERP links as https://www.google.com/url?q=<REAL>&sa=… — the old
+ * code rejected anything containing "google." and therefore threw away EVERY
+ * result, which is why "מצא לינקים" silently found nothing. Unwrap first, then
+ * filter out genuine Google infrastructure.
  */
-export async function searchWeb(query: string, limit = 10, counter?: RequestCounter): Promise<SearchHit[]> {
+function unwrapGoogleUrl(raw: string): string {
+  try {
+    const u = new URL(raw)
+    if (/(^|\.)google\./i.test(u.hostname)) {
+      const target = u.searchParams.get('q') || u.searchParams.get('url') || u.searchParams.get('imgurl')
+      if (target && /^https?:\/\//i.test(target)) return target
+    }
+  } catch { /* not a parseable URL */ }
+  return raw
+}
+
+function isInfraUrl(url: string): boolean {
+  return /gstatic|googleusercontent|google\.com\/(search|preferences|advanced_search|intl|policies|setprefs)|accounts\.google|support\.google|policies\.google|webcache\./i.test(url)
+}
+
+/**
+ * SERP search → links. Returns diagnostics (raw payload size, hit count) so a
+ * zero-result run can be distinguished from a broken request.
+ */
+export async function searchWebDetailed(query: string, limit = 10, counter?: RequestCounter): Promise<SearchResult> {
   const q = (query || '').trim()
-  if (!q || !token()) return []
+  if (!q) return { hits: [], rawLength: 0, error: 'empty_query' }
+  if (!token()) return { hits: [], rawLength: 0, error: 'missing_brightdata_token' }
   const body = {
     zone: ZONE,
     url: `https://www.google.com/search?q=${encodeURIComponent(q)}&num=${limit}&hl=he&gl=il`,
@@ -127,24 +149,42 @@ export async function searchWeb(query: string, limit = 10, counter?: RequestCoun
   try {
     if (counter) counter.searches++
     const r = await attempt(body)
-    if (!r.ok || !r.text) return []
-    // Markdown links: [title](url) — keep real http(s) targets, drop google's own.
+    if (!r.ok) return { hits: [], rawLength: (r.text || '').length, error: `http_${r.status}: ${(r.text || '').slice(0, 120)}` }
+    const text = r.text || ''
+    if (!text.trim()) return { hits: [], rawLength: 0, error: 'empty_response' }
+
     const hits: SearchHit[] = []
     const seen = new Set<string>()
-    const re = /\[([^\]]{2,120})\]\((https?:\/\/[^)\s]+)\)/g
-    let m: RegExpExecArray | null
-    while ((m = re.exec(r.text)) !== null) {
-      const url = m[2]
-      if (/google\.|gstatic|googleusercontent|\/search\?/i.test(url)) continue
-      if (seen.has(url)) continue
-      seen.add(url)
-      hits.push({ title: m[1].trim(), url })
-      if (hits.length >= limit) break
+    const push = (title: string, rawUrl: string) => {
+      const url = unwrapGoogleUrl(rawUrl)
+      if (!/^https?:\/\//i.test(url) || isInfraUrl(url)) return
+      const key = url.replace(/[#?].*$/, '')
+      if (seen.has(key)) return
+      seen.add(key)
+      hits.push({ title: (title || '').trim(), url })
     }
-    return hits
-  } catch {
-    return []
+
+    // 1. Markdown links [title](url)
+    const mdRe = /\[([^\]]{0,160})\]\((https?:\/\/[^)\s]+)\)/g
+    let m: RegExpExecArray | null
+    while ((m = mdRe.exec(text)) !== null && hits.length < limit) push(m[1], m[2])
+
+    // 2. Fallback: bare URLs in the text (markdown conversion sometimes drops
+    //    the link syntax entirely, which previously yielded zero hits).
+    if (hits.length === 0) {
+      const bareRe = /(https?:\/\/[^\s)\]"'<>]+)/g
+      let b: RegExpExecArray | null
+      while ((b = bareRe.exec(text)) !== null && hits.length < limit) push('', b[1])
+    }
+    return { hits, rawLength: text.length }
+  } catch (e: any) {
+    return { hits: [], rawLength: 0, error: e?.name === 'AbortError' ? 'search_timeout' : (e?.message || 'search_failed') }
   }
+}
+
+/** Back-compat: hits only. */
+export async function searchWeb(query: string, limit = 10, counter?: RequestCounter): Promise<SearchHit[]> {
+  return (await searchWebDetailed(query, limit, counter)).hits
 }
 
 /** Find the best profile URL for a competitor on a given platform host. */
@@ -268,11 +308,27 @@ const SYNC_TIMEOUT_MS = Number(process.env.BRIGHTDATA_SYNC_TIMEOUT_MS) || 180000
 // Dedicated scrapers bill per RECORD collected (marketplace price), unlike the
 // Web Unlocker's per-request price. Env-tunable.
 export const BRIGHTDATA_RECORD_COST = Number(process.env.BRIGHTDATA_RECORD_COST) || 0.0025
-// Async social scrapes can genuinely take minutes. Hitting this is NOT a
-// failure — we return status 'processing' + the snapshot_id so the admin can
-// re-poll later with fetchSnapshot() (no re-trigger, no extra cost).
-const POLL_TIMEOUT_MS = Number(process.env.BRIGHTDATA_POLL_TIMEOUT_MS) || 180000
-const POLL_INTERVAL_MS = Number(process.env.BRIGHTDATA_POLL_INTERVAL_MS) || 5000
+// BrightData guidance: async collections take 30s → several minutes with NO hard
+// max, and a job ALWAYS ends in 'ready' or 'failed'. So we poll to one of those
+// terminal states rather than giving up early; the timeout is only a safety net.
+// Hitting it is NOT a failure — we return 'processing' + the snapshot_id so the
+// admin can re-poll with "בדוק שוב" (no re-trigger, no extra cost).
+const POLL_TIMEOUT_MS = Number(process.env.BRIGHTDATA_POLL_TIMEOUT_MS) || 300000
+
+// Documented job statuses. Anything non-terminal means "keep polling".
+const TERMINAL_READY = 'ready'
+const TERMINAL_FAILED = 'failed'
+const IN_PROGRESS_STATUSES = ['running', 'building', 'collecting', 'digesting', 'pending', 'queued', 'started']
+
+// WEBHOOK STUB (future, hands-off delivery): setting BRIGHTDATA_WEBHOOK_URL makes
+// us pass `endpoint` to /trigger so BrightData POSTs the results to us when the
+// job is ready — no polling at all. That is the path to full reliability for the
+// PRODUCTION integration (a serverless function can't poll for 5 minutes safely).
+// For the dev tab we keep polling as the default; wiring the receiver route is a
+// separate task (it needs an unauthenticated callback endpoint + run lookup).
+export const BRIGHTDATA_WEBHOOK_URL = process.env.BRIGHTDATA_WEBHOOK_URL || ''
+// BrightData recommends ~10s between progress checks.
+const POLL_INTERVAL_MS = Number(process.env.BRIGHTDATA_POLL_INTERVAL_MS) || 10000
 
 export interface SocialPost {
   caption: string
@@ -302,6 +358,8 @@ export interface StructuredScrapeResult {
   url?: string
   /** Set when a collection is still running — re-poll it with fetchSnapshot(). */
   snapshotId?: string
+  /** Some input URLs failed while others succeeded (BrightData per-row errors). */
+  partialErrors?: string[]
 }
 
 const num = (v: any): number | null => {
@@ -429,6 +487,27 @@ async function bdFetch(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Split dataset rows into usable records and per-URL failures. BrightData can
+ * succeed as a JOB while individual input URLs fail (documented `errors` field),
+ * so we use what worked and report the rest rather than discarding everything.
+ */
+function splitRows(rows: any[]): { good: any[]; errors: string[] } {
+  const good: any[] = []
+  const errors: string[] = []
+  for (const r of rows) {
+    if (!r) continue
+    const err = r.error || r.warning || r.error_code || r.errors
+    if (err) {
+      const msg = typeof err === 'string' ? err : JSON.stringify(err)
+      errors.push(`${r.input?.url || r.url || ''} ${msg}`.trim().slice(0, 160))
+      continue
+    }
+    good.push(r)
+  }
+  return { good, errors }
+}
+
 /** Rows come back as a JSON array, {data:[…]}, or NDJSON — accept all three. */
 function parseRows(text: string): any[] {
   try {
@@ -466,13 +545,17 @@ export async function scrapeSocialProfile(
   // Docs-confirmed body: {"input":[{…}]} with PER-PLATFORM fields.
   const payload = JSON.stringify({ input: [buildInput(platform, url)] })
   const finish = (rows: any[]): StructuredScrapeResult => {
-    const valid = rows.filter((r) => r && !r.error && !r.warning)
-    if (counter) counter.records += valid.length  // datasets bill per record
-    if (valid.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
-    const posts = valid.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
-    const profile = toProfile(valid[0], platform)
-    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
-    return { ok: true, status: 'ok', posts, profile, url }
+    const { good, errors } = splitRows(rows)
+    if (counter) counter.records += good.length  // datasets bill per record
+    const partialErrors = errors.length ? errors.slice(0, 3) : undefined
+    if (good.length === 0) {
+      return { ok: false, status: 'empty', posts: [], url, partialErrors, error: errors[0] || 'no_rows' }
+    }
+    const posts = good.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
+    const profile = toProfile(good[0], platform)
+    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, url, partialErrors, error: 'no_posts_parsed' }
+    // PARTIAL success: some URLs worked, others didn't — keep the good data.
+    return { ok: true, status: 'ok', posts, profile, url, partialErrors }
   }
 
   // ── 1. SYNC /scrape (preferred) ──────────────────────────────────────────
@@ -522,23 +605,32 @@ export async function scrapeSocialProfile(
     }
   }
 
+  // Poll until a TERMINAL status ('ready' | 'failed'). Non-terminal statuses
+  // (collecting/digesting/running/…) just mean "still working" — keep going.
   const deadline = Date.now() + POLL_TIMEOUT_MS
+  let lastStatus = ''
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS)
     try {
       const res = await bdFetch(`${DATASETS_BASE}/progress/${snapshotId}`, { method: 'GET' }, 20000)
       const body = await res.json().catch(() => ({}))
       const status = String(body?.status || '').toLowerCase()
-      if (status === 'ready') break
-      if (status === 'failed' || body?.error) {
-        return { ok: false, status: 'failed', posts: [], error: `snapshot_${status || 'error'}: ${String(body?.error || '').slice(0, 160)}`, url }
+      if (status) lastStatus = status
+      if (status === TERMINAL_READY) break
+      if (status === TERMINAL_FAILED) {
+        return { ok: false, status: 'failed', posts: [], error: `snapshot_failed: ${String(body?.error || body?.message || '').slice(0, 160)}`, url }
+      }
+      // An `error` with no terminal status is treated as transient, not fatal —
+      // the job may still complete (documented: it always ends ready/failed).
+      if (!status && body?.error && !IN_PROGRESS_STATUSES.includes(lastStatus)) {
+        return { ok: false, status: 'failed', posts: [], error: `snapshot_error: ${String(body.error).slice(0, 160)}`, url }
       }
     } catch { /* transient — keep polling until the deadline */ }
   }
   if (Date.now() >= deadline) {
     return {
       ok: false, status: 'processing', posts: [], url, snapshotId,
-      error: `הסריקה עדיין רצה אחרי ${Math.round(POLL_TIMEOUT_MS / 1000)} שניות — לחץ "בדוק שוב" בעוד דקה (ללא עלות נוספת)`,
+      error: `הסריקה עדיין רצה אחרי ${Math.round(POLL_TIMEOUT_MS / 1000)} שניות${lastStatus ? ` (סטטוס: ${lastStatus})` : ''} — לחץ "בדוק שוב" בעוד דקה (ללא עלות נוספת)`,
     }
   }
 
@@ -586,12 +678,13 @@ export async function fetchSnapshot(
       if (res.status === 202) return { ok: false, status: 'processing', posts: [], snapshotId: id, url, error: 'עדיין רץ — נסה שוב בעוד רגע' }
       return { ok: false, status: 'failed', posts: [], error: `snapshot_http_${res.status}: ${text.slice(0, 160)}`, url }
     }
-    const rows = parseRows(text).filter((r) => r && !r.error && !r.warning)
-    if (rows.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
-    const posts = rows.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
-    const profile = toProfile(rows[0], platform)
-    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
-    return { ok: true, status: 'ok', posts, profile, url }
+    const { good, errors } = splitRows(parseRows(text))
+    const partialErrors = errors.length ? errors.slice(0, 3) : undefined
+    if (good.length === 0) return { ok: false, status: 'empty', posts: [], url, partialErrors, error: errors[0] || 'no_rows' }
+    const posts = good.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
+    const profile = toProfile(good[0], platform)
+    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, url, partialErrors, error: 'no_posts_parsed' }
+    return { ok: true, status: 'ok', posts, profile, url, partialErrors }
   } catch (e: any) {
     return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'snapshot_timeout' : (e?.message || 'snapshot_failed'), url }
   }
@@ -601,37 +694,49 @@ export async function fetchSnapshot(
  * TARGETED link discovery for one competitor: precise per-platform queries
  * (site: operators) so results are far more reliable than a generic name search.
  * Search-only — no scraping, so this step is cheap.
+ * Returns per-platform DIAGNOSTICS so the UI can explain a zero-result run
+ * (search error vs. genuinely nothing found) instead of failing silently.
  */
+export interface LinkDiscovery {
+  urls: Record<string, string>
+  diagnostics: Array<{ key: string; query: string; hits: number; picked: string; rawLength: number; error?: string }>
+}
+
 export async function findCompetitorLinks(
   name: string, counter?: RequestCounter,
-): Promise<Record<string, string>> {
+): Promise<LinkDiscovery> {
   const clean = (name || '').trim()
-  if (!clean) return {}
+  if (!clean) return { urls: {}, diagnostics: [] }
   const q = `"${clean}"`
   const plan: Array<{ key: string; query: string; must?: string; reject?: RegExp }> = [
     { key: 'instagram', query: `${q} site:instagram.com`, must: 'instagram.com' },
     { key: 'facebook', query: `${q} site:facebook.com`, must: 'facebook.com' },
     { key: 'linkedin', query: `${q} site:linkedin.com`, must: 'linkedin.com' },
-    // Official site: exclude the socials/aggregators so we land on their domain.
-    { key: 'website', query: `${q} אתר רשמי`, reject: /instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com|wikipedia\.org|maps\.google|yelp\.|zap\.co\.il|dun/i },
+    // Official site: exclude socials/aggregators so we land on their own domain.
+    { key: 'website', query: `${q} אתר רשמי`, reject: /instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com|wikipedia\.org|maps\.google|yelp\.|zap\.co\.il|dun|\.gov\./i },
   ]
 
-  const out: Record<string, string> = {}
+  const urls: Record<string, string> = {}
+  const diagnostics: LinkDiscovery['diagnostics'] = []
+
   await Promise.all(plan.map(async ({ key, query, must, reject }) => {
-    try {
-      const hits = await searchWeb(query, 10, counter)
-      const hit = hits.find((h) => {
-        const u = h.url.toLowerCase()
-        if (must && !u.includes(must)) return false
-        if (reject && reject.test(u)) return false
-        // Skip platform index/login pages — we want an actual profile.
-        if (must && /\/(login|signup|accounts|explore|help|policies)(\/|$|\?)/.test(u)) return false
-        return true
-      })
-      if (hit) out[key] = hit.url
-    } catch { /* a platform with no result simply stays blank */ }
+    const r = await searchWebDetailed(query, 10, counter)
+    const hit = r.hits.find((h) => {
+      const u = h.url.toLowerCase()
+      if (must && !u.includes(must)) return false
+      if (reject && reject.test(u)) return false
+      // Skip platform index/login pages — we want an actual profile.
+      if (must && /\/(login|signup|accounts|explore|help|policies|privacy|terms)(\/|$|\?)/.test(u)) return false
+      // A bare platform root ("https://instagram.com/") is not a profile.
+      if (must && new RegExp(`^https?://(www\\.)?${must.replace('.', '\\.')}/?$`).test(u)) return false
+      return true
+    })
+    if (hit) urls[key] = hit.url
+    diagnostics.push({ key, query, hits: r.hits.length, picked: hit?.url || '', rawLength: r.rawLength, error: r.error })
   }))
-  return out
+
+  console.log('[find-links]', clean, JSON.stringify(diagnostics))
+  return { urls, diagnostics }
 }
 
 /** Back-compat alias — TikTok goes through the same generalized function. */

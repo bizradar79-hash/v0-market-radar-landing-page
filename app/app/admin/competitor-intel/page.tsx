@@ -73,6 +73,8 @@ export default function CompetitorIntelDevPage() {
   const [recencyDays, setRecencyDays] = useState(45)
   const [finding, setFinding] = useState<number | null>(null)
   const [rechecking, setRechecking] = useState<string | null>(null)
+  // Per-competitor search diagnostics so a zero-result run is explainable.
+  const [linkDiag, setLinkDiag] = useState<Record<number, Array<{ key: string; hits: number; error?: string }>>>({})
 
   useEffect(() => {
     fetch('/api/admin/companies').then(r => r.json())
@@ -134,8 +136,24 @@ export default function CompetitorIntelDevPage() {
         }
         return { ...c, urls, selected }
       }))
+      const diags: Array<{ key: string; hits: number; error?: string }> = data.diagnostics || []
+      setLinkDiag(prev => ({ ...prev, [i]: diags }))
       const n = SOURCES.filter(src => found[src]).length
-      toast({ title: `נמצאו ${n} מתוך ${SOURCES.length} לינקים`, description: n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined })
+      const errs = diags.filter(d => d.error)
+      if (n === 0) {
+        toast({
+          title: 'לא נמצאו לינקים',
+          description: errs.length
+            ? `שגיאת חיפוש: ${errs[0].error} — אפשר להזין ידנית`
+            : 'החיפוש לא החזיר תוצאות מתאימות — אפשר להזין ידנית',
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: `נמצאו ${n} מתוך ${SOURCES.length} לינקים`,
+          description: n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined,
+        })
+      }
     } catch (e: any) {
       toast({ title: 'שגיאה בחיפוש', description: e?.message, variant: 'destructive' })
     } finally {
@@ -330,6 +348,11 @@ export default function CompetitorIntelDevPage() {
                   </div>
                 ))}
               </div>
+              {linkDiag[i] && (
+                <p className="text-[10px] text-muted-foreground">
+                  תוצאות חיפוש: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${d.error ? `שגיאה (${d.error})` : d.hits}`).join(' · ')}
+                </p>
+              )}
             </div>
           ))}
         </CardContent>
@@ -392,6 +415,11 @@ export default function CompetitorIntelDevPage() {
                             ? <Loader2 className="h-3 w-3 animate-spin" />
                             : <><RefreshCw className="h-3 w-3 ml-1" />בדוק שוב</>}
                         </Button>
+                      )}
+                      {!!(s as any).partialErrors?.length && (
+                        <span className="text-amber-600" title={(s as any).partialErrors.join(' | ')}>
+                          חלקי ({(s as any).partialErrors.length} כשלו)
+                        </span>
                       )}
                       {s.error && s.error !== 'not_selected' && (
                         <span className="text-muted-foreground truncate max-w-[200px]" title={s.error}>{s.error}</span>
