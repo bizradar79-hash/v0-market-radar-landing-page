@@ -37,7 +37,11 @@ const DISCOVER_HOST: Partial<Record<IntelSource, string>> = {
   website: '', // never guessed — an unknown site is too risky to invent
   instagram: 'instagram.com',
   facebook: 'facebook.com',
-  linkedin: 'linkedin.com/company',
+  // LinkedIn's posts-discover-by-profile-url dataset takes a PERSON profile
+  // (/in/…) — company pages aren't supported by it, so auto-discovery targets
+  // /in/. An admin can still paste a company URL manually; the real API error
+  // then surfaces per-source instead of being hidden.
+  linkedin: 'linkedin.com/in',
 }
 
 // GET ?company_id= → recent dev runs for that company

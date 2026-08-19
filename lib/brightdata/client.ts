@@ -186,6 +186,48 @@ export const DATASET_IDS: Record<SocialPlatform, string> = {
   facebook: process.env.BRIGHTDATA_FACEBOOK_POSTS_DATASET_ID || 'gd_lkaxegm826bjpoo9m5',
 }
 
+// ── Per-platform REQUEST CONFIG (verified against the API docs) ───────────
+// The bug behind "Invalid input" (LinkedIn) and "0 rows" (Instagram): discovery
+// datasets need type=discover_new&discover_by=<value> QUERY PARAMS. Without
+// them the endpoint treats a PROFILE url as a single-item collect-by-url call,
+// so it either rejects it or finds nothing.
+//   instagram → discover_by=url          (docs: instagram-posts-discover-by-url)
+//   linkedin  → discover_by=profile_url  (docs: linkedin-posts-discover-by-profile-url)
+//   facebook  → none (pages-posts COLLECT-by-url — already working)
+//   tiktok    → none (unchanged)
+const DISCOVER_PARAMS: Partial<Record<SocialPlatform, Record<string, string>>> = {
+  instagram: { type: 'discover_new', discover_by: 'url' },
+  linkedin: { type: 'discover_new', discover_by: 'profile_url' },
+}
+
+// How many recent posts to request where the dataset supports a limit.
+const IG_NUM_POSTS = Number(process.env.BRIGHTDATA_IG_NUM_POSTS) || 12
+// Date window for datasets that accept one (LinkedIn). Wider than our 45-day
+// briefing filter so a low-frequency poster still yields rows.
+const LOOKBACK_DAYS = Number(process.env.BRIGHTDATA_LOOKBACK_DAYS) || 90
+
+/** Build the per-platform input object exactly as each dataset documents it. */
+function buildInput(platform: SocialPlatform, url: string): Record<string, any> {
+  if (platform === 'instagram') {
+    // Docs: { url, num_of_posts?, posts_to_not_include?, start_date?, end_date?, post_type? }
+    // post_type omitted on purpose so we get BOTH posts and reels.
+    return { url, num_of_posts: IG_NUM_POSTS }
+  }
+  if (platform === 'linkedin') {
+    // Docs: { url, start_date?, end_date?, only_authored_posts? } — ISO 8601.
+    const end = new Date()
+    const start = new Date(end.getTime() - LOOKBACK_DAYS * 86400000)
+    return { url, start_date: start.toISOString(), end_date: end.toISOString() }
+  }
+  return { url } // facebook / tiktok — plain collect-by-url
+}
+
+/** Query string for a dataset call, including discovery flags when required. */
+function datasetQuery(platform: SocialPlatform, datasetId: string, extra?: Record<string, string>): string {
+  const qs = new URLSearchParams({ dataset_id: datasetId, include_errors: 'true', ...(extra || {}), ...(DISCOVER_PARAMS[platform] || {}) })
+  return qs.toString()
+}
+
 // Sync /scrape is preferred (returns rows directly). Facebook discovery can be
 // slow, so it gets a longer sync budget before we fall back to trigger+poll.
 const SYNC_TIMEOUT_MS = Number(process.env.BRIGHTDATA_SYNC_TIMEOUT_MS) || 180000
@@ -383,8 +425,8 @@ export async function scrapeSocialProfile(
   const datasetId = DATASET_IDS[platform]
   if (!datasetId) return { ok: false, status: 'failed', posts: [], error: `missing_dataset_id_for_${platform}`, url }
 
-  // Docs-confirmed body shape for every one of these datasets.
-  const payload = JSON.stringify({ input: [{ url }] })
+  // Docs-confirmed body: {"input":[{…}]} with PER-PLATFORM fields.
+  const payload = JSON.stringify({ input: [buildInput(platform, url)] })
   const finish = (rows: any[]): StructuredScrapeResult => {
     const valid = rows.filter((r) => r && !r.error && !r.warning)
     if (counter) counter.records += valid.length  // datasets bill per record
@@ -399,7 +441,7 @@ export async function scrapeSocialProfile(
   let snapshotId = ''
   try {
     const res = await bdFetch(
-      `${DATASETS_BASE}/scrape?dataset_id=${encodeURIComponent(datasetId)}&format=json&include_errors=true`,
+      `${DATASETS_BASE}/scrape?${datasetQuery(platform, datasetId, { format: 'json' })}`,
       { method: 'POST', body: payload },
       SYNC_TIMEOUT_MS,
     )
@@ -426,7 +468,7 @@ export async function scrapeSocialProfile(
     for (let i = 0; i < 2; i++) { // retry once on transient errors
       try {
         const res = await bdFetch(
-          `${DATASETS_BASE}/trigger?dataset_id=${encodeURIComponent(datasetId)}&include_errors=true`,
+          `${DATASETS_BASE}/trigger?${datasetQuery(platform, datasetId)}`,
           { method: 'POST', body: payload },
         )
         const text = await res.text().catch(() => '')
