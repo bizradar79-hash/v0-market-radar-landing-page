@@ -268,7 +268,10 @@ const SYNC_TIMEOUT_MS = Number(process.env.BRIGHTDATA_SYNC_TIMEOUT_MS) || 180000
 // Dedicated scrapers bill per RECORD collected (marketplace price), unlike the
 // Web Unlocker's per-request price. Env-tunable.
 export const BRIGHTDATA_RECORD_COST = Number(process.env.BRIGHTDATA_RECORD_COST) || 0.0025
-const POLL_TIMEOUT_MS = Number(process.env.BRIGHTDATA_POLL_TIMEOUT_MS) || 90000
+// Async social scrapes can genuinely take minutes. Hitting this is NOT a
+// failure — we return status 'processing' + the snapshot_id so the admin can
+// re-poll later with fetchSnapshot() (no re-trigger, no extra cost).
+const POLL_TIMEOUT_MS = Number(process.env.BRIGHTDATA_POLL_TIMEOUT_MS) || 180000
 const POLL_INTERVAL_MS = Number(process.env.BRIGHTDATA_POLL_INTERVAL_MS) || 5000
 
 export interface SocialPost {
@@ -297,6 +300,8 @@ export interface StructuredScrapeResult {
   profile?: ProfileMeta
   error?: string
   url?: string
+  /** Set when a collection is still running — re-poll it with fetchSnapshot(). */
+  snapshotId?: string
 }
 
 const num = (v: any): number | null => {
@@ -531,7 +536,10 @@ export async function scrapeSocialProfile(
     } catch { /* transient — keep polling until the deadline */ }
   }
   if (Date.now() >= deadline) {
-    return { ok: false, status: 'processing', posts: [], error: `still_processing_after_${Math.round(POLL_TIMEOUT_MS / 1000)}s (snapshot ${snapshotId}) — נסה שוב בעוד רגע`, url }
+    return {
+      ok: false, status: 'processing', posts: [], url, snapshotId,
+      error: `הסריקה עדיין רצה אחרי ${Math.round(POLL_TIMEOUT_MS / 1000)} שניות — לחץ "בדוק שוב" בעוד דקה (ללא עלות נוספת)`,
+    }
   }
 
   try {
@@ -542,6 +550,88 @@ export async function scrapeSocialProfile(
   } catch (e: any) {
     return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'snapshot_timeout' : (e?.message || 'snapshot_failed'), url }
   }
+}
+
+/**
+ * RE-POLL an existing snapshot WITHOUT re-triggering — so a slow collection can
+ * be retrieved later instead of lost, at NO extra collection cost (records were
+ * already billed by the original trigger; we only read them).
+ * Returns 'processing' again if it still isn't ready.
+ */
+export async function fetchSnapshot(
+  platform: SocialPlatform, snapshotId: string, url = '',
+): Promise<StructuredScrapeResult> {
+  const id = (snapshotId || '').trim()
+  if (!id) return { ok: false, status: 'failed', posts: [], error: 'no_snapshot_id', url }
+  if (!token()) return { ok: false, status: 'failed', posts: [], error: 'missing_brightdata_token', url }
+
+  // Is it ready yet?
+  try {
+    const res = await bdFetch(`${DATASETS_BASE}/progress/${id}`, { method: 'GET' }, 20000)
+    const body = await res.json().catch(() => ({}))
+    const status = String(body?.status || '').toLowerCase()
+    if (status && status !== 'ready') {
+      if (status === 'failed' || body?.error) {
+        return { ok: false, status: 'failed', posts: [], error: `snapshot_${status}: ${String(body?.error || '').slice(0, 160)}`, url }
+      }
+      return { ok: false, status: 'processing', posts: [], snapshotId: id, url, error: 'עדיין רץ — נסה שוב בעוד רגע' }
+    }
+  } catch { /* fall through and just try the snapshot */ }
+
+  try {
+    const res = await bdFetch(`${DATASETS_BASE}/snapshot/${id}?format=json`, { method: 'GET' }, 45000)
+    const text = await res.text().catch(() => '')
+    if (!res.ok) {
+      // 202 = accepted-but-not-ready on some BrightData responses.
+      if (res.status === 202) return { ok: false, status: 'processing', posts: [], snapshotId: id, url, error: 'עדיין רץ — נסה שוב בעוד רגע' }
+      return { ok: false, status: 'failed', posts: [], error: `snapshot_http_${res.status}: ${text.slice(0, 160)}`, url }
+    }
+    const rows = parseRows(text).filter((r) => r && !r.error && !r.warning)
+    if (rows.length === 0) return { ok: false, status: 'empty', posts: [], error: 'no_rows', url }
+    const posts = rows.map((r) => toPost(r, platform)).filter((p) => p.caption || p.date || p.postUrl)
+    const profile = toProfile(rows[0], platform)
+    if (posts.length === 0) return { ok: false, status: 'empty', posts: [], profile, error: 'no_posts_parsed', url }
+    return { ok: true, status: 'ok', posts, profile, url }
+  } catch (e: any) {
+    return { ok: false, status: 'failed', posts: [], error: e?.name === 'AbortError' ? 'snapshot_timeout' : (e?.message || 'snapshot_failed'), url }
+  }
+}
+
+/**
+ * TARGETED link discovery for one competitor: precise per-platform queries
+ * (site: operators) so results are far more reliable than a generic name search.
+ * Search-only — no scraping, so this step is cheap.
+ */
+export async function findCompetitorLinks(
+  name: string, counter?: RequestCounter,
+): Promise<Record<string, string>> {
+  const clean = (name || '').trim()
+  if (!clean) return {}
+  const q = `"${clean}"`
+  const plan: Array<{ key: string; query: string; must?: string; reject?: RegExp }> = [
+    { key: 'instagram', query: `${q} site:instagram.com`, must: 'instagram.com' },
+    { key: 'facebook', query: `${q} site:facebook.com`, must: 'facebook.com' },
+    { key: 'linkedin', query: `${q} site:linkedin.com`, must: 'linkedin.com' },
+    // Official site: exclude the socials/aggregators so we land on their domain.
+    { key: 'website', query: `${q} אתר רשמי`, reject: /instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com|wikipedia\.org|maps\.google|yelp\.|zap\.co\.il|dun/i },
+  ]
+
+  const out: Record<string, string> = {}
+  await Promise.all(plan.map(async ({ key, query, must, reject }) => {
+    try {
+      const hits = await searchWeb(query, 10, counter)
+      const hit = hits.find((h) => {
+        const u = h.url.toLowerCase()
+        if (must && !u.includes(must)) return false
+        if (reject && reject.test(u)) return false
+        // Skip platform index/login pages — we want an actual profile.
+        if (must && /\/(login|signup|accounts|explore|help|policies)(\/|$|\?)/.test(u)) return false
+        return true
+      })
+      if (hit) out[key] = hit.url
+    } catch { /* a platform with no result simply stays blank */ }
+  }))
+  return out
 }
 
 /** Back-compat alias — TikTok goes through the same generalized function. */

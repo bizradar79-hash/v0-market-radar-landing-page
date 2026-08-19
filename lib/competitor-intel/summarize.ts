@@ -23,7 +23,8 @@ export const SOURCE_LABELS: Record<IntelSource, string> = {
 
 export interface SourceResult {
   source: IntelSource
-  status: SourceStatus
+  /** 'processing' = snapshot still running; re-poll via "בדוק שוב" (not a failure). */
+  status: SourceStatus | 'processing'
   url?: string
   /** Raw markdown (generic path) OR a readable rendering of `posts` (dedicated path). */
   text?: string
@@ -34,6 +35,8 @@ export interface SourceResult {
   postsTotal?: number
   /** How many of those fall inside the recency window (drives the insights). */
   postsRecent?: number
+  /** Present while status==='processing' — lets the UI re-poll the same snapshot. */
+  snapshotId?: string
   error?: string
 }
 

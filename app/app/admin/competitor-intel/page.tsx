@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, Play, ChevronDown, ChevronUp, Building2, Lightbulb, FlaskConical } from "lucide-react"
+import { Loader2, Play, ChevronDown, ChevronUp, Building2, Lightbulb, FlaskConical, Search, RefreshCw } from "lucide-react"
 
 // TikTok removed from the ACTIVE flow (unreliable). Its label is kept so
 // previously-stored runs still render correctly.
@@ -23,7 +23,8 @@ const MAX_COMPETITORS = 5
 interface Company { id: string; name: string; website?: string }
 interface SocialPost { caption: string; date: string; likes?: number | null; comments?: number | null; shares?: number | null; views?: number | null; hashtags?: string[]; postUrl?: string }
 interface ProfileMeta { followers?: number | null; bio?: string; name?: string }
-interface SourceResult { source: Source; status: 'ok' | 'empty' | 'failed' | 'skipped'; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; postsTotal?: number; postsRecent?: number; error?: string }
+type SourceStatus = 'ok' | 'empty' | 'failed' | 'skipped' | 'processing'
+interface SourceResult { source: Source; status: SourceStatus; url?: string; text?: string; posts?: SocialPost[]; profile?: ProfileMeta; postsTotal?: number; postsRecent?: number; snapshotId?: string; error?: string }
 interface BriefingItem { what: string; source: Source; date?: string; kind?: string; implication?: string }
 interface DerivedInsights {
   cadence?: { total: number; level: string; text: string }
@@ -42,15 +43,19 @@ interface RunCost {
 }
 interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; cost?: RunCost | null; created_at?: string }
 
-interface CompetitorInput { name: string; urls: Record<string, string> }
+interface CompetitorInput { name: string; urls: Record<string, string>; selected: Record<string, boolean> }
 const emptyCompetitor = (): CompetitorInput => ({
-  name: '', urls: { website: '', instagram: '', facebook: '', linkedin: '' },
+  name: '',
+  urls: { website: '', instagram: '', facebook: '', linkedin: '' },
+  // A source is scraped only when CHECKED. Discovery ticks the ones it finds.
+  selected: { website: false, instagram: false, facebook: false, linkedin: false },
 })
 
-function statusBadge(s: SourceResult['status']) {
+function statusBadge(s: SourceResult['status'], error?: string) {
   if (s === 'ok') return <Badge className="bg-green-100 text-green-700 border-green-200">ok</Badge>
+  if (s === 'processing') return <Badge className="bg-blue-100 text-blue-700 border-blue-200">בתהליך</Badge>
   if (s === 'empty') return <Badge variant="outline" className="text-amber-600 border-amber-300">ריק</Badge>
-  if (s === 'skipped') return <Badge variant="outline" className="text-muted-foreground">לא נבדק</Badge>
+  if (s === 'skipped') return <Badge variant="outline" className="text-muted-foreground">{error === 'not_selected' ? 'לא נבחר' : 'לא נבדק'}</Badge>
   return <Badge className="bg-red-100 text-red-700 border-red-200">נכשל</Badge>
 }
 
@@ -66,6 +71,8 @@ export default function CompetitorIntelDevPage() {
   const [expandedRaw, setExpandedRaw] = useState<string | null>(null)
   const [bdConfigured, setBdConfigured] = useState<boolean | null>(null)
   const [recencyDays, setRecencyDays] = useState(45)
+  const [finding, setFinding] = useState<number | null>(null)
+  const [rechecking, setRechecking] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/admin/companies').then(r => r.json())
@@ -89,7 +96,81 @@ export default function CompetitorIntelDevPage() {
     setCompetitors(prev => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)))
   }
   function updateUrl(i: number, source: Source, value: string) {
-    setCompetitors(prev => prev.map((c, idx) => (idx === i ? { ...c, urls: { ...c.urls, [source]: value } } : c)))
+    // Typing a URL auto-selects that source; clearing it deselects.
+    setCompetitors(prev => prev.map((c, idx) => (idx === i
+      ? { ...c, urls: { ...c.urls, [source]: value }, selected: { ...c.selected, [source]: !!value.trim() } }
+      : c)))
+  }
+  function toggleSource(i: number, source: Source) {
+    setCompetitors(prev => prev.map((c, idx) => (idx === i
+      ? { ...c, selected: { ...c.selected, [source]: !c.selected[source] } } : c)))
+  }
+
+  // ── STEP 1: "מצא לינקים" — targeted search per platform, fills the fields.
+  // Search-only (no scraping) so it's cheap; every URL stays editable.
+  async function findLinks(i: number) {
+    const comp = competitors[i]
+    if (!comp.name.trim()) {
+      toast({ title: 'חסר שם', description: 'הזן שם מתחרה כדי לחפש לינקים', variant: 'destructive' })
+      return
+    }
+    setFinding(i)
+    try {
+      const res = await fetch('/api/admin/competitor-intel', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: comp.name.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const found: Record<string, string> = data.urls || {}
+      setCompetitors(prev => prev.map((c, idx) => {
+        if (idx !== i) return c
+        const urls = { ...c.urls }
+        const selected = { ...c.selected }
+        for (const src of SOURCES) {
+          if (found[src]) { urls[src] = found[src]; selected[src] = true }
+          // Nothing found → leave blank + unchecked; the admin can paste one.
+        }
+        return { ...c, urls, selected }
+      }))
+      const n = SOURCES.filter(src => found[src]).length
+      toast({ title: `נמצאו ${n} מתוך ${SOURCES.length} לינקים`, description: n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined })
+    } catch (e: any) {
+      toast({ title: 'שגיאה בחיפוש', description: e?.message, variant: 'destructive' })
+    } finally {
+      setFinding(null)
+    }
+  }
+
+  // "בדוק שוב" — re-poll an existing snapshot. No re-trigger → no extra cost.
+  async function recheck(runIdx: number, srcIdx: number) {
+    const run = runs[runIdx]
+    const src = run?.sources?.[srcIdx]
+    if (!src?.snapshotId) return
+    const key = `${runIdx}-${srcIdx}`
+    setRechecking(key)
+    try {
+      const res = await fetch('/api/admin/competitor-intel', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot_id: src.snapshotId, source: src.source, url: src.url }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setRuns(prev => prev.map((r, ri) => (ri !== runIdx ? r : {
+        ...r, sources: r.sources.map((sc, si) => (si === srcIdx ? { ...sc, ...data.result } : sc)),
+      })))
+      const st = data.result?.status
+      toast({
+        title: st === 'ok' ? '✅ הנתונים התקבלו' : st === 'processing' ? 'עדיין רץ' : `סטטוס: ${st}`,
+        description: st === 'processing' ? 'נסה שוב בעוד רגע' : undefined,
+      })
+    } catch (e: any) {
+      toast({ title: 'שגיאה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setRechecking(null)
+    }
   }
 
   async function runOne(i: number): Promise<boolean> {
@@ -103,7 +184,7 @@ export default function CompetitorIntelDevPage() {
       const res = await fetch('/api/admin/competitor-intel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: companyId, competitor: { name: comp.name.trim(), urls: comp.urls } }),
+        body: JSON.stringify({ company_id: companyId, competitor: { name: comp.name.trim(), urls: comp.urls, selected: comp.selected } }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
@@ -204,23 +285,46 @@ export default function CompetitorIntelDevPage() {
                   onChange={e => updateCompetitor(i, { name: e.target.value })}
                   className="font-medium"
                 />
-                <Button size="sm" onClick={() => runOne(i)} disabled={!companyId || running !== null || runningAll} className="shrink-0">
+                {/* STEP 1 — find links (search only, no scraping) */}
+                <Button
+                  size="sm" variant="outline" className="shrink-0"
+                  onClick={() => findLinks(i)}
+                  disabled={!c.name.trim() || finding !== null || running !== null || runningAll}
+                >
+                  {finding === i ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  <span className="mr-1.5">מצא לינקים</span>
+                </Button>
+                {/* STEP 2 — scrape ONLY the checked sources */}
+                <Button
+                  size="sm" className="shrink-0"
+                  onClick={() => runOne(i)}
+                  disabled={!companyId || running !== null || runningAll || !SOURCES.some(src => c.selected[src] && c.urls[src]?.trim())}
+                >
                   {running === i ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  <span className="mr-1.5">הרץ בדיקה</span>
+                  <span className="mr-1.5">סרוק</span>
                 </Button>
                 {competitors.length > 1 && (
                   <Button size="sm" variant="ghost" onClick={() => setCompetitors(p => p.filter((_, idx) => idx !== i))} className="shrink-0">✕</Button>
                 )}
               </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {SOURCES.map(s => (
-                  <div key={s} className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">{SOURCE_LABELS[s]}</Label>
+                {SOURCES.map(src => (
+                  <div key={src} className="space-y-1">
+                    <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={!!c.selected[src]}
+                        onChange={() => toggleSource(i, src)}
+                        disabled={!c.urls[src]?.trim()}
+                        className="h-3.5 w-3.5 accent-teal-600 disabled:opacity-40"
+                      />
+                      <span className={c.selected[src] ? 'font-semibold text-foreground' : ''}>{SOURCE_LABELS[src]}</span>
+                    </label>
                     <Input
                       dir="ltr"
-                      placeholder={s === 'website' ? 'https://…' : 'ריק = חיפוש אוטומטי'}
-                      value={c.urls[s]}
-                      onChange={e => updateUrl(i, s, e.target.value)}
+                      placeholder="ריק = לא ייסרק"
+                      value={c.urls[src]}
+                      onChange={e => updateUrl(i, src, e.target.value)}
                       className="h-8 text-xs"
                     />
                   </div>
@@ -277,8 +381,21 @@ export default function CompetitorIntelDevPage() {
                   {(run.sources || []).map((s, si) => (
                     <span key={si} className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
                       <b>{SOURCE_LABELS[s.source] || s.source}</b>
-                      {statusBadge(s.status)}
-                      {s.error && <span className="text-muted-foreground truncate max-w-[160px]" title={s.error}>{s.error}</span>}
+                      {statusBadge(s.status, s.error)}
+                      {s.status === 'processing' && s.snapshotId && (
+                        <Button
+                          size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]"
+                          onClick={() => recheck(ri, si)}
+                          disabled={rechecking === `${ri}-${si}`}
+                        >
+                          {rechecking === `${ri}-${si}`
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <><RefreshCw className="h-3 w-3 ml-1" />בדוק שוב</>}
+                        </Button>
+                      )}
+                      {s.error && s.error !== 'not_selected' && (
+                        <span className="text-muted-foreground truncate max-w-[200px]" title={s.error}>{s.error}</span>
+                      )}
                     </span>
                   ))}
                 </div>
