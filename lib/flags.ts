@@ -8,3 +8,30 @@
 export const TENDERS_ENABLED =
   process.env.NEXT_PUBLIC_TENDERS_ENABLED === 'true' ||
   process.env.TENDERS_ENABLED === 'true'
+
+// ── COMPETITORS ────────────────────────────────────────────────────────────
+// Direct competitors are now MANUAL ONLY: the client names up to 5 in
+// onboarding / settings, stored in business_profile.directCompetitors (the
+// single source of truth). The new tracking module (admin dev tab today) gets
+// wired into scans separately.
+
+/** How many direct competitors a client may track. */
+export const MAX_DIRECT_COMPETITORS = Number(process.env.MAX_DIRECT_COMPETITORS) || 5
+
+// AUTO-DISCOVERY (/api/find-competitors): OFF. It was the expensive part —
+// a web-search model call per scan to invent competitors the client never
+// asked for. Code and data are untouched; flip the env var to bring it back.
+//   COMPETITOR_AUTODISCOVERY_ENABLED=true
+export const COMPETITOR_AUTODISCOVERY_ENABLED =
+  process.env.NEXT_PUBLIC_COMPETITOR_AUTODISCOVERY_ENABLED === 'true' ||
+  process.env.COMPETITOR_AUTODISCOVERY_ENABLED === 'true'
+
+// The OLD competitor analysis module (competitors + competitor_ratings scan
+// steps, the /app/competitors dashboard card and nav entry). OFF pending its
+// replacement. NOTHING is deleted: the page, routes, tables and rows all stay,
+// so flipping this back restores the module exactly as it was.
+//   NEXT_PUBLIC_OLD_COMPETITOR_MODULE_ENABLED=true
+//   OLD_COMPETITOR_MODULE_ENABLED=true
+export const OLD_COMPETITOR_MODULE_ENABLED =
+  process.env.NEXT_PUBLIC_OLD_COMPETITOR_MODULE_ENABLED === 'true' ||
+  process.env.OLD_COMPETITOR_MODULE_ENABLED === 'true'

@@ -13,12 +13,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { MAX_DIRECT_COMPETITORS } from "@/lib/flags"
 import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles, ChevronUp, ChevronDown, Pencil, Check } from "lucide-react"
 
 // Reusable add/remove chip editor for a string[] field, with a friendly
 // explanation and a save button. Matches the existing settings card styling.
 function ChipEditor({
-  icon: Icon, title, explanation, items, onItemsChange, onSave, saving, placeholder,
+  icon: Icon, title, explanation, items, onItemsChange, onSave, saving, placeholder, maxItems,
 }: {
   icon?: any
   title: string
@@ -28,10 +29,14 @@ function ChipEditor({
   onSave: () => void
   saving: boolean
   placeholder: string
+  /** Optional hard cap (e.g. direct competitors are limited to 5). */
+  maxItems?: number
 }) {
   const [val, setVal] = useState("")
+  const full = maxItems != null && items.length >= maxItems
   const add = () => {
     const t = val.trim()
+    if (full) return
     if (t && !items.includes(t)) { onItemsChange([...items, t]); setVal("") }
   }
   return (
@@ -39,19 +44,23 @@ function ChipEditor({
       <CardHeader>
         <CardTitle className="text-foreground flex items-center gap-2 text-base">
           {Icon && <Icon className="h-4 w-4 text-primary" />}{title}
+          {maxItems != null && (
+            <span className="text-xs font-normal text-muted-foreground">({items.length}/{maxItems})</span>
+          )}
         </CardTitle>
         <p className="text-sm text-muted-foreground mt-1">{explanation}</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex gap-2">
           <Input
-            placeholder={placeholder}
+            placeholder={full ? `הגעת למקסימום ${maxItems} — הסר אחד כדי להוסיף` : placeholder}
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
-            className="border-border bg-input"
+            disabled={full}
+            className="border-border bg-input disabled:opacity-60"
           />
-          <Button onClick={add} className="bg-primary text-primary-foreground"><Plus className="h-4 w-4" /></Button>
+          <Button onClick={add} disabled={full} className="bg-primary text-primary-foreground"><Plus className="h-4 w-4" /></Button>
         </div>
         <div className="flex flex-wrap gap-2">
           {items.length === 0 ? (
@@ -204,7 +213,11 @@ export default function SettingsPage() {
               : (Array.isArray((company as any).distribution_channels) ? (company as any).distribution_channels : [])
             setDistChannels(dc.filter((q: any) => typeof q === 'string'))
           }
-          if (Array.isArray(bp.directCompetitors)) setDirectCompetitors(bp.directCompetitors.filter((q: any) => typeof q === 'string'))
+          if (Array.isArray(bp.directCompetitors)) {
+            // Existing clients may hold more than the cap — show them all so
+            // nothing silently disappears; the cap applies when adding/saving.
+            setDirectCompetitors(bp.directCompetitors.filter((q: any) => typeof q === 'string'))
+          }
           if (Array.isArray(bp.targetAudiences)) setTargetAudiences(bp.targetAudiences.filter((q: any) => typeof q === 'string'))
           if (Array.isArray(bp.industryTags)) setIndustryTags(bp.industryTags.filter((q: any) => typeof q === 'string'))
           if (Array.isArray(bp.geographicMarkets)) setGeographicMarkets(bp.geographicMarkets.filter((q: any) => typeof q === 'string'))
@@ -805,12 +818,13 @@ export default function SettingsPage() {
             <ChipEditor
               icon={Target}
               title="מתחרים ישירים"
-              explanation="המתחרים שאתה רוצה שנעקוב אחריהם — משפיע על גילוי וניתוח המתחרים."
+              explanation={`המתחרים שנעקוב אחריהם — עד ${MAX_DIRECT_COMPETITORS}. זו הרשימה היחידה שקובעת; הוסף, ערוך או הסר בכל עת.`}
               items={directCompetitors}
               onItemsChange={setDirectCompetitors}
-              onSave={() => patchProfile('competitors', { directCompetitors })}
+              onSave={() => patchProfile('competitors', { directCompetitors: directCompetitors.slice(0, MAX_DIRECT_COMPETITORS) })}
               saving={bpSaving === 'competitors'}
               placeholder="הוסף שם מתחרה"
+              maxItems={MAX_DIRECT_COMPETITORS}
             />
           </div>
 

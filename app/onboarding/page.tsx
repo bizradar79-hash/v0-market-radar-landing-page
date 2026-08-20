@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { MAX_DIRECT_COMPETITORS, COMPETITOR_AUTODISCOVERY_ENABLED, OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
 import Image from "next/image"
 import {
   Check,
@@ -66,7 +67,11 @@ const WIZARD_STEPS = [
 const SCAN_STEPS = [
   { label: 'מנתח פרופיל עסקי...', route: '/api/generate-overview' },
   { label: 'מייצר ניתוח SWOT...', route: '/api/generate-swot' },
-  { label: 'מגלה מתחרים...', route: '/api/find-competitors' },
+  // Competitor auto-discovery removed from onboarding: the client names their
+  // own direct competitors in step 5, so there is nothing to "discover".
+  ...(COMPETITOR_AUTODISCOVERY_ENABLED
+    ? [{ label: 'מגלה מתחרים...', route: '/api/find-competitors' }]
+    : []),
   { label: 'מדרג SEO...', route: '/api/generate-seo-ranking' },
   { label: 'מדרג GEO...', route: '/api/generate-geo-ranking' },
   { label: 'מנתח טרנדים בתעשייה...', route: '/api/industry-trends' },
@@ -76,7 +81,9 @@ const SCAN_STEPS = [
   { label: 'מחפש מכרזים...', route: '/api/find-tenders' },
   { label: 'מגלה לידים...', route: '/api/generate-leads' },
   { label: 'מייצר פעולות שבועיות...', route: '/api/generate-weekly-actions' },
-  { label: 'מסנכרן דירוגי מתחרים...', route: '/api/sync-competitor-ratings' },
+  ...(OLD_COMPETITOR_MODULE_ENABLED
+    ? [{ label: 'מסנכרן דירוגי מתחרים...', route: '/api/sync-competitor-ratings' }]
+    : []),
   { label: 'מחפש דירוג גוגל מאפס...', route: '/api/analyze-company-reviews' },
 ]
 
@@ -85,7 +92,8 @@ const SCAN_STEPS = [
 // ──────────────────────────────────────────────────────────────────────────
 
 type Phase = 'payment' | 'intake' | 'analyzing' | 'wizard' | 'saving' | 'scanning'
-interface WizardCompetitor { name: string; website: string; source: 'auto' | 'manual' }
+// Every competitor is entered by the client — there is no 'auto' source now.
+interface WizardCompetitor { name: string; website: string; source: 'manual' }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Helper: removable tag list with inline add
@@ -305,24 +313,10 @@ export default function OnboardingPage() {
         setWIndustryTags(p.industryTags || [])
         setWPrimaryKw(p.primaryKeywords || [])
         setWSecondaryKw(p.secondaryKeywords || [])
-        const autoCompetitors: WizardCompetitor[] = (p.directCompetitors || []).map(name => ({ name, website: '', source: 'auto' as const }))
-        setWCompetitors(autoCompetitors)
-        // Fetch websites for auto-detected competitors in background
-        autoCompetitors.forEach(async (comp) => {
-          try {
-            const r = await fetch('/api/lookup-competitor-website', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: comp.name }),
-            })
-            const { website: fetchedWebsite } = await r.json()
-            if (fetchedWebsite) {
-              setWCompetitors(prev => prev.map(c =>
-                c.name === comp.name && c.source === 'auto' ? { ...c, website: fetchedWebsite } : c
-              ))
-            }
-          } catch { /* silent */ }
-        })
+        // Competitors are MANUAL ONLY (see lib/flags): the client names the
+        // businesses they actually compete with. We no longer prefill from the
+        // AI profile or look their websites up — that was auto-discovery, and
+        // it cost a model call per name to guess at businesses nobody asked for.
         setWizardStep(1)
         setPhase('wizard')
       } else {
@@ -356,7 +350,7 @@ export default function OnboardingPage() {
         industryTags: wIndustryTags,
         primaryKeywords: wPrimaryKw,
         secondaryKeywords: wSecondaryKw,
-        directCompetitors: wCompetitors.map(c => c.name),
+        directCompetitors: wCompetitors.map(c => c.name.trim()).filter(Boolean).slice(0, MAX_DIRECT_COMPETITORS),
       }
 
       const { error: upsertError } = await supabase.from('companies').upsert({
@@ -380,6 +374,7 @@ export default function OnboardingPage() {
         await supabase.from('competitors').insert(
           wCompetitors
             .filter(c => c.name.trim())
+            .slice(0, MAX_DIRECT_COMPETITORS)
             .map(c => ({
               company_id: user.id,
               name: c.name.trim(),
@@ -450,6 +445,7 @@ export default function OnboardingPage() {
 
   function addCompetitor() {
     if (!newCompName.trim()) return
+    if (wCompetitors.length >= MAX_DIRECT_COMPETITORS) return
     setWCompetitors([...wCompetitors, {
       name: newCompName.trim(),
       website: newCompWebsite.trim(),
@@ -889,7 +885,8 @@ export default function OnboardingPage() {
                   <div>
                     <h2 className="text-xl font-semibold text-foreground">מתחרים</h2>
                     <p className="text-sm text-muted-foreground mt-1">
-                      AI זיהה {wCompetitors.length} מתחרים — ניתן לערוך, להסיר ולהוסיף
+                      מי המתחרים הישירים שלך? הזן עד {MAX_DIRECT_COMPETITORS} שמות — אחריהם נעקוב.
+                      {' '}({wCompetitors.length}/{MAX_DIRECT_COMPETITORS})
                     </p>
                   </div>
 
@@ -929,13 +926,17 @@ export default function OnboardingPage() {
                     ))}
                     {wCompetitors.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-3 border border-dashed border-border rounded-lg">
-                        לא זוהו מתחרים — הוסף ידנית
+                        עדיין לא הוספת מתחרים — הזן שם מתחרה למטה (אפשר גם בהמשך, בהגדרות)
                       </p>
                     )}
                   </div>
 
                   <div className="rounded-lg border border-dashed border-border bg-background/50 p-3 space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">הוסף מתחרה</p>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {wCompetitors.length >= MAX_DIRECT_COMPETITORS
+                        ? `הגעת למקסימום ${MAX_DIRECT_COMPETITORS} מתחרים`
+                        : 'הוסף מתחרה (שם — חובה, אתר — לא חובה)'}
+                    </p>
                     <div className="grid sm:grid-cols-2 gap-2">
                       <Input
                         value={newCompName}

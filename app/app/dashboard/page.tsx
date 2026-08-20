@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { TENDERS_ENABLED } from "@/lib/flags"
+import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -369,7 +369,10 @@ export default function AppDashboardPage() {
     ...(TENDERS_ENABLED
       ? [{ key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" }]
       : []),
-    { key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" },
+    // Old competitor module feature-flagged off — card hidden, nothing deleted.
+    ...(OLD_COMPETITOR_MODULE_ENABLED
+      ? [{ key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" }]
+      : []),
     { key: "trends", label: "טרנדים", icon: Activity, href: "/app/trends", value: data?.trendsCount || 0, color: "bg-blue-100 text-blue-700" },
     { key: "conferences", label: "כנסים", icon: Calendar, href: "/app/conferences", value: data?.conferencesCount || 0, color: "bg-indigo-100 text-indigo-700" },
     { key: "news", label: "חדשות", icon: Newspaper, href: "/app/news", value: data?.newsCount || 0, color: "bg-slate-100 text-slate-700" },
@@ -583,39 +586,42 @@ export default function AppDashboardPage() {
           <section>
             <GroupHeader color="bg-blue-500" label="מודיעין שוק" />
             <div className="grid gap-4 md:grid-cols-2">
-              {/* מתחרים עיקריים */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Target className="h-4 w-4 text-blue-600" />
-                    מתחרים עיקריים
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {data!.topCompetitors.length > 0 ? (
-                    <div className="space-y-2">
-                      {data!.topCompetitors.map((comp, idx) => (
-                        <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium">{comp.name}</p>
-                            {comp.services && <p className="text-xs text-muted-foreground line-clamp-1">{comp.services}</p>}
+              {/* Old competitor module feature-flagged off — card hidden,
+                  nothing deleted (lib/flags). */}
+              {OLD_COMPETITOR_MODULE_ENABLED && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Target className="h-4 w-4 text-blue-600" />
+                      מתחרים עיקריים
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {data!.topCompetitors.length > 0 ? (
+                      <div className="space-y-2">
+                        {data!.topCompetitors.map((comp, idx) => (
+                          <div key={idx} className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{comp.name}</p>
+                              {comp.services && <p className="text-xs text-muted-foreground line-clamp-1">{comp.services}</p>}
+                            </div>
+                            <Badge variant="outline" className={
+                              comp.threat_score >= 70 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"
+                            }>
+                              {comp.threat_score}
+                            </Badge>
                           </div>
-                          <Badge variant="outline" className={
-                            comp.threat_score >= 70 ? "border-red-200 text-red-600" : "border-yellow-200 text-yellow-600"
-                          }>
-                            {comp.threat_score}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="py-4 text-center text-sm text-muted-foreground">לא נמצאו מתחרים עדיין</p>
-                  )}
-                  <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    כל המתחרים <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-4 text-center text-sm text-muted-foreground">לא נמצאו מתחרים עדיין</p>
+                    )}
+                    <Link href="/app/competitors" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל המתחרים <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* מילות מפתח חמות — real DataForSEO keyword_trends */}
               <Card>

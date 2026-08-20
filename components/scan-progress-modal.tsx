@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, Square, RefreshCw } from "lucide-react"
+import { OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
 
 type ModuleStatus = 'pending' | 'running' | 'done' | 'skipped' | 'error'
 type ScanStatus = 'running' | 'done' | 'stopped' | 'error'
@@ -36,8 +37,12 @@ interface ScanControl {
 const MODULE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'overview',           label: 'ניתוח פרופיל עסקי' },
   { id: 'swot',               label: 'ניתוח SWOT' },
-  { id: 'competitors',        label: 'גילוי מתחרים' },
-  { id: 'competitor_ratings', label: 'דירוגי מתחרים' },
+  // Old competitor module is flagged off — these steps no longer run, so they
+  // must not appear as perpetually-pending rows in the progress modal.
+  ...(OLD_COMPETITOR_MODULE_ENABLED
+    ? [{ id: 'competitors', label: 'גילוי מתחרים' },
+       { id: 'competitor_ratings', label: 'דירוגי מתחרים' }]
+    : []),
   { id: 'review_analysis',    label: 'ניתוח ביקורות' },
   { id: 'seo_ranking',        label: 'דירוג SEO' },
   { id: 'geo_ranking',        label: 'דירוג GEO' },

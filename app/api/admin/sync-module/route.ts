@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
 import { NextResponse } from 'next/server'
+import { COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 
@@ -18,7 +19,12 @@ const MODULE_ROUTES: Record<string, string[]> = {
   news:           ['/api/generate-news'],
   conferences:    ['/api/generate-conferences'],
   tenders:        ['/api/find-tenders'],
-  competitors:    ['/api/sync-profile-competitors', '/api/find-competitors'],
+  // Old competitor module — gated (lib/flags). Auto-discovery is dropped from
+  // the chain unless explicitly re-enabled; seeding manual names still works.
+  competitors: [
+    '/api/sync-profile-competitors',
+    ...(COMPETITOR_AUTODISCOVERY_ENABLED ? ['/api/find-competitors'] : []),
+  ],
   // Leads — distribution-channel-driven partner search (or customer fallback).
   // force=true here bypasses the route's 7-day cache AND the sync/run ≥5-leads
   // skip, so re-running after editing channels actually regenerates.

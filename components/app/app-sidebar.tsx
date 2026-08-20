@@ -31,6 +31,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
 
 interface AppSidebarProps {
   isOpen: boolean
@@ -65,7 +66,11 @@ const getNavGroups = (counts: NavCounts) => [
   {
     title: "📊 מודיעין שוק",
     items: [
-      { href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined },
+      // Old competitor module feature-flagged off — nav entry hidden. The page
+      // and its data remain (the client report still links to it).
+      ...(OLD_COMPETITOR_MODULE_ENABLED
+        ? [{ href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined }]
+        : []),
       { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
       { href: "/app/seo-geo", label: "דירוג SEO/GEO", icon: BarChart2 },
     ],

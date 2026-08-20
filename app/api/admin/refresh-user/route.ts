@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
 import { captureSnapshot } from '@/lib/scan/snapshot'
 
 function getAdminClient() {
@@ -71,14 +72,19 @@ export async function POST(request: Request) {
 
       // Run the 4 scans in parallel per user
       const [compRes, seoRes, geoRes, trendsRes] = await Promise.allSettled([
-        fetch(`${origin}/api/find-competitors`,          { method: 'POST', headers: h }),
+        // Competitor auto-discovery is flagged off (lib/flags) — skipped here
+        // too so an admin refresh can't quietly re-incur its cost.
+        COMPETITOR_AUTODISCOVERY_ENABLED
+          ? fetch(`${origin}/api/find-competitors`, { method: 'POST', headers: h })
+          : Promise.resolve(null),
         fetch(`${origin}/api/generate-seo-ranking?force=true`, { method: 'POST', headers: h }),
         fetch(`${origin}/api/generate-geo-ranking?force=true`, { method: 'POST', headers: h }),
         fetch(`${origin}/api/generate-trends`,           { method: 'POST', headers: h }),
       ])
 
       const errors = [compRes, seoRes, geoRes, trendsRes]
-        .filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok))
+        // A null value = a step deliberately skipped by a flag, not a failure.
+        .filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value != null && !r.value.ok))
         .map(r => r.status === 'rejected' ? String(r.reason) : `HTTP ${(r as any).value.status}`)
 
       results[uid] = errors.length === 0

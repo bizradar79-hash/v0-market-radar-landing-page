@@ -12,7 +12,7 @@ import {
 import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
 import { channelsSig } from '@/lib/leads/channels-sig'
 import { createReportSnapshot } from '@/lib/report/snapshot'
-import { TENDERS_ENABLED } from '@/lib/flags'
+import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -130,8 +130,7 @@ export async function POST(request: Request) {
   const WEEKLY_SKIP = new Set<string>([
     'overview',             // business overview — onboarding/initial only
     'swot',                 // SWOT analysis — onboarding/initial only
-    'competitors',          // competitor DISCOVERY (expensive)
-    'competitor_ratings',   // Google Places sweep
+    // 'competitors' / 'competitor_ratings' — old module, disabled (lib/flags)
     'review_analysis',      // analyze-company-reviews (the runaway)
     // 'leads' is NOT weekly-skipped anymore: its runStep gates on a channels
     // fingerprint (run only when distribution channels changed / leads empty),
@@ -145,7 +144,8 @@ export async function POST(request: Request) {
   // WEEKLY_SKIP so the lean weekly refresh skips them.
   const MODULE_IDS = [
     'overview', 'swot',
-    'competitors', 'competitor_ratings', 'review_analysis',
+    ...(OLD_COMPETITOR_MODULE_ENABLED ? ['competitors', 'competitor_ratings'] : []),
+    'review_analysis',
     'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
     'competitor_trends', 'news', 'tenders', 'conferences', 'leads', 'weekly_actions',
     'niche_opportunities', 'weekly_report',
@@ -269,38 +269,46 @@ export async function POST(request: Request) {
       return { status: r.ok ? 'ok' : 'error', message: r.ok ? 'generated' : (r.body?.error ?? `HTTP ${r.status}`) }
     })
 
-    // 1. Competitor seeding + DISCOVERY — initial only (weekly skips it per FIX 4).
-    await runStep('competitors', async () => {
-      // 1a. Seed competitors identified during onboarding
-      // (business_profile.directCompetitors → competitor rows + enrichment).
-      // This MUST run in the scan: the competitors page no longer syncs on view.
-      // Idempotent — short-circuits once the rows already exist.
-      const seed = await callModule(origin, '/api/sync-profile-competitors', companyId!, false)
-      const seededMsg = seed.ok ? `seeded ${seed.body?.added ?? 0}` : `seed HTTP ${seed.status}`
+    // 1. Competitor seeding + DISCOVERY — DISABLED (lib/flags).
+    // Auto-discovery invented competitors the client never asked for, at a
+    // web-search model call per scan. Direct competitors are now MANUAL ONLY
+    // (business_profile.directCompetitors). Both halves stay behind flags so
+    // the old behaviour is one env var away.
+    if (OLD_COMPETITOR_MODULE_ENABLED) {
+      await runStep('competitors', async () => {
+        // 1a. Seed competitors named by the client
+        // (business_profile.directCompetitors → competitor rows + enrichment).
+        // Idempotent — short-circuits once the rows already exist.
+        const seed = await callModule(origin, '/api/sync-profile-competitors', companyId!, false)
+        const seededMsg = seed.ok ? `seeded ${seed.body?.added ?? 0}` : `seed HTTP ${seed.status}`
 
-      const { count: autoCount } = await adminDb
-        .from('competitors')
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', companyId)
-        .neq('source', 'manual')
-      if ((autoCount ?? 0) >= COMPETITOR_TARGET) {
-        return { status: 'ok', message: `${seededMsg}; already have ${autoCount} auto competitors` }
-      }
-      const r = await callModule(origin, '/api/find-competitors', companyId!, false)
-      return {
-        status: r.ok ? 'ok' : 'error',
-        message: r.ok ? `${seededMsg}; found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`),
-      }
-    })
+        if (!COMPETITOR_AUTODISCOVERY_ENABLED) {
+          return { status: 'ok', message: `${seededMsg}; autodiscovery disabled` }
+        }
+        const { count: autoCount } = await adminDb
+          .from('competitors')
+          .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId)
+          .neq('source', 'manual')
+        if ((autoCount ?? 0) >= COMPETITOR_TARGET) {
+          return { status: 'ok', message: `${seededMsg}; already have ${autoCount} auto competitors` }
+        }
+        const r = await callModule(origin, '/api/find-competitors', companyId!, false)
+        return {
+          status: r.ok ? 'ok' : 'error',
+          message: r.ok ? `${seededMsg}; found ${r.body?.count ?? 0}` : (r.body?.error ?? `HTTP ${r.status}`),
+        }
+      })
 
-    // 1b. Competitor ratings (Google Places) — initial only.
-    await runStep('competitor_ratings', async () => {
-      const r = await callModule(origin, '/api/sync-competitor-ratings', companyId!)
-      return {
-        status: r.ok ? 'ok' : 'error',
-        message: r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`),
-      }
-    })
+      // 1b. Competitor ratings (Google Places) — initial only.
+      await runStep('competitor_ratings', async () => {
+        const r = await callModule(origin, '/api/sync-competitor-ratings', companyId!)
+        return {
+          status: r.ok ? 'ok' : 'error',
+          message: r.ok ? `${r.body?.updated ?? 0} updated` : (r.body?.error ?? `HTTP ${r.status}`),
+        }
+      })
+    }
 
     // 1c. Company Google review analysis — initial only, and WITHOUT force so the
     // route's 7-day cache applies (FIX 2: at most once per cache window, no runaway).
