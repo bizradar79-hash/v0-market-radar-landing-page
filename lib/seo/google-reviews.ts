@@ -19,6 +19,47 @@ const MY_BUSINESS_LIVE = `${BASE}/my_business_info/live`
 const REVIEWS_POST = `${BASE}/reviews/task_post`
 const REVIEWS_GET = `${BASE}/reviews/task_get`
 
+/**
+ * LOCATION — the field that broke this. DataForSEO only accepts locations from
+ * ITS OWN catalog, in English, "City,Region,Country" form. We were passing
+ * deriveArea().search, which is Hebrew ("ישראל", "דימונה") because it exists to
+ * feed prompts — DataForSEO answered "Invalid Field: 'location_name'".
+ *
+ * So: never send a Hebrew string. Default to the exact literal our WORKING SERP
+ * calls have always used ('Israel'), map the handful of Hebrew cities we can
+ * translate with confidence, and fall back to country level otherwise — the
+ * business name plus the resolved `cid` do the real disambiguation anyway.
+ */
+const DFS_LOCATION_NAME = process.env.DFS_LOCATION_NAME || 'Israel'
+/** Optional numeric override (DataForSEO location_code), if ever preferred. */
+const DFS_LOCATION_CODE = Number(process.env.DFS_LOCATION_CODE) || 0
+
+/** Hebrew city → DataForSEO catalog name. Unknown → country level, never Hebrew. */
+const CITY_MAP: Record<string, string> = {
+  'תל אביב': 'Tel Aviv,Israel', 'תל אביב יפו': 'Tel Aviv,Israel', 'תל־אביב': 'Tel Aviv,Israel',
+  'ירושלים': 'Jerusalem,Israel', 'חיפה': 'Haifa,Israel', 'באר שבע': 'Beersheba,Israel',
+  'ראשון לציון': 'Rishon LeZion,Israel', 'פתח תקווה': 'Petah Tikva,Israel',
+  'נתניה': 'Netanya,Israel', 'אשדוד': 'Ashdod,Israel', 'אשקלון': 'Ashkelon,Israel',
+  'רמת גן': 'Ramat Gan,Israel', 'הרצליה': 'Herzliya,Israel', 'רחובות': 'Rehovot,Israel',
+  'חולון': 'Holon,Israel', 'בת ים': 'Bat Yam,Israel', 'כפר סבא': 'Kfar Saba,Israel',
+  'רעננה': 'Raanana,Israel', 'מודיעין': 'Modiin,Israel', 'אילת': 'Eilat,Israel',
+  'טבריה': 'Tiberias,Israel', 'דימונה': 'Dimona,Israel', 'עפולה': 'Afula,Israel',
+  'נצרת': 'Nazareth,Israel', 'לוד': 'Lod,Israel', 'רמלה': 'Ramla,Israel',
+}
+
+/**
+ * Translate our internal (Hebrew) area label into something DataForSEO accepts.
+ * Returns the location FIELDS to spread into a task — never a Hebrew value.
+ */
+export function dfsLocation(area?: string): Record<string, any> {
+  if (DFS_LOCATION_CODE) return { location_code: DFS_LOCATION_CODE }
+  const a = (area || '').trim()
+  // Already an English catalog-style name ("Tel Aviv,Israel") — pass it through.
+  if (a && /^[\x20-\x7E]+$/.test(a)) return { location_name: a }
+  const mapped = CITY_MAP[a] || CITY_MAP[a.replace(/^ב/, '')]
+  return { location_name: mapped || DFS_LOCATION_NAME }
+}
+
 /** Reviews are billed per 10 returned — keep the depth at what we actually use. */
 const REVIEWS_DEPTH = Number(process.env.DFS_REVIEWS_DEPTH) || 20
 const POLL_INTERVAL_MS = Number(process.env.DFS_POLL_INTERVAL_MS) || 10000
@@ -63,7 +104,14 @@ function taskOf(data: any): { node: any; error?: string; cost: number } {
   const cost = Number(data?.cost) || Number(node?.cost) || 0
   const st = node?.status_code
   if (st && st !== 20000 && st !== 20100) {
-    return { node: null, error: `task_${st}: ${(node?.status_message || '').slice(0, 120)}`, cost }
+    const msg = String(node?.status_message || '')
+    // Make the two failures we actually hit legible instead of a raw code.
+    const friendly = /location/i.test(msg)
+      ? `מיקום לא נתמך ב-DataForSEO (${msg.slice(0, 80)})`
+      : /invalid field/i.test(msg)
+        ? `שדה לא תקין בבקשה (${msg.slice(0, 80)})`
+        : `task_${st}: ${msg.slice(0, 120)}`
+    return { node: null, error: friendly, cost }
   }
   return { node, cost }
 }
@@ -87,7 +135,7 @@ export async function fetchBusinessInfo(
   try {
     const { res, data } = await dfsPost(MY_BUSINESS_LIVE, [{
       keyword: name.slice(0, 700),
-      location_name: locationName,
+      ...dfsLocation(locationName),
       language_code: 'he',
     }], auth)
     const { node, error, cost } = taskOf(data)
@@ -120,7 +168,7 @@ async function fetchReviewItems(
   try {
     // `cid` pins the exact business resolved in step 1; keyword is the fallback.
     const task: Record<string, any> = {
-      location_name: opts.locationName,
+      ...dfsLocation(opts.locationName),
       language_code: 'he',
       depth: REVIEWS_DEPTH,
       sort_by: 'newest', // we only care about the recency window

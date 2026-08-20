@@ -164,7 +164,11 @@ export async function POST(request: Request) {
   // than failing the run. The client's own area disambiguates same-named
   // businesses (single source of truth: deriveArea).
   const area = deriveArea(company, (company?.business_profile as any) || null)
-  const reviewsWanted = selected.reviews !== false && isReviewsConfigured()
+  // Reviews are their OWN selectable source: unchecked → the (billed) DataForSEO
+  // calls never happen; checked alone → this is the entire run and no social
+  // source is scraped (each social source is gated independently below).
+  const reviewsSelected = selected.reviews !== false
+  const reviewsWanted = reviewsSelected && isReviewsConfigured()
   const reviewsPromise: Promise<ReviewSnapshot | null> = reviewsWanted
     ? fetchGoogleReviews(name, area.search || 'Israel').then((r) => ({
         found: r.found,
@@ -185,7 +189,14 @@ export async function POST(request: Request) {
         found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
         capturedAt: new Date().toISOString(), error: (e?.message || 'reviews_failed').slice(0, 60),
       }))
-    : Promise.resolve(null)
+    : Promise.resolve(reviewsSelected
+        // Selected but unusable — say so instead of silently showing nothing.
+        ? {
+            found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
+            capturedAt: new Date().toISOString(),
+            error: 'DATAFORSEO_LOGIN/PASSWORD לא מוגדרים',
+          }
+        : null)
 
   // Every source runs INDEPENDENTLY — one failure never blocks the others.
   const sources: SourceResult[] = await Promise.all(

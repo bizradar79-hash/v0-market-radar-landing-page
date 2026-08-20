@@ -351,7 +351,10 @@ export default function CompetitorIntelDevPage() {
                 <Button
                   size="sm" className="shrink-0"
                   onClick={() => runOne(i)}
-                  disabled={!companyId || running !== null || runningAll || !SOURCES.some(src => c.selected[src] && c.urls[src]?.trim())}
+                  /* Reviews alone is a valid run — it needs no scraped URL. */
+                  disabled={!companyId || running !== null || runningAll || !(
+                    c.selected.reviews !== false || SOURCES.some(src => c.selected[src] && c.urls[src]?.trim())
+                  )}
                 >
                   {running === i ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                   <span className="mr-1.5">סרוק</span>
