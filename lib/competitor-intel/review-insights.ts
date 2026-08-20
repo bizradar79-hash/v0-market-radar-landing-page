@@ -38,6 +38,8 @@ export interface ReviewSnapshot {
   title?: string
   address?: string
   cid?: string
+  /** The Google Maps listing the id came from (auto-discovered by the AI finder). */
+  mapsUrl?: string
   rating: number | null
   reviewsCount: number | null
   reviews: GoogleReview[]

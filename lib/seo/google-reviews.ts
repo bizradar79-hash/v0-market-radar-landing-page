@@ -128,13 +128,21 @@ async function dfsPost(url: string, body: any, auth: string, timeoutMs = 30000) 
 
 /** Step 1 — resolve the business + its live rating / review count. */
 export async function fetchBusinessInfo(
-  name: string, locationName = 'Israel',
+  name: string, locationName = 'Israel', id?: { cid?: string; placeId?: string },
 ): Promise<BusinessInfo & { costUSD: number; error?: string }> {
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
   try {
+    // PREFER the resolved id. DataForSEO's keyword search cannot find Israeli
+    // businesses by Hebrew name (task_40102 "No Search Results" even for a
+    // business with 119 reviews), but cid/place_id lookups are exact.
+    const identity: Record<string, any> = id?.cid
+      ? { cid: id.cid }
+      : id?.placeId
+        ? { place_id: id.placeId }
+        : { keyword: name.slice(0, 700) }
     const { res, data } = await dfsPost(MY_BUSINESS_LIVE, [{
-      keyword: name.slice(0, 700),
+      ...identity,
       ...dfsLocation(locationName),
       language_code: 'he',
     }], auth)
@@ -162,7 +170,7 @@ export async function fetchBusinessInfo(
 
 /** Step 2 — review TEXT. Task-based: post, then poll task_get until ready. */
 async function fetchReviewItems(
-  opts: { cid?: string; keyword: string; locationName: string }, auth: string,
+  opts: { cid?: string; placeId?: string; locationName: string }, auth: string,
 ): Promise<{ reviews: GoogleReview[]; costUSD: number; error?: string }> {
   let cost = 0
   try {
@@ -173,8 +181,11 @@ async function fetchReviewItems(
       depth: REVIEWS_DEPTH,
       sort_by: 'newest', // we only care about the recency window
     }
+    // ID ONLY — never fall back to `keyword`, which fails the same way the
+    // business search does for Hebrew names.
     if (opts.cid) task.cid = opts.cid
-    else task.keyword = opts.keyword.slice(0, 700)
+    else if (opts.placeId) task.place_id = opts.placeId
+    else return { reviews: [], costUSD: cost, error: 'no_business_id' }
 
     const posted = await dfsPost(REVIEWS_POST, [task], auth)
     const p = taskOf(posted.data)
@@ -220,19 +231,23 @@ async function fetchReviewItems(
  * Google profile returns found:false with the reason, not an error state.
  */
 export async function fetchGoogleReviews(
-  name: string, locationName = 'Israel',
+  name: string, locationName = 'Israel', id?: { cid?: string; placeId?: string },
 ): Promise<ReviewsFetch> {
   const auth = authHeader()
   if (!auth) {
     return { found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0, error: 'missing_credentials' }
   }
-  const info = await fetchBusinessInfo(name, locationName)
+  const info = await fetchBusinessInfo(name, locationName, id)
   if (!info.found) {
     return { ...info, reviews: [], costUSD: info.costUSD, error: info.error || 'no_google_business_profile' }
   }
   // A business with zero reviews needs no second (billed) call.
   if (!info.reviewsCount) return { ...info, reviews: [], costUSD: info.costUSD }
 
-  const r = await fetchReviewItems({ cid: info.cid, keyword: name, locationName }, auth)
+  // The id from discovery wins; info.cid is the fallback when we looked the
+  // business up by keyword and it happened to work.
+  const r = await fetchReviewItems(
+    { cid: id?.cid || info.cid, placeId: id?.placeId, locationName }, auth,
+  )
   return { ...info, reviews: r.reviews, costUSD: info.costUSD + r.costUSD, error: r.error }
 }

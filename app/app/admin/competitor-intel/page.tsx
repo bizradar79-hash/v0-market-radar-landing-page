@@ -53,7 +53,7 @@ interface ReviewInsights {
   windowDays: number
 }
 interface ReviewSnapshot {
-  found: boolean; title?: string; address?: string; cid?: string
+  found: boolean; title?: string; address?: string; cid?: string; mapsUrl?: string
   rating: number | null; reviewsCount: number | null
   reviews: GoogleReviewItem[]; insights?: ReviewInsights
   capturedAt: string; costUSD: number; error?: string
@@ -63,7 +63,7 @@ interface Run { id?: string; competitor_name: string; sources: SourceResult[]; b
 interface CompetitorInput { name: string; urls: Record<string, string>; selected: Record<string, boolean> }
 const emptyCompetitor = (): CompetitorInput => ({
   name: '',
-  urls: { website: '', instagram: '', facebook: '', linkedin: '' },
+  urls: { website: '', instagram: '', facebook: '', linkedin: '', googleMaps: '' },
   // A source is scraped only when CHECKED. Discovery ticks the ones it finds.
   // Google reviews are cheap and independent of the social links, so they're
   // on by default; unchecking skips the (billed) DataForSEO calls entirely.
@@ -157,6 +157,9 @@ export default function CompetitorIntelDevPage() {
         if (idx !== i) return c
         const urls = { ...c.urls }
         const selected = { ...c.selected }
+        // googleMaps is discovered too, but it is NOT a scraped source — it
+        // only feeds the reviews lookup, so it fills the field without a checkbox.
+        if (found.googleMaps) urls.googleMaps = found.googleMaps
         for (const src of SOURCES) {
           if (found[src]) { urls[src] = found[src]; selected[src] = true }
           // Nothing found → leave blank + unchecked; the admin can paste one.
@@ -403,6 +406,20 @@ export default function CompetitorIntelDevPage() {
                   ביקורות גוגל (DataForSEO)
                 </span>
               </label>
+              {c.selected.reviews !== false && (
+                <div className="space-y-1">
+                  <Input
+                    dir="ltr"
+                    placeholder="עמוד גוגל — נמצא אוטומטית לפי השם, אין צורך למלא"
+                    value={c.urls.googleMaps || ''}
+                    onChange={e => setCompetitors(p => p.map((x, idx) => idx === i ? { ...x, urls: { ...x.urls, googleMaps: e.target.value } } : x))}
+                    className="h-8 text-xs"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    לא חובה. אם ריק — המערכת מאתרת את כרטיס הגוגל של המתחרה לבד לפי השם.
+                  </p>
+                </div>
+              )}
               {linkDiag[i] && (
                 <p className="text-[10px] text-muted-foreground">
                   איתור: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${
@@ -659,6 +676,11 @@ export default function CompetitorIntelDevPage() {
                             {run.reviews.title && (
                               <p className="text-[11px] text-muted-foreground">
                                 {run.reviews.title}{run.reviews.address ? ` · ${run.reviews.address}` : ''}
+                                {run.reviews.mapsUrl && (
+                                  <a href={run.reviews.mapsUrl} target="_blank" rel="noopener noreferrer" className="mr-1.5 underline">
+                                    (כרטיס גוגל)
+                                  </a>
+                                )}
                               </p>
                             )}
                             {run.reviews.insights?.standing && (

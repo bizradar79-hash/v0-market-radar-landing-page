@@ -13,6 +13,7 @@ import {
 import { findCompetitorLinksAI } from '@/lib/competitor-intel/find-links-ai'
 import { fetchGoogleReviews, isReviewsConfigured } from '@/lib/seo/google-reviews'
 import { computeReviewInsights, type ReviewSnapshot } from '@/lib/competitor-intel/review-insights'
+import { resolveMapsId } from '@/lib/competitor-intel/maps-id'
 import { deriveArea } from '@/lib/geo/area'
 import { summarizeCompetitor, filterRecentPosts, RECENCY_DAYS, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
@@ -169,28 +170,68 @@ export async function POST(request: Request) {
   // source is scraped (each social source is gated independently below).
   const reviewsSelected = selected.reviews !== false
   const reviewsWanted = reviewsSelected && isReviewsConfigured()
+
+  /**
+   * NAME IN, EVERYTHING ELSE AUTOMATIC.
+   * DataForSEO cannot find Israeli businesses by Hebrew name, so we never ask it
+   * to: the AI link-finder locates the Google Maps listing (a web search, which
+   * Grok handles well), we extract the cid/place_id from that URL, and reviews
+   * are fetched BY ID. The admin types only a name — the googleMaps URL below is
+   * an optional dev-tab override, never a requirement.
+   */
+  async function resolveListing(): Promise<{ cid?: string; placeId?: string; mapsUrl?: string; reason?: string }> {
+    const provided = (urls.googleMaps || '').trim()
+    if (provided) {
+      const id = await resolveMapsId(provided)
+      if (id.cid || id.placeId) return { ...id, mapsUrl: provided }
+      // A pasted URL we can't read shouldn't block auto-discovery.
+    }
+    const discovered = await findCompetitorLinksAI(
+      name, (urls.website || company?.website || '').trim(), undefined, area.display,
+    )
+    const found = discovered.urls.googleMaps
+    if (!found) return { reason: 'no_google_listing_found' }
+    const id = await resolveMapsId(found)
+    if (!id.cid && !id.placeId) return { reason: id.error || 'no_business_id', mapsUrl: found }
+    return { ...id, mapsUrl: found }
+  }
+
   const reviewsPromise: Promise<ReviewSnapshot | null> = reviewsWanted
-    ? fetchGoogleReviews(name, area.search || 'Israel').then((r) => ({
-        found: r.found,
-        title: r.title,
-        address: r.address,
-        cid: r.cid,
-        rating: r.rating,
-        reviewsCount: r.reviewsCount,
-        reviews: r.reviews,
-        // Deterministic, no LLM — same input always yields the same insights.
-        insights: r.found ? computeReviewInsights(r) : undefined,
-        // Stored every run so a later run can diff rating / review count
-        // over time, the same way follower counts are tracked.
-        capturedAt: new Date().toISOString(),
-        costUSD: r.costUSD,
-        error: r.error,
-      })).catch((e: any) => ({
+    ? resolveListing().then(async (listing) => {
+        if (!listing.cid && !listing.placeId) {
+          return {
+            found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
+            capturedAt: new Date().toISOString(),
+            error: listing.reason === 'no_google_listing_found'
+              ? 'לא נמצא עמוד גוגל למתחרה'
+              : `נמצא עמוד גוגל אך לא ניתן לחלץ מזהה (${listing.reason})`,
+          }
+        }
+        const r = await fetchGoogleReviews(name, area.search || 'Israel', {
+          cid: listing.cid, placeId: listing.placeId,
+        })
+        return {
+          found: r.found,
+          title: r.title,
+          address: r.address,
+          cid: r.cid || listing.cid,
+          mapsUrl: listing.mapsUrl,
+          rating: r.rating,
+          reviewsCount: r.reviewsCount,
+          reviews: r.reviews,
+          // Deterministic, no LLM — same input always yields the same insights.
+          insights: r.found ? computeReviewInsights(r) : undefined,
+          // Stored every run so a later run can diff rating / review count
+          // over time, the same way follower counts are tracked.
+          capturedAt: new Date().toISOString(),
+          costUSD: r.costUSD,
+          error: r.error,
+        }
+      }).catch((e: any) => ({
         found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
         capturedAt: new Date().toISOString(), error: (e?.message || 'reviews_failed').slice(0, 60),
       }))
     : Promise.resolve(reviewsSelected
-        // Selected but unusable — say so instead of silently showing nothing.
         ? {
             found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
             capturedAt: new Date().toISOString(),
