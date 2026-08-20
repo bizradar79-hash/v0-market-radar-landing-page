@@ -39,16 +39,35 @@ interface Briefing { summary: string; items: BriefingItem[]; sourcesUsed: Source
 interface RunCost {
   brightdata: { requests: number; scrapes: number; searches: number; records?: number; perRequestUSD: number; perRecordUSD?: number; costUSD: number; precision: 'exact' }
   llm: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
+  dataforseo?: { calls: number; costUSD: number; precision: 'exact' } | null
   totalUSD: number
 }
-interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; cost?: RunCost | null; created_at?: string }
+interface GoogleReviewItem { date: string; rating: number | null; text: string; author?: string }
+interface ReviewInsights {
+  standing?: { rating: number | null; total: number | null; text: string }
+  recent?: { count: number; avgRating: number | null; text: string }
+  sentiment?: { direction: 'up' | 'down' | 'flat'; delta: number; text: string }
+  themes?: { terms: Array<{ term: string; count: number }>; text: string }
+  negatives?: Array<{ date: string; rating: number | null; text: string }>
+  noRecentReviews?: boolean
+  windowDays: number
+}
+interface ReviewSnapshot {
+  found: boolean; title?: string; address?: string; cid?: string
+  rating: number | null; reviewsCount: number | null
+  reviews: GoogleReviewItem[]; insights?: ReviewInsights
+  capturedAt: string; costUSD: number; error?: string
+}
+interface Run { id?: string; competitor_name: string; sources: SourceResult[]; briefing: Briefing | null; cost?: RunCost | null; reviews?: ReviewSnapshot | null; created_at?: string }
 
 interface CompetitorInput { name: string; urls: Record<string, string>; selected: Record<string, boolean> }
 const emptyCompetitor = (): CompetitorInput => ({
   name: '',
   urls: { website: '', instagram: '', facebook: '', linkedin: '' },
   // A source is scraped only when CHECKED. Discovery ticks the ones it finds.
-  selected: { website: false, instagram: false, facebook: false, linkedin: false },
+  // Google reviews are cheap and independent of the social links, so they're
+  // on by default; unchecking skips the (billed) DataForSEO calls entirely.
+  selected: { website: false, instagram: false, facebook: false, linkedin: false, reviews: true },
 })
 
 function statusBadge(s: SourceResult['status'], error?: string) {
@@ -370,6 +389,17 @@ export default function CompetitorIntelDevPage() {
                   </div>
                 ))}
               </div>
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none w-fit">
+                <input
+                  type="checkbox"
+                  checked={c.selected.reviews !== false}
+                  onChange={() => toggleSource(i, 'reviews' as Source)}
+                  className="h-3.5 w-3.5 accent-amber-600"
+                />
+                <span className={c.selected.reviews !== false ? 'font-semibold text-foreground' : ''}>
+                  ביקורות גוגל (DataForSEO)
+                </span>
+              </label>
               {linkDiag[i] && (
                 <p className="text-[10px] text-muted-foreground">
                   איתור: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${
@@ -420,6 +450,13 @@ export default function CompetitorIntelDevPage() {
                         >
                           {run.cost.llm.precision === 'exact' ? 'מדויק' : 'הערכה'}
                         </Badge>
+                      </span>
+                    )}
+                    {run.cost.dataforseo && (
+                      <span>
+                        DataForSEO (ביקורות): <b>${run.cost.dataforseo.costUSD.toFixed(4)}</b>
+                        <Badge variant="outline" className="mr-1.5 border-green-300 text-green-700 py-0 h-4 text-[9px]">מדויק</Badge>
+                        <span className="text-muted-foreground"> ({run.cost.dataforseo.calls} קריאות)</span>
                       </span>
                     )}
                     <span className="font-bold">סה"כ: ${run.cost.totalUSD.toFixed(4)}</span>
@@ -595,6 +632,65 @@ export default function CompetitorIntelDevPage() {
                       </div>
                     ) : (
                       <p className="text-xs text-muted-foreground">אין תדריך</p>
+                    )}
+
+                    {/* ── ביקורות גוגל (DataForSEO) — deterministic, no LLM ── */}
+                    {run.reviews && (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-amber-800">
+                          ביקורות גוגל
+                          {run.reviews.insights && (
+                            <span className="mr-1.5 font-normal text-muted-foreground">
+                              ({run.reviews.insights.windowDays ?? recencyDays} הימים האחרונים)
+                            </span>
+                          )}
+                        </p>
+                        {!run.reviews.found ? (
+                          <p className="text-xs text-muted-foreground">
+                            {run.reviews.error === 'no_google_business_profile' || !run.reviews.error
+                              ? 'לא נמצא פרופיל Google Business למתחרה הזה.'
+                              : `לא נאספו ביקורות (${run.reviews.error}).`}
+                          </p>
+                        ) : (
+                          <>
+                            {run.reviews.title && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {run.reviews.title}{run.reviews.address ? ` · ${run.reviews.address}` : ''}
+                              </p>
+                            )}
+                            {run.reviews.insights?.standing && (
+                              <p className="text-xs">⭐ {run.reviews.insights.standing.text}</p>
+                            )}
+                            {run.reviews.insights?.noRecentReviews && (
+                              <p className="text-xs text-muted-foreground">
+                                אין ביקורות חדשות ב-{run.reviews.insights.windowDays ?? recencyDays} הימים האחרונים.
+                              </p>
+                            )}
+                            {run.reviews.insights?.recent && (
+                              <p className="text-xs">🆕 {run.reviews.insights.recent.text}</p>
+                            )}
+                            {run.reviews.insights?.sentiment && (
+                              <p className="text-xs">
+                                {run.reviews.insights.sentiment.direction === 'up' ? '📈' : run.reviews.insights.sentiment.direction === 'down' ? '📉' : '➖'}{' '}
+                                {run.reviews.insights.sentiment.text}
+                              </p>
+                            )}
+                            {run.reviews.insights?.themes && (
+                              <p className="text-xs">🗣 {run.reviews.insights.themes.text}</p>
+                            )}
+                            {(run.reviews.insights?.negatives || []).map((ng, ni) => (
+                              <p key={ni} className="text-xs text-red-700">
+                                ⚠️ {ng.rating ?? '?'}★ {ng.date ? `· ${ng.date}` : ''} — {ng.text || '(ללא טקסט)'}
+                              </p>
+                            ))}
+                            {run.reviews.rating != null && (
+                              <p className="text-[10px] text-muted-foreground">
+                                נשמר לצורך מעקב צמיחה (דירוג + מספר ביקורות) — השוואה תוצג לאחר 2+ סריקות.
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

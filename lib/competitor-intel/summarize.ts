@@ -210,12 +210,12 @@ const CADENCE_VERY_ACTIVE = Number(process.env.INTEL_CADENCE_VERY_ACTIVE) || 8
 const CADENCE_ACTIVE = Number(process.env.INTEL_CADENCE_ACTIVE) || 3
 
 // Hebrew/English stop-words for theme extraction (too generic to be a "theme").
-const THEME_STOP = new Set([
+export const THEME_STOP = new Set([
   'את','של','עם','על','לא','כל','גם','זה','אני','אנחנו','הוא','היא','יש','אין','מה','כי','אבל','או','אם','רק','עוד','כמו','כדי','אחרי','לפני','בין','הכי','יותר','מאוד','שלנו','שלכם','שלך','היום','חדש','חדשה',
   'the','and','for','with','you','your','our','this','that','from','are','was','have','has','all','new','out','get','can','will','more','about','how','why','what',
 ])
 
-function themeTokens(text: string): string[] {
+export function themeTokens(text: string): string[] {
   return norm(text)
     .split(/\s+/)
     .map((w) => w.replace(/^#/, ''))

@@ -11,6 +11,9 @@ import {
   type SocialPlatform,
 } from '@/lib/brightdata/client'
 import { findCompetitorLinksAI } from '@/lib/competitor-intel/find-links-ai'
+import { fetchGoogleReviews, isReviewsConfigured } from '@/lib/seo/google-reviews'
+import { computeReviewInsights, type ReviewSnapshot } from '@/lib/competitor-intel/review-insights'
+import { deriveArea } from '@/lib/geo/area'
 import { summarizeCompetitor, filterRecentPosts, RECENCY_DAYS, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
@@ -47,7 +50,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await adminDb()
     .from('competitor_intel_dev')
-    .select('id, competitor_name, sources, briefing, cost, created_at')
+    .select('id, competitor_name, sources, briefing, cost, reviews, created_at')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(RUN_HISTORY_CAP)
@@ -135,7 +138,9 @@ export async function POST(request: Request) {
 
   const db = adminDb()
   const { data: company } = await db
-    .from('companies').select('name, website, industry, description, business_profile').eq('id', companyId).single()
+    .from('companies')
+    .select('name, website, industry, description, business_profile, city, geographic_area, geographic_scope')
+    .eq('id', companyId).single()
 
   const bp: any = company?.business_profile || {}
   const clientContext = [
@@ -152,6 +157,35 @@ export async function POST(request: Request) {
   // EXACT BrightData request counting for the per-run cost (see client comment:
   // computed from OUR request count, not BrightData's billing API).
   const counter = new RequestCounter()
+
+  // ── Google reviews (DataForSEO) ──────────────────────────────────────────
+  // Runs ALONGSIDE the social sources, independently: no Google Business
+  // profile, or DataForSEO not configured, degrades to a skipped block rather
+  // than failing the run. The client's own area disambiguates same-named
+  // businesses (single source of truth: deriveArea).
+  const area = deriveArea(company, (company?.business_profile as any) || null)
+  const reviewsWanted = selected.reviews !== false && isReviewsConfigured()
+  const reviewsPromise: Promise<ReviewSnapshot | null> = reviewsWanted
+    ? fetchGoogleReviews(name, area.search || 'Israel').then((r) => ({
+        found: r.found,
+        title: r.title,
+        address: r.address,
+        cid: r.cid,
+        rating: r.rating,
+        reviewsCount: r.reviewsCount,
+        reviews: r.reviews,
+        // Deterministic, no LLM — same input always yields the same insights.
+        insights: r.found ? computeReviewInsights(r) : undefined,
+        // Stored every run so a later run can diff rating / review count
+        // over time, the same way follower counts are tracked.
+        capturedAt: new Date().toISOString(),
+        costUSD: r.costUSD,
+        error: r.error,
+      })).catch((e: any) => ({
+        found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
+        capturedAt: new Date().toISOString(), error: (e?.message || 'reviews_failed').slice(0, 60),
+      }))
+    : Promise.resolve(null)
 
   // Every source runs INDEPENDENTLY — one failure never blocks the others.
   const sources: SourceResult[] = await Promise.all(
@@ -194,6 +228,8 @@ export async function POST(request: Request) {
     }),
   )
 
+  const reviews = await reviewsPromise
+
   const briefing = await summarizeCompetitor({ competitorName: name, clientContext, sources })
 
   // ── Per-run cost ─────────────────────────────────────────────────────────
@@ -215,18 +251,23 @@ export async function POST(request: Request) {
     llm: llm
       ? { model: llm.model, promptTokens: llm.promptTokens, completionTokens: llm.completionTokens, costUSD: llm.costUSD, precision: llm.precision }
       : null,
-    totalUSD: counter.costUSD + (llm?.costUSD || 0),
+    // DataForSEO: EXACT — read from the provider's own `cost` field per task,
+    // not estimated from a price list.
+    dataforseo: reviews
+      ? { calls: reviews.found && reviews.reviewsCount ? 2 : 1, costUSD: reviews.costUSD, precision: 'exact' as const }
+      : null,
+    totalUSD: counter.costUSD + (llm?.costUSD || 0) + (reviews?.costUSD || 0),
   }
 
   // Store raw + briefing + cost in the ISOLATED dev table (append, never overwrite).
   const { data: saved, error } = await db
     .from('competitor_intel_dev')
-    .insert({ company_id: companyId, competitor_name: name, sources, briefing, cost })
-    .select('id, competitor_name, sources, briefing, cost, created_at')
+    .insert({ company_id: companyId, competitor_name: name, sources, briefing, cost, reviews })
+    .select('id, competitor_name, sources, briefing, cost, reviews, created_at')
     .single()
   if (error) {
     // Still return the result so the sandbox is usable before the migration runs.
-    return NextResponse.json({ success: true, stored: false, storeError: error.message, run: { competitor_name: name, sources, briefing, cost } })
+    return NextResponse.json({ success: true, stored: false, storeError: error.message, run: { competitor_name: name, sources, briefing, cost, reviews } })
   }
 
   // Keep only the latest RUN_HISTORY_CAP runs per company (same pattern as the

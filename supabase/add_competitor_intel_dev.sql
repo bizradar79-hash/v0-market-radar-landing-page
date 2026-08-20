@@ -30,3 +30,11 @@ alter table competitor_intel_dev enable row level security;
 -- BrightData figures are EXACT (counted from the requests we fire); the model
 -- figures are exact when the provider returns token counts, else estimated.
 alter table competitor_intel_dev add column if not exists cost jsonb;
+
+-- ── Added later: Google reviews snapshot (DataForSEO) ──────────────────────
+-- { found, title, address, cid, rating, reviewsCount, reviews:[{date,rating,text,author}],
+--   insights:{ standing, recent, sentiment, themes, negatives, windowDays },
+--   capturedAt, costUSD, error }
+-- Stored per RUN (never overwritten), so rating + reviewsCount across runs form
+-- a growth series — the review-side equivalent of the follower counts.
+alter table competitor_intel_dev add column if not exists reviews jsonb;
