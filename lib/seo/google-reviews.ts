@@ -22,7 +22,7 @@
  * Cost is read from DataForSEO's own `cost` field on each response — EXACT,
  * never estimated (same discipline as the BrightData request counting).
  */
-import { norm } from '@/lib/match/hebrew-core'
+import { norm, deParticle } from '@/lib/match/hebrew-core'
 
 const BASE = 'https://api.dataforseo.com/v3/business_data/google'
 const MY_BUSINESS_LIVE = `${BASE}/my_business_info/live`
@@ -146,14 +146,85 @@ async function dfsPost(url: string, body: any, auth: string, timeoutMs = 30000) 
 // "מאי פיננסים - יועץ משכנתאות" are the same business.
 const MIN_NAME_SCORE = Number(process.env.DFS_MIN_NAME_SCORE) || 0.6
 
+/**
+ * Words that carry no brand identity — a Google listing title is almost always
+ * "<brand> <what they do> <where>", and only the brand identifies the business.
+ * Matching on these would let "לימון" match any consultancy in the country.
+ */
+// NOTE: these are written in normal Hebrew but MUST be compared in normalized
+// form — norm() folds final letters (פיננסים → פיננסימ), so a raw list would
+// never match a single entry. GENERIC_TITLE_TOKENS below is built through norm().
+const GENERIC_TITLE_RAW = [
+  'ייעוץ', 'יעוץ', 'יועץ', 'יועצי', 'יועצים', 'משכנתא', 'משכנתאות', 'פיננסי', 'פיננסים',
+  'חברת', 'חברה', 'קבוצת', 'קבוצה', 'בעמ', 'בע', 'מ', 'ltd', 'inc', 'group', 'ושות',
+  'סוכנות', 'משרד', 'משרדי', 'שירותי', 'שירות', 'מרכז', 'בית', 'סטודיו', 'עסק',
+  'ישראל', 'תל', 'אביב', 'ירושלים', 'חיפה', 'דימונה', 'the', 'and', 'of',
+]
+const GENERIC_TITLE_TOKENS = new Set(GENERIC_TITLE_RAW.map((t) => norm(t)).filter(Boolean))
+
+const tokensOf = (s: string) => norm(s).split(/\s+/).filter(Boolean)
+/**
+ * The identifying words of a name: everything that isn't boilerplate.
+ * Prefixed particles are stripped first (ו/ה/ב/ל/מ/ש/כ), otherwise "ופיננסים"
+ * survives as a "brand" word and dilutes the real one.
+ */
+export function brandTokens(name: string): string[] {
+  const all = tokensOf(name).filter((t) => t.length >= 2)
+  // NEVER apply deParticle to the token itself — a real brand can legitimately
+  // start with a particle letter ("לימון" would become "ימון"). We only use the
+  // de-particled form as an ADDITIONAL variant when comparing.
+  const brand = all.filter((t) => !GENERIC_TITLE_TOKENS.has(t) && !GENERIC_TITLE_TOKENS.has(deParticle(t)))
+  // A name made ENTIRELY of generic words still has to match on something.
+  return brand.length ? brand : all
+}
+
+/** A token matches a candidate if either form (as-is or de-particled) appears. */
+function tokenHits(token: string, candidateTokens: Set<string>, candidateText: string): boolean {
+  const bare = deParticle(token)
+  return candidateTokens.has(token) || candidateTokens.has(bare) ||
+    candidateText.includes(token) || (bare.length >= 3 && candidateText.includes(bare))
+}
+
+/**
+ * How well a Maps result matches the competitor we asked for.
+ *
+ * The old rule demanded that EVERY query token appear in the title, which is
+ * near-exact matching: "לימון" vs "לימון ייעוץ משכנתאות" passed, but any name
+ * whose stored form differs slightly from the listing ("מסלולים" stored,
+ * "מסלולים - ייעוץ משכנתאות בע\"מ" listed, or vice versa) scored below the
+ * threshold and every real business was rejected.
+ *
+ * Now: substring containment either way, or brand-token overlap. Extra words in
+ * the listing ("ייעוץ משכנתאות", "בע\"מ", a city suffix) cost nothing.
+ */
 export function nameScore(query: string, candidate: string): number {
-  const q = norm(query).split(/\s+/).filter((t) => t.length >= 2)
-  const c = new Set(norm(candidate).split(/\s+/).filter(Boolean))
-  if (!q.length || !c.size) return 0
-  const hit = q.filter((t) => c.has(t)).length
-  // Share of the QUERY's tokens present in the candidate: a longer candidate
-  // title ("… - יועץ משכנתאות בדימונה") must not be penalised for extra words.
-  return hit / q.length
+  const q = norm(query)
+  const c = norm(candidate)
+  if (!q || !c) return 0
+  if (q === c) return 1
+
+  // Containment in either direction is a strong signal: the listing name is the
+  // stored name plus descriptors, or the stored name is the listing plus ours.
+  if (c.includes(q) || q.includes(c)) return 1
+
+  const qb = brandTokens(query)
+  if (!qb.length) return 0
+  // Compare BRAND words to the candidate's full text: descriptors on either
+  // side are irrelevant, only the identifying words have to line up.
+  const cAll = new Set(tokensOf(candidate))
+  const hits = qb.filter((t) => tokenHits(t, cAll, c)).length
+  return hits / qb.length
+}
+
+/**
+ * HARD GUARD against grabbing an unrelated business: at least one identifying
+ * brand word of the competitor name must literally appear in the listing title.
+ * Loosening the score without this would let "לימון" match "תפוז ייעוץ".
+ */
+export function shareBrandToken(query: string, candidate: string): boolean {
+  const cTokens = new Set(tokensOf(candidate))
+  const cJoined = norm(candidate)
+  return brandTokens(query).some((t) => tokenHits(t, cTokens, cJoined))
 }
 
 export interface MapsMatch extends BusinessInfo {
@@ -189,16 +260,26 @@ export async function searchBusinessOnMaps(
       .map((it) => ({
         it,
         score: nameScore(name, it.title || ''),
+        // A candidate without a shared brand word can never be selected, no
+        // matter how the score lands.
+        brandOk: shareBrandToken(name, it.title || ''),
+        votes: typeof it.rating?.votes_count === 'number' ? it.rating.votes_count : 0,
         title: it.title || '',
         cid: it.cid ? String(it.cid) : '',
         address: it.address || '',
       }))
-      .sort((a, b) => b.score - a.score)
+      // Among acceptable candidates prefer the MOST-REVIEWED one: on Google a
+      // real business outweighs a stub or duplicate listing of the same name.
+      .sort((a, b) => (b.score - a.score) || (b.votes - a.votes))
+
+    const acceptable = scored
+      .filter((x) => x.brandOk && x.score >= MIN_NAME_SCORE)
+      .sort((a, b) => (b.votes - a.votes) || (b.score - a.score))
 
     const diag = scored.slice(0, 5).map(({ title, score, cid, address }) => ({ title, score: Math.round(score * 100) / 100, cid, address }))
-    const best = scored[0]
-    // No confident match is an HONEST empty, not a wrong business.
-    if (!best || best.score < MIN_NAME_SCORE) {
+    const best = acceptable[0]
+    // No acceptable match is an HONEST empty, not a wrong business.
+    if (!best) {
       return {
         found: false, rating: null, reviewsCount: null, costUSD: cost,
         error: items.length ? 'no_confident_name_match' : 'no_maps_results',

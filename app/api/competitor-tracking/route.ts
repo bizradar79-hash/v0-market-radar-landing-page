@@ -8,6 +8,9 @@ import { getFullContext } from '@/lib/context'
 import { deriveArea } from '@/lib/geo/area'
 import { MAX_DIRECT_COMPETITORS } from '@/lib/flags'
 import { trackCompetitor, isFresh, TRACKING_MIN_DAYS, type ResolvedLinks } from '@/lib/competitor-intel/engine'
+
+/** Per-competitor wall-clock budget, so one hung scrape can't starve the rest. */
+const COMPETITOR_BUDGET_MS = Number(process.env.COMPETITOR_TIME_BUDGET_MS) || 240000
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 function adminDb() {
@@ -47,6 +50,10 @@ export async function POST(request: Request) {
   // The admin module-sync button opts INTO background so the run survives the
   // admin closing the dialog or the tab.
   const background = params.get('background') === 'true'
+  // CHAINING (same mechanism the main scan uses to beat the function timeout):
+  // one competitor per invocation, each chaining into a fresh one.
+  const cursor = Math.max(0, Number(params.get('cursor')) || 0)
+  const chainIndex = Math.max(0, Number(params.get('chain_index')) || 0)
 
   const ctx = await getFullContext()
   const company: any = ctx?.company
@@ -83,28 +90,29 @@ export async function POST(request: Request) {
 
   const details: Array<{ name: string; status: string; message?: string }> = []
 
-  // Sequential on purpose: each competitor can fire several BrightData
-  // collections, and running five in parallel risks provider rate limits and a
-  // 300s wall-clock overrun.
-  async function runAll(): Promise<{ tracked: number; skipped: number; costUSD: number }> {
-  let tracked = 0
-  let skipped = 0
-  let costUSD = 0
-  for (const name of names) {
+  /**
+   * Track ONE competitor, with its own time budget. A single BrightData poll can
+   * legitimately run five minutes; without a per-competitor cap one slow
+   * competitor would consume the whole invocation and starve the rest.
+   */
+  async function runOne(name: string): Promise<{ tracked: boolean; skipped: boolean; costUSD: number }> {
     const row = byName.get(name)
     if (!force && isFresh(row?.scanned_at)) {
-      skipped++
       details.push({ name, status: 'skipped', message: `fresh (< ${TRACKING_MIN_DAYS}d)` })
-      continue
+      return { tracked: false, skipped: true, costUSD: 0 }
     }
     try {
-      const result = await trackCompetitor({
-        name,
-        areaSearch: area.search,
-        cachedLinks: (row?.resolved_links || null) as ResolvedLinks | null,
-        // Only an explicit force re-runs link discovery; otherwise the cache wins.
-        force,
-      })
+      const result = await Promise.race([
+        trackCompetitor({
+          name,
+          areaSearch: area.search,
+          cachedLinks: (row?.resolved_links || null) as ResolvedLinks | null,
+          // Only an explicit force re-runs link discovery; otherwise the cache wins.
+          force,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('competitor_time_budget_exceeded')), COMPETITOR_BUDGET_MS)),
+      ])
       const { error } = await db.from('competitor_tracking').upsert({
         company_id: companyId,
         competitor_name: name,
@@ -117,10 +125,8 @@ export async function POST(request: Request) {
       }, { onConflict: 'company_id,competitor_name' })
       if (error) {
         details.push({ name, status: 'error', message: error.message })
-        continue
+        return { tracked: false, skipped: false, costUSD: 0 }
       }
-      tracked++
-      costUSD += result.cost.totalUSD
       if (result.cost.brightdata.requests || result.cost.brightdata.records) {
         cost.add({ provider: 'brightdata', model: 'scrapers', costUSD: result.cost.brightdata.costUSD })
       }
@@ -132,29 +138,73 @@ export async function POST(request: Request) {
         status: 'ok',
         message: `${result.sources.filter(s => s.status === 'ok').length} sources · reviews ${result.reviews?.found ? 'ok' : 'none'}`,
       })
+      return { tracked: true, skipped: false, costUSD: result.cost.totalUSD }
     } catch (e: any) {
-      // BEST EFFORT: one bad competitor must never fail the module, let alone
-      // the scan that called it.
+      // BEST EFFORT: one bad or slow competitor must never stop the chain.
       details.push({ name, status: 'error', message: (e?.message || 'failed').slice(0, 120) })
+      return { tracked: false, skipped: false, costUSD: 0 }
     }
   }
-  await cost.flush()
-  return { tracked, skipped, costUSD }
+
+  /** Chain into a fresh invocation for the NEXT competitor. */
+  function chainNext(next: number) {
+    if (next >= names.length || chainIndex >= names.length + 2) return
+    const origin = new URL(request.url).origin
+    const qs = new URLSearchParams({
+      force: String(force), background: 'true',
+      cursor: String(next), chain_index: String(chainIndex + 1),
+    })
+    void fetch(`${origin}/api/competitor-tracking?${qs}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-user-id': companyId,
+        'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      },
+      body: JSON.stringify({}),
+    }).catch((e: any) => console.error('[competitor-tracking] chain failed:', e?.message))
   }
 
-  // BACKGROUND: respond now, keep working. after() keeps the serverless
-  // invocation alive past the response, independent of the browser.
+  // Synchronous mode (the scan): process everything in this invocation. The scan
+  // is already chunked by sync/run's own chaining, and it needs the summary.
+  async function runAll(): Promise<{ tracked: number; skipped: number; costUSD: number }> {
+    let tracked = 0, skipped = 0, costUSD = 0
+    for (const name of names) {
+      const r = await runOne(name)
+      if (r.tracked) tracked++
+      if (r.skipped) skipped++
+      costUSD += r.costUSD
+    }
+    await cost.flush()
+    return { tracked, skipped, costUSD }
+  }
+
+  // BACKGROUND + CHAINED: this invocation handles exactly ONE competitor, then
+  // triggers a fresh invocation for the next. Five competitors sequentially in a
+  // single request exceeded the function limit and died after ~2; one per
+  // invocation gives each the full budget, mirroring how /api/sync/run chains
+  // module windows. Every competitor is an idempotent upsert, so re-running or
+  // re-entering a step is safe.
   if (background) {
+    const name = names[cursor]
+    if (!name) {
+      return NextResponse.json({ success: true, background: true, finished: true, total: names.length })
+    }
     after(async () => {
       try {
-        const r = await runAll()
-        console.log(`[competitor-tracking] background done for ${companyId}: ${r.tracked}/${names.length} tracked, ${r.skipped} fresh, $${r.costUSD.toFixed(4)}`)
+        const r = await runOne(name)
+        await cost.flush()
+        console.log(`[competitor-tracking] ${companyId} [${cursor + 1}/${names.length}] ${name}: ${r.tracked ? 'tracked' : r.skipped ? 'fresh' : 'failed'} $${r.costUSD.toFixed(4)}`)
       } catch (e: any) {
         console.error('[competitor-tracking] background failed:', e?.message)
+      } finally {
+        // ALWAYS chain, even after a failure — the rest must still run.
+        chainNext(cursor + 1)
       }
     })
     return NextResponse.json({
       success: true, background: true, total: names.length,
+      cursor, competitor: name,
       message: `הסריקה רצה ברקע עבור ${names.length} מתחרים — אפשר לסגור את החלון`,
     })
   }
