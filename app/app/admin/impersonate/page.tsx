@@ -358,6 +358,37 @@ export default function ImpersonatePage() {
     }
   }
 
+  // Live progress for the BACKGROUND competitor-tracking run. The request
+  // returns in under a second by design (the work continues on the server), so
+  // an instant ✅ would be indistinguishable from the old no-op bug. We poll
+  // instead and show real N/total progress until every competitor is written.
+  const [ctProgress, setCtProgress] = useState<{
+    total: number; done: number; finished: boolean
+    competitors: Array<{ name: string; done: boolean; sourcesOk: number; reviewsFound: boolean; reviewsError: string | null }>
+  } | null>(null)
+
+  function pollCompetitorTracking(userId: string, since: string) {
+    let tries = 0
+    const tick = async () => {
+      tries++
+      try {
+        const res = await fetch(`/api/admin/competitor-tracking-status?company_id=${userId}&since=${encodeURIComponent(since)}`)
+        const data = await res.json()
+        if (res.ok) {
+          setCtProgress(data)
+          if (data.finished) {
+            setModuleStates(prev => ({ ...prev, [userId]: { ...(prev[userId] || {}), competitor_tracking: 'ok' } }))
+            toast({ title: '✅ מעקב מתחרים הושלם', description: `${data.done}/${data.total} מתחרים נסרקו` })
+            return
+          }
+        }
+      } catch { /* keep polling */ }
+      // ~10 minutes of polling, then stop nagging — the run continues regardless.
+      if (tries < 60) setTimeout(tick, 10000)
+    }
+    setTimeout(tick, 5000)
+  }
+
   async function syncModule(userId: string, moduleId: string) {
     setModuleStates(prev => ({
       ...prev,
@@ -370,11 +401,18 @@ export default function ImpersonatePage() {
         body: JSON.stringify({ company_id: userId, module: moduleId }),
       })
       const ok = res.ok
+      const data = await res.json().catch(() => ({}))
+      const bg = data.results?.find((r: any) => String(r.route).includes('/api/competitor-tracking'))?.body?.background
+      // A background run is NOT done just because the HTTP call returned —
+      // stay in 'running' and let the poller flip it to ok.
       setModuleStates(prev => ({
         ...prev,
-        [userId]: { ...(prev[userId] || {}), [moduleId]: ok ? 'ok' : 'error' },
+        [userId]: { ...(prev[userId] || {}), [moduleId]: ok ? (bg ? 'running' : 'ok') : 'error' },
       }))
-      const data = await res.json().catch(() => ({}))
+      if (ok && bg) {
+        setCtProgress(null)
+        pollCompetitorTracking(userId, new Date().toISOString())
+      }
       const label = SYNC_MODULES.find(m => m.id === moduleId)?.label
       // Competitor tracking returns real per-competitor detail — surface it
       // instead of a bare "עודכן", so a run that found nothing says so.
@@ -392,13 +430,15 @@ export default function ImpersonatePage() {
         description: ok ? detail : (data.results?.[0]?.body?.error ?? 'שגיאה לא ידועה'),
         variant: ok ? 'default' : 'destructive',
       })
-      // Reset to idle after 4s
-      setTimeout(() => {
-        setModuleStates(prev => ({
-          ...prev,
-          [userId]: { ...(prev[userId] || {}), [moduleId]: 'idle' },
-        }))
-      }, 4000)
+      // Reset to idle after 4s — except a background run, which the poller owns.
+      if (!bg) {
+        setTimeout(() => {
+          setModuleStates(prev => ({
+            ...prev,
+            [userId]: { ...(prev[userId] || {}), [moduleId]: 'idle' },
+          }))
+        }, 4000)
+      }
     } catch (e: any) {
       setModuleStates(prev => ({
         ...prev,
@@ -412,7 +452,7 @@ export default function ImpersonatePage() {
   // Load the client's stored business_profile.geoQueries when the module dialog
   // opens; admins edit + save them here (writes business_profile.geoQueries).
   useEffect(() => {
-    if (!moduleSyncUser) { setGeoQueries([]); setNewGeoQuery(""); return }
+    if (!moduleSyncUser) { setGeoQueries([]); setNewGeoQuery(""); setCtProgress(null); return }
     let cancelled = false
     setGeoQueriesLoading(true)
     fetch(`/api/admin/geo-queries?company_id=${moduleSyncUser.id}`)
@@ -1038,6 +1078,29 @@ export default function ImpersonatePage() {
                   )
                 })}
               </div>
+              {ctProgress && (
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-primary">
+                    מעקב מתחרים — {ctProgress.done}/{ctProgress.total} הושלמו
+                    {!ctProgress.finished && <span className="mr-1.5 font-normal animate-pulse">⟳ רץ בשרת…</span>}
+                  </p>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{ width: `${ctProgress.total ? (ctProgress.done / ctProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  {ctProgress.competitors.map(c => (
+                    <p key={c.name} className="text-[11px] text-muted-foreground">
+                      {c.done ? '✅' : '⏳'} {c.name}
+                      {c.done && ` — ${c.sourcesOk} מקורות · ביקורות: ${c.reviewsFound ? 'נמצאו' : (c.reviewsError || 'לא נמצאו')}`}
+                    </p>
+                  ))}
+                  <p className="text-[10px] text-muted-foreground">
+                    אפשר לסגור את החלון — הסריקה ממשיכה בשרת.
+                  </p>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">
                 ✅ = הצליח · ❌ = שגיאה · ⟳ = רץ · האייקון המקורי = ממתין
               </p>
