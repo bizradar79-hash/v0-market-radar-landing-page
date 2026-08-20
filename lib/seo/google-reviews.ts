@@ -377,13 +377,22 @@ export async function fetchBusinessInfo(
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
   try {
-    // PREFER the resolved id. DataForSEO's keyword search cannot find Israeli
-    // businesses by Hebrew name (task_40102 "No Search Results" even for a
-    // business with 119 reviews), but cid/place_id lookups are exact.
+    // PREFER the resolved id. DataForSEO's plain keyword search cannot find
+    // Israeli businesses by Hebrew name (task_40102 "No Search Results" even for
+    // a business with 119 reviews), but an id lookup is exact.
+    //
+    // CRITICAL SHAPE (this endpoint only): my_business_info/live takes NO `cid`
+    // or `place_id` field — the identifier goes INSIDE `keyword`, prefixed:
+    //   keyword: "cid:194604053573767737"  /  keyword: "place_id:GhIJ…"
+    // Sending them as top-level fields left the request with no `keyword` at
+    // all, which the API reports as: Invalid Field: 'keyword'. That is why
+    // reviews broke as soon as the first cid got cached.
+    // (The reviews task_post endpoint is different — there cid/place_id ARE
+    // their own fields. See fetchReviewItems.)
     const identity: Record<string, any> = id?.cid
-      ? { cid: id.cid }
+      ? { keyword: `cid:${id.cid}` }
       : id?.placeId
-        ? { place_id: id.placeId }
+        ? { keyword: `place_id:${id.placeId}` }
         : { keyword: name.slice(0, 700) }
     const { res, data } = await dfsPost(MY_BUSINESS_LIVE, [{
       ...identity,

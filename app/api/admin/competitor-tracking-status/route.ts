@@ -1,5 +1,7 @@
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+// One competitor can take minutes (async social collections + reviews polling).
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
@@ -75,4 +77,46 @@ export async function GET(request: Request) {
     finished: names.length > 0 && done >= names.length,
     competitors,
   })
+}
+
+/**
+ * POST { company_id, competitor } — run ONE competitor for that client.
+ *
+ * The browser drives the loop (one request per competitor, awaited in turn), so
+ * this proxies to /api/competitor-tracking?only=… with the service credentials
+ * the client must never hold. Synchronous: it returns that competitor's real
+ * result, and the row is already saved when it does.
+ */
+export async function POST(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { data: role } = await supabase
+    .from('user_roles').select('is_admin').eq('user_id', user.id).single()
+  if (!role?.is_admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const body = await request.json().catch(() => ({}))
+  const companyId = String(body.company_id || '')
+  const competitor = String(body.competitor || '')
+  if (!companyId || !competitor) {
+    return NextResponse.json({ error: 'Missing company_id or competitor' }, { status: 400 })
+  }
+
+  const origin = new URL(request.url).origin
+  const qs = new URLSearchParams({ only: competitor, force: 'true' })
+  try {
+    const res = await fetch(`${origin}/api/competitor-tracking?${qs}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-user-id': companyId,
+        'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      },
+      body: JSON.stringify({}),
+    })
+    const data = await res.json().catch(() => ({}))
+    return NextResponse.json(data, { status: res.status })
+  } catch (e: any) {
+    return NextResponse.json({ error: (e?.message || 'run_failed').slice(0, 160) }, { status: 500 })
+  }
 }

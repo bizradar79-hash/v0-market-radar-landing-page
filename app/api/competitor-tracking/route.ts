@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-import { NextResponse, after } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { getFullContext } from '@/lib/context'
 import { deriveArea } from '@/lib/geo/area'
@@ -40,25 +40,26 @@ function adminDb() {
  *  - post counts are capped at the scraper (BRIGHTDATA_MAX_POSTS + lookback)
  *  - no LLM anywhere on this path
  *
- * EXECUTION MODE. Tracking five competitors means several minutes of async
- * scrapes. Two modes:
- *  - default (background=true): the loop runs inside after(), so the HTTP
- *    response returns immediately and the work continues on the server. Closing
- *    the browser tab cannot kill it — same reason /api/sync/start uses after().
- *  - background=false: await the loop and return the per-competitor results.
- *    Used by the scan (sync/run), which is itself already server-side and needs
- *    the summary for its step message.
+ * EXECUTION MODES.
+ *  - ?only=<name>  — run EXACTLY ONE competitor, synchronously, and return its
+ *    real result. This is what the admin UI drives: one request per competitor,
+ *    no chaining, no after() continuation, nothing that depends on the platform
+ *    keeping an invocation alive past its response.
+ *  - no params — run every competitor sequentially and return the summary. Used
+ *    by the weekly scan (sync/run), which is already server-side and chunked by
+ *    its own window chaining.
+ *
+ * WHY THE CHAIN IS GONE: processing five competitors across self-triggered
+ * invocations kept stalling part-way on Vercel. Each competitor is an
+ * idempotent upsert, so driving them one-per-request from the browser is
+ * strictly more reliable and fully observable — and if the tab closes, whatever
+ * finished is already saved.
  */
 export async function POST(request: Request) {
   const params = new URL(request.url).searchParams
   const force = params.get('force') === 'true'
-  // The admin module-sync button opts INTO background so the run survives the
-  // admin closing the dialog or the tab.
-  const background = params.get('background') === 'true'
-  // CHAINING (same mechanism the main scan uses to beat the function timeout):
-  // one competitor per invocation, each chaining into a fresh one.
-  const cursor = Math.max(0, Number(params.get('cursor')) || 0)
-  const chainIndex = Math.max(0, Number(params.get('chain_index')) || 0)
+  /** Run a SINGLE named competitor and return its result. */
+  const only = (params.get('only') || '').trim()
 
   const ctx = await getFullContext()
   const company: any = ctx?.company
@@ -115,13 +116,10 @@ export async function POST(request: Request) {
    */
   async function runOne(name: string): Promise<{ tracked: boolean; skipped: boolean; costUSD: number }> {
     const row = byName.get(name)
-    // A BACKGROUND run is always admin-initiated ("סרוק עכשיו"), so the
-    // staleness gate must not apply: skipping wrote no row, the progress panel
-    // counts a competitor as done only when a row lands in this run, and the
-    // most-recently-scanned competitor (typically the last in the list) sat at
-    // ⏳ forever while the chain had in fact completed. The gate still protects
-    // the automatic weekly scan, which is what it exists for.
-    if (!force && !background && isFresh(row?.scanned_at)) {
+    // Asking for ONE competitor by name is always deliberate, so the staleness
+    // gate never applies there. It still protects the automatic weekly scan,
+    // which is the only place it exists to save cost.
+    if (!force && !only && isFresh(row?.scanned_at)) {
       details.push({ name, status: 'skipped', message: `fresh (< ${TRACKING_MIN_DAYS}d)` })
       return { tracked: false, skipped: true, costUSD: 0 }
     }
@@ -171,43 +169,6 @@ export async function POST(request: Request) {
     }
   }
 
-  /**
-   * Chain into a fresh invocation for the NEXT competitor.
-   *
-   * AWAITED — this is the bug that stranded runs at 2/5. The handoff used to be
-   * `void fetch(...)`, so the after() callback resolved immediately and the
-   * platform froze the invocation before the outbound request was established.
-   * /api/sync/run's window chain awaits its re-invoke for exactly this reason;
-   * this now mirrors it, try/catch and all.
-   */
-  async function chainNext(next: number): Promise<void> {
-    if (next >= names.length) return
-    if (chainIndex >= names.length + 2) {
-      console.error(`[competitor-tracking] chain guard hit at index ${chainIndex} — stopping`)
-      return
-    }
-    const origin = new URL(request.url).origin
-    const qs = new URLSearchParams({
-      force: String(force), background: 'true',
-      cursor: String(next), chain_index: String(chainIndex + 1),
-    })
-    try {
-      await fetch(`${origin}/api/competitor-tracking?${qs}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-user-id': companyId,
-          'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        },
-        body: JSON.stringify({}),
-      })
-    } catch (e: any) {
-      // A dropped handoff strands the rest of the run; log loudly so the gap is
-      // visible in the function logs rather than looking like a silent stall.
-      console.error(`[competitor-tracking] chain handoff FAILED at cursor ${next}:`, e?.message)
-    }
-  }
-
   // Synchronous mode (the scan): process everything in this invocation. The scan
   // is already chunked by sync/run's own chaining, and it needs the summary.
   async function runAll(): Promise<{ tracked: number; skipped: number; costUSD: number }> {
@@ -222,36 +183,40 @@ export async function POST(request: Request) {
     return { tracked, skipped, costUSD }
   }
 
-  // BACKGROUND + CHAINED: this invocation handles exactly ONE competitor, then
-  // triggers a fresh invocation for the next. Five competitors sequentially in a
-  // single request exceeded the function limit and died after ~2; one per
-  // invocation gives each the full budget, mirroring how /api/sync/run chains
-  // module windows. Every competitor is an idempotent upsert, so re-running or
-  // re-entering a step is safe.
-  if (background) {
-    const name = names[cursor]
+  // SINGLE COMPETITOR — the manual path. One request, one competitor, a real
+  // answer. Saved independently, so a failure here costs nothing already done.
+  if (only) {
+    const name = names.find((n) => n === only)
+      || names.find((n) => n.trim() === only.trim())
     if (!name) {
-      return NextResponse.json({ success: true, background: true, finished: true, total: names.length })
+      return NextResponse.json({ error: `Competitor not configured: ${only}` }, { status: 400 })
     }
-    after(async () => {
-      try {
-        const r = await runOne(name)
-        await cost.flush()
-        console.log(`[competitor-tracking] ${companyId} [${cursor + 1}/${names.length}] ${name}: ${r.tracked ? 'tracked' : r.skipped ? 'fresh' : 'failed'} $${r.costUSD.toFixed(4)}`)
-      } catch (e: any) {
-        console.error('[competitor-tracking] background failed:', e?.message)
-      } finally {
-        // ALWAYS chain, even after a failure — the rest must still run.
-        if (cursor + 1 >= names.length) {
-          console.log(`[competitor-tracking] ${companyId} RUN COMPLETE — ${names.length}/${names.length} competitors processed`)
-        }
-        await chainNext(cursor + 1)
-      }
-    })
+    const r = await runOne(name)
+    await cost.flush()
+    const detail = details.find((d) => d.name === name)
+    const { data: saved } = await db
+      .from('competitor_tracking')
+      .select('competitor_name, resolved_links, sources, reviews, scanned_at')
+      .eq('company_id', companyId).eq('competitor_name', name).maybeSingle()
+    const srcs: any[] = (saved?.sources as any) || []
     return NextResponse.json({
-      success: true, background: true, total: names.length,
-      cursor, competitor: name,
-      message: `הסריקה רצה ברקע עבור ${names.length} מתחרים — אפשר לסגור את החלון`,
+      success: true,
+      competitor: name,
+      status: detail?.status || (r.tracked ? 'ok' : 'error'),
+      message: detail?.message,
+      costUSD: Math.round(r.costUSD * 10000) / 10000,
+      // Per-source truth, so the admin sees what actually came back.
+      sources: srcs.map((x) => ({ source: x.source, status: x.status, postsRecent: x.postsRecent ?? 0, error: x.error })),
+      reviews: saved?.reviews
+        ? {
+            found: (saved.reviews as any).found,
+            rating: (saved.reviews as any).rating,
+            reviewsCount: (saved.reviews as any).reviewsCount,
+            passes: (saved.reviews as any).passes,
+            error: (saved.reviews as any).error,
+          }
+        : null,
+      scannedAt: saved?.scanned_at,
     })
   }
 
