@@ -75,12 +75,14 @@ export async function PUT(request: Request) {
   // Social validation goes through the unlocker (plain HTTP can't tell a real
   // profile from a fake one) — every request is counted so the cost stays honest.
   const counter = new RequestCounter()
-  const { urls, diagnostics, aiError } = await findCompetitorLinksAI(name, knownWebsite, counter)
+  const { urls, unverified, diagnostics, aiError } = await findCompetitorLinksAI(name, knownWebsite, counter)
   return NextResponse.json({
     success: true,
     urls,
-    // Per-source outcome (found / dropped-invalid / not-found) so a zero-result
-    // run is never silent and a dropped hallucination is visible.
+    // Sources whose URL is populated but could not be confirmed (bot-blocked).
+    unverified,
+    // Per-source outcome (found / unverified / dropped-invalid / not-found) so a
+    // zero-result run is never silent and a dropped hallucination is visible.
     diagnostics,
     aiError,
     cost: { requests: counter.total, costUSD: counter.costUSD, perRequestUSD: BRIGHTDATA_COST_PER_REQ },

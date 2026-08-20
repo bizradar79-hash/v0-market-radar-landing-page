@@ -75,6 +75,8 @@ export default function CompetitorIntelDevPage() {
   const [rechecking, setRechecking] = useState<string | null>(null)
   // Per-competitor search diagnostics so a zero-result run is explainable.
   const [linkDiag, setLinkDiag] = useState<Record<number, Array<{ key: string; outcome: string; candidate?: string; reason?: string }>>>({})
+  // Sources whose URL was kept but NOT confirmed (platform blocked the check).
+  const [unverified, setUnverified] = useState<Record<number, string[]>>({})
 
   useEffect(() => {
     fetch('/api/admin/companies').then(r => r.json())
@@ -98,6 +100,8 @@ export default function CompetitorIntelDevPage() {
     setCompetitors(prev => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)))
   }
   function updateUrl(i: number, source: Source, value: string) {
+    // The admin edited it — our "not verified" note no longer applies.
+    setUnverified(prev => ({ ...prev, [i]: (prev[i] || []).filter(s => s !== source) }))
     // Typing a URL auto-selects that source; clearing it deselects.
     setCompetitors(prev => prev.map((c, idx) => (idx === i
       ? { ...c, urls: { ...c.urls, [source]: value }, selected: { ...c.selected, [source]: !!value.trim() } }
@@ -142,8 +146,10 @@ export default function CompetitorIntelDevPage() {
       }))
       const diags: Array<{ key: string; outcome: string; candidate?: string; reason?: string }> = data.diagnostics || []
       setLinkDiag(prev => ({ ...prev, [i]: diags }))
+      setUnverified(prev => ({ ...prev, [i]: data.unverified || [] }))
       const n = SOURCES.filter(src => found[src]).length
       const dropped = diags.filter(d => d.outcome === 'dropped').length
+      const unconfirmed = diags.filter(d => d.outcome === 'unverified').length
       if (n === 0) {
         toast({
           title: 'לא נמצאו לינקים — אפשר להזין ידנית',
@@ -156,8 +162,12 @@ export default function CompetitorIntelDevPage() {
         })
       } else {
         toast({
-          title: `נמצאו ואומתו ${n} לינקים`,
-          description: dropped ? `${dropped} כתובות נפסלו באימות · אפשר להשלים ידנית` : (n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined),
+          title: unconfirmed ? `נמצאו ${n} לינקים (${unconfirmed} לא אומתו)` : `נמצאו ואומתו ${n} לינקים`,
+          description: [
+            unconfirmed ? `${unconfirmed} לא ניתנו לאימות (הפלטפורמה חסמה את הבדיקה) — כדאי לבדוק ידנית` : '',
+            dropped ? `${dropped} כתובות נפסלו (כתובת לא תקינה)` : '',
+            !unconfirmed && !dropped && n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : '',
+          ].filter(Boolean).join(' · ') || undefined,
         })
       }
     } catch (e: any) {
@@ -343,13 +353,19 @@ export default function CompetitorIntelDevPage() {
                         className="h-3.5 w-3.5 accent-teal-600 disabled:opacity-40"
                       />
                       <span className={c.selected[src] ? 'font-semibold text-foreground' : ''}>{SOURCE_LABELS[src]}</span>
+                      {/* Kept + checked, but the platform blocked our check. */}
+                      {unverified[i]?.includes(src) && (
+                        <span className="text-amber-600" title="הפלטפורמה חסמה את בדיקת האימות — הכתובת תקינה מבנית אך לא אושרה">
+                          לא אומת — בדוק
+                        </span>
+                      )}
                     </label>
                     <Input
                       dir="ltr"
                       placeholder="ריק = לא ייסרק"
                       value={c.urls[src]}
                       onChange={e => updateUrl(i, src, e.target.value)}
-                      className="h-8 text-xs"
+                      className={`h-8 text-xs${unverified[i]?.includes(src) ? ' border-amber-300' : ''}`}
                     />
                   </div>
                 ))}
@@ -358,7 +374,8 @@ export default function CompetitorIntelDevPage() {
                 <p className="text-[10px] text-muted-foreground">
                   איתור: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${
                     d.outcome === 'found' ? 'אומת' :
-                    d.outcome === 'dropped' ? `נפסל באימות (${d.reason || 'לא אומת'})` :
+                    d.outcome === 'unverified' ? 'לא אומת' :
+                    d.outcome === 'dropped' ? `נפסל — כתובת לא תקינה (${d.reason || ''})` :
                     'לא נמצא'
                   }`).join(' · ')}
                 </p>

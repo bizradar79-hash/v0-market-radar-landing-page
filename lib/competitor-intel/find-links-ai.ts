@@ -16,8 +16,14 @@ import { scrapeUrl, isBrightDataConfigured, RequestCounter } from '@/lib/brightd
 export type LinkKey = 'website' | 'instagram' | 'facebook' | 'linkedin'
 export const LINK_KEYS: LinkKey[] = ['website', 'instagram', 'facebook', 'linkedin']
 
-/** found = AI returned + validated · dropped = AI returned but failed validation. */
-export type LinkOutcome = 'found' | 'dropped' | 'not_found'
+/**
+ * found      = structurally valid AND positively confirmed to exist
+ * unverified = structurally valid, but the platform blocked our check — KEPT,
+ *              flagged for the admin. Never a rejection: an anti-bot response is
+ *              not evidence the profile is fake.
+ * dropped    = structurally wrong, or positively proven not to exist
+ */
+export type LinkOutcome = 'found' | 'unverified' | 'dropped' | 'not_found'
 export interface LinkDiag {
   key: LinkKey
   outcome: LinkOutcome
@@ -27,6 +33,8 @@ export interface LinkDiag {
 }
 export interface AILinkResult {
   urls: Partial<Record<LinkKey, string>>
+  /** Keys whose URL is populated but could not be confirmed (show "לא אומת"). */
+  unverified?: LinkKey[]
   diagnostics: LinkDiag[]
   aiError?: string
 }
@@ -46,7 +54,8 @@ function extractXAIText(output: any[]): string {
 const HOST_RULES: Record<LinkKey, { host: RegExp; path?: RegExp }> = {
   website: { host: /.*/ },
   instagram: { host: /(^|\.)instagram\.com$/i, path: /^\/[A-Za-z0-9._]{2,40}\/?$/ },
-  facebook: { host: /(^|\.)facebook\.com$/i, path: /^\/(pg\/|profile\.php|people\/)?[A-Za-z0-9.\-_%]{2,80}\/?/ },
+  // /<page>, /pg/<page>, /people/<name>/<id>, or /profile.php?id=<numeric id>.
+  facebook: { host: /(^|\.)facebook\.com$/i, path: /^\/(profile\.php$|(pg\/|people\/)?[A-Za-z0-9.\-_%]{2,80}\/?)/ },
   linkedin: { host: /(^|\.)linkedin\.com$/i, path: /^\/(company|school)\/[^/]{2,100}\/?/ },
 }
 const BAD_PATH = /^\/(login|signup|accounts|explore|help|policies|privacy|terms|about|home|pages|search|feed|directory|legal)(\/|$)/i
@@ -65,6 +74,10 @@ function shapeOk(key: LinkKey, url: string): string | null {
   if (BAD_PATH.test(u.pathname)) return 'platform_page_not_profile'
   if (u.pathname === '/' || u.pathname === '') return 'platform_root_not_profile'
   if (rule.path && !rule.path.test(u.pathname)) return 'not_a_profile_path'
+  // facebook.com/profile.php is only a profile WITH its numeric id.
+  if (key === 'facebook' && u.pathname === '/profile.php' && !/^\d{3,}$/.test(u.searchParams.get('id') || '')) {
+    return 'profile_php_without_id'
+  }
   return null
 }
 
@@ -88,56 +101,85 @@ async function httpProbe(url: string): Promise<{ status: number; body?: string }
   }
 }
 
-/** Blocked/anti-bot responses — inconclusive, not a verdict. */
-const BLOCKED = new Set([401, 403, 429, 999, 0, 400])
+/**
+ * Three verdicts, not two. The old boolean conflated "proven fake" with "we
+ * couldn't tell", so a Facebook page that happened to serve an anti-bot blank
+ * was reported as נפסל — and the SAME url validated fine on the next run. A
+ * blocked response is absence of evidence, never evidence of absence.
+ */
+export type Verdict = 'valid' | 'unverified' | 'invalid'
+interface Check { verdict: Verdict; reason?: string }
 
-// A profile page that really exists renders the handle plus profile furniture.
+// A profile page that really rendered shows the handle plus profile furniture.
 const PROFILE_SIGNAL = /followers|following|posts|likes|employees|עוקבים|עוקב|פוסטים|לייקים|עובדים/i
+// Positive proof of NON-existence — the only text that may reject a URL.
 const NOT_AVAILABLE = /Sorry, this page isn'?t available|Page Not Found|content isn'?t available|This page isn'?t available|page you requested was not found|הדף אינו זמין|העמוד לא נמצא/i
+/** A rendered page this short is an anti-bot stub, not a verdict. */
+const RENDERED_MIN = 1500
 
 /**
- * MEASURED, not assumed: a plain HTTP GET cannot validate a social profile.
- * instagram.com/<real> and instagram.com/<nonexistent> BOTH return HTTP 200 with
- * the same JS shell, and facebook.com returns 400 for real and fake pages alike.
- * So social URLs are validated through BrightData's unlocker, which renders the
- * real page — and we require positive proof (the handle + profile furniture)
- * rather than merely "the request didn't fail".
+ * Platforms that routinely serve blocked/blank pages to automated checks. For
+ * these, STRUCTURE is the primary signal and the fetch is a bonus: it can only
+ * upgrade to 'valid' or reject on an explicit not-found marker — never on noise.
+ * (Instagram renders reliably through the unlocker, so it stays strict.)
  */
-async function validateSocial(url: string, counter?: RequestCounter): Promise<{ ok: boolean; reason?: string }> {
-  if (!isBrightDataConfigured()) return { ok: false, reason: 'no_validator' }
-  const r = await scrapeUrl(url, counter)
-  const text = (r.text || '')
-  if (!r.ok || text.trim().length < 200) return { ok: false, reason: `unverified_${r.error || 'empty'}`.slice(0, 40) }
-  if (NOT_AVAILABLE.test(text)) return { ok: false, reason: 'profile_not_found' }
-
-  // The handle/slug the URL claims must actually appear on the rendered page.
-  const slug = decodeURIComponent(new URL(url).pathname.replace(/\/+$/, '').split('/').pop() || '')
-  if (slug && slug.length > 2 && !text.toLowerCase().includes(slug.toLowerCase())) {
-    return { ok: false, reason: 'handle_not_on_page' }
-  }
-  if (!PROFILE_SIGNAL.test(text)) return { ok: false, reason: 'no_profile_signal' }
-  return { ok: true }
+const ANTI_BOT: Record<LinkKey, boolean> = {
+  website: false, instagram: false, facebook: true, linkedin: true,
 }
 
-export async function validateLink(key: LinkKey, url: string, counter?: RequestCounter): Promise<{ ok: boolean; reason?: string }> {
-  const shape = shapeOk(key, url)
-  if (shape) return { ok: false, reason: shape }
-  if (key !== 'website') return validateSocial(url, counter)
+async function checkSocial(key: LinkKey, url: string, counter?: RequestCounter): Promise<Check> {
+  // Structure already passed at this point. Decide what a failed fetch means.
+  const inconclusive: Check = ANTI_BOT[key]
+    ? { verdict: 'unverified', reason: 'platform_blocked_check' }
+    : { verdict: 'unverified', reason: 'check_inconclusive' }
 
-  // A plain website is honest over HTTP — a 404 is a real 404.
+  if (!isBrightDataConfigured()) return { verdict: 'unverified', reason: 'no_validator' }
+  const r = await scrapeUrl(url, counter)
+  const text = r.text || ''
+  // Empty / errored fetch → we learned nothing. Keep the URL, flag it.
+  if (!r.ok || text.trim().length < 200) return inconclusive
+
+  // Explicit "this page does not exist" is the ONLY basis for rejection.
+  if (NOT_AVAILABLE.test(text)) return { verdict: 'invalid', reason: 'profile_not_found' }
+
+  const rendered = text.trim().length >= RENDERED_MIN && PROFILE_SIGNAL.test(text)
+  const slug = decodeURIComponent(new URL(url).pathname.replace(/\/+$/, '').split('/').pop() || '')
+  const handleOnPage = !slug || slug.length <= 2 || text.toLowerCase().includes(slug.toLowerCase())
+
+  if (rendered && handleOnPage) return { verdict: 'valid' }
+  // A fully-rendered profile page that never mentions its own handle is a real
+  // mismatch — but only trust that when the page actually rendered.
+  if (rendered && !handleOnPage) {
+    return ANTI_BOT[key] ? { verdict: 'unverified', reason: 'handle_not_on_page' } : { verdict: 'invalid', reason: 'handle_not_on_page' }
+  }
+  return inconclusive
+}
+
+/**
+ * Deterministic given the same candidate: the structural gate runs first and
+ * always produces the same answer, and no network outcome can turn a
+ * well-formed URL into a rejection — only an explicit not-found marker can.
+ */
+export async function validateLink(key: LinkKey, url: string, counter?: RequestCounter): Promise<Check> {
+  // 1. STRUCTURE — the primary, fully deterministic signal.
+  const shape = shapeOk(key, url)
+  if (shape) return { verdict: 'invalid', reason: shape }
+
+  if (key !== 'website') return checkSocial(key, url, counter)
+
+  // 2. A plain website is honest over HTTP — a 404 there is a real 404.
   const probe = await httpProbe(url)
   if (probe.status >= 200 && probe.status < 400) {
-    if (probe.body && NOT_AVAILABLE.test(probe.body)) return { ok: false, reason: 'page_not_available' }
-    return { ok: true }
+    if (probe.body && NOT_AVAILABLE.test(probe.body)) return { verdict: 'invalid', reason: 'page_not_available' }
+    return { verdict: 'valid' }
   }
-  if (probe.status === 404 || probe.status === 410) return { ok: false, reason: `http_${probe.status}` }
-  // Blocked or network error → let the unlocker settle it.
-  if (BLOCKED.has(probe.status) && isBrightDataConfigured()) {
+  if (probe.status === 404 || probe.status === 410) return { verdict: 'invalid', reason: `http_${probe.status}` }
+  // Blocked or network error → ask the unlocker; still inconclusive → keep+flag.
+  if (isBrightDataConfigured()) {
     const r = await scrapeUrl(url, counter)
-    if (r.ok && (r.text || '').trim().length > 200) return { ok: true }
-    return { ok: false, reason: `unverified_${r.error || 'empty'}`.slice(0, 40) }
+    if (r.ok && (r.text || '').trim().length > 200) return { verdict: 'valid' }
   }
-  return { ok: false, reason: `unverified_http_${probe.status}` }
+  return { verdict: 'unverified', reason: `unreachable_http_${probe.status}` }
 }
 
 // ── The Grok call ──────────────────────────────────────────────────────────
@@ -212,23 +254,27 @@ export async function findCompetitorLinksAI(
   const urls: Partial<Record<LinkKey, string>> = {}
   const diagnostics: LinkDiag[] = []
 
+  const unverified: LinkKey[] = []
   await Promise.all(LINK_KEYS.map(async (key) => {
     const candidate = raw[key]
     if (!candidate) {
       diagnostics.push({ key, outcome: 'not_found', url: '', reason: error || 'ai_returned_null' })
       return
     }
-    const v = await validateLink(key, candidate, counter)
-    if (v.ok) {
-      urls[key] = candidate
-      diagnostics.push({ key, outcome: 'found', url: candidate })
-    } else {
-      // Hallucinated or dead — never surfaced to the admin.
-      diagnostics.push({ key, outcome: 'dropped', url: '', candidate, reason: v.reason })
+    const { verdict, reason } = await validateLink(key, candidate, counter)
+    if (verdict === 'invalid') {
+      // Structurally wrong, or proven not to exist — never surfaced.
+      diagnostics.push({ key, outcome: 'dropped', url: '', candidate, reason })
+      return
     }
+    // 'valid' and 'unverified' both populate the field; only the label differs,
+    // so a bot-blocked platform never costs the admin a real link.
+    urls[key] = candidate
+    if (verdict === 'unverified') unverified.push(key)
+    diagnostics.push({ key, outcome: verdict === 'valid' ? 'found' : 'unverified', url: candidate, reason })
   }))
 
   diagnostics.sort((a, b) => LINK_KEYS.indexOf(a.key) - LINK_KEYS.indexOf(b.key))
   console.log('[find-links-ai]', clean, JSON.stringify({ raw, diagnostics, aiError: error }))
-  return { urls, diagnostics, aiError: error }
+  return { urls, unverified, diagnostics, aiError: error }
 }
