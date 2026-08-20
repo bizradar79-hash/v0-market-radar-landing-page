@@ -215,6 +215,22 @@ export const THEME_STOP = new Set([
   'the','and','for','with','you','your','our','this','that','from','are','was','have','has','all','new','out','get','can','will','more','about','how','why','what',
 ])
 
+/**
+ * norm() folds Hebrew final letters (לימון → לימונ), which is right for MATCHING
+ * but wrong for DISPLAY — a client reading "לימונ" sees a typo. We therefore
+ * keep, for each normalized token, the first original spelling we saw and show
+ * that instead.
+ */
+export function displayFormOf(normalized: string, sources: string[]): string {
+  for (const text of sources) {
+    for (const raw of (text || '').split(/[\s,.;:!?()\[\]"'׳״]+/)) {
+      const word = raw.replace(/^#/, '').trim()
+      if (word && norm(word) === normalized) return word
+    }
+  }
+  return normalized
+}
+
 export function themeTokens(text: string): string[] {
   return norm(text)
     .split(/\s+/)
@@ -279,7 +295,8 @@ export function computeInsights(
     .filter(([, c]) => c >= 2) // must recur
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
-    .map(([term, count]) => ({ term, count }))
+    // Show the original spelling, not the normalized one.
+    .map(([term, count]) => ({ term: displayFormOf(term, texts), count }))
   if (terms.length > 0 && texts.length >= 3) {
     out.themes = { terms, text: `הכי מדברים על: ${terms.map((t) => `"${t.term}" (${t.count})`).join(' · ')}` }
   }

@@ -7,7 +7,7 @@
  * Every insight degrades gracefully: when the data can't support it, the field
  * is omitted rather than guessed or shown as a bare blank.
  */
-import { themeTokens } from './summarize'
+import { themeTokens, displayFormOf } from './summarize'
 import { RECENCY_DAYS } from './summarize'
 import type { GoogleReview } from '@/lib/seo/google-reviews'
 
@@ -42,6 +42,8 @@ export interface ReviewSnapshot {
   mapsUrl?: string
   /** Maps-search candidates + name scores, for diagnosing a missing match. */
   candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
+  /** Which resolution passes ran and how each ended (name@area, brand@country…). */
+  passes?: string
   rating: number | null
   reviewsCount: number | null
   reviews: GoogleReview[]
@@ -128,7 +130,8 @@ export function computeReviewInsights(
     .filter(([, c]) => c >= 2) // must actually recur
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
-    .map(([term, count]) => ({ term, count }))
+    // Show the original spelling, not the normalized (sofit-folded) one.
+    .map(([term, count]) => ({ term: displayFormOf(term, recent.map((r) => r.text || '')), count }))
   if (terms.length > 0 && recent.filter((r) => (r.text || '').trim()).length >= 3) {
     out.themes = { terms, text: `לקוחות מזכירים: ${terms.map((t) => `"${t.term}" (${t.count})`).join(' · ')}` }
   }

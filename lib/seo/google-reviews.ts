@@ -57,6 +57,17 @@ const CITY_MAP: Record<string, string> = {
   'רעננה': 'Raanana,Israel', 'מודיעין': 'Modiin,Israel', 'אילת': 'Eilat,Israel',
   'טבריה': 'Tiberias,Israel', 'דימונה': 'Dimona,Israel', 'עפולה': 'Afula,Israel',
   'נצרת': 'Nazareth,Israel', 'לוד': 'Lod,Israel', 'רמלה': 'Ramla,Israel',
+  'בני ברק': 'Bnei Brak,Israel', 'גבעתיים': 'Givatayim,Israel', 'ראש העין': 'Rosh Haayin,Israel',
+  'אור יהודה': 'Or Yehuda,Israel', 'יהוד': 'Yehud,Israel', 'הוד השרון': 'Hod Hasharon,Israel',
+  'ראשל"צ': 'Rishon LeZion,Israel', 'קריית גת': 'Kiryat Gat,Israel', 'נס ציונה': 'Ness Ziona,Israel',
+  'בית שמש': 'Beit Shemesh,Israel', 'עכו': 'Acre,Israel', 'קריית שמונה': 'Kiryat Shmona,Israel',
+  'אריאל': 'Ariel,Israel', 'שדרות': 'Sderot,Israel', 'ערד': 'Arad,Israel', 'צפת': 'Safed,Israel',
+}
+
+/** The DataForSEO location a given area maps to — used to compare passes. */
+export function mappedLocationLabel(area?: string): string {
+  const loc = dfsLocation(area)
+  return String(loc.location_name || loc.location_code || 'Israel')
 }
 
 /**
@@ -227,6 +238,25 @@ export function shareBrandToken(query: string, candidate: string): boolean {
   return brandTokens(query).some((t) => tokenHits(t, cTokens, cJoined))
 }
 
+/**
+ * The keyword to search Maps with. Generic words steer a Maps query toward the
+ * whole category — searching "לימון ייעוץ משכנתאות" surfaces the mortgage-advisor
+ * pack, while "לימון" finds the business. So when a name has a distinctive brand
+ * word we search on THAT, and still match the full name against the results.
+ */
+export function searchKeyword(name: string): string {
+  const brand = brandTokens(name)
+  const all = norm(name).split(/\s+/).filter(Boolean)
+  // Only narrow when stripping actually removed generic noise and left something
+  // substantial; otherwise the original name is the better query.
+  if (!brand.length || brand.length === all.length) return name.trim()
+  const kept = name.trim().split(/\s+/).filter((w) => {
+    const n = norm(w)
+    return brand.some((b) => n === b || n.includes(b) || b.includes(n))
+  })
+  return kept.length ? kept.join(' ') : name.trim()
+}
+
 export interface MapsMatch extends BusinessInfo {
   costUSD: number
   error?: string
@@ -239,13 +269,13 @@ export interface MapsMatch extends BusinessInfo {
  * match by name before trusting it. Never throws.
  */
 export async function searchBusinessOnMaps(
-  name: string, locationName = 'Israel',
+  name: string, locationName = 'Israel', keywordOverride?: string,
 ): Promise<MapsMatch> {
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
   try {
     const { res, data } = await dfsPost(MAPS_SEARCH_LIVE, [{
-      keyword: name.slice(0, 700),
+      keyword: (keywordOverride || name).slice(0, 700),
       ...dfsLocation(locationName),
       language_code: 'he',
     }], auth, 45000)
@@ -409,7 +439,9 @@ async function fetchReviewItems(
  * Google profile returns found:false with the reason, not an error state.
  */
 export async function fetchGoogleReviews(
-  name: string, locationName = 'Israel', id?: { cid?: string; placeId?: string },
+  name: string, locationName = 'Israel',
+  id?: { cid?: string; placeId?: string },
+  keywordOverride?: string,
 ): Promise<ReviewsFetch> {
   const auth = authHeader()
   if (!auth) {
@@ -420,7 +452,7 @@ export async function fetchGoogleReviews(
   // Google Maps search resolves the business from name + the client's city.
   const info: MapsMatch = id?.cid || id?.placeId
     ? { ...(await fetchBusinessInfo(name, locationName, id)) }
-    : await searchBusinessOnMaps(name, locationName)
+    : await searchBusinessOnMaps(name, locationName, keywordOverride)
 
   if (!info.found) {
     return {

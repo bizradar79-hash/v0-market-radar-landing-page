@@ -9,8 +9,13 @@ import { deriveArea } from '@/lib/geo/area'
 import { MAX_DIRECT_COMPETITORS } from '@/lib/flags'
 import { trackCompetitor, isFresh, TRACKING_MIN_DAYS, type ResolvedLinks } from '@/lib/competitor-intel/engine'
 
-/** Per-competitor wall-clock budget, so one hung scrape can't starve the rest. */
-const COMPETITOR_BUDGET_MS = Number(process.env.COMPETITOR_TIME_BUDGET_MS) || 240000
+/**
+ * Per-competitor wall-clock budget. MUST stay comfortably below maxDuration
+ * (300s): if the platform kills the invocation first, the finally{} never runs
+ * and the chain dies silently. 150s leaves ~150s of headroom for the upsert and
+ * the awaited handoff, so the timeout always fires before the platform does.
+ */
+const COMPETITOR_BUDGET_MS = Number(process.env.COMPETITOR_TIME_BUDGET_MS) || 150000
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 function adminDb() {
@@ -146,23 +151,41 @@ export async function POST(request: Request) {
     }
   }
 
-  /** Chain into a fresh invocation for the NEXT competitor. */
-  function chainNext(next: number) {
-    if (next >= names.length || chainIndex >= names.length + 2) return
+  /**
+   * Chain into a fresh invocation for the NEXT competitor.
+   *
+   * AWAITED — this is the bug that stranded runs at 2/5. The handoff used to be
+   * `void fetch(...)`, so the after() callback resolved immediately and the
+   * platform froze the invocation before the outbound request was established.
+   * /api/sync/run's window chain awaits its re-invoke for exactly this reason;
+   * this now mirrors it, try/catch and all.
+   */
+  async function chainNext(next: number): Promise<void> {
+    if (next >= names.length) return
+    if (chainIndex >= names.length + 2) {
+      console.error(`[competitor-tracking] chain guard hit at index ${chainIndex} — stopping`)
+      return
+    }
     const origin = new URL(request.url).origin
     const qs = new URLSearchParams({
       force: String(force), background: 'true',
       cursor: String(next), chain_index: String(chainIndex + 1),
     })
-    void fetch(`${origin}/api/competitor-tracking?${qs}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-user-id': companyId,
-        'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      },
-      body: JSON.stringify({}),
-    }).catch((e: any) => console.error('[competitor-tracking] chain failed:', e?.message))
+    try {
+      await fetch(`${origin}/api/competitor-tracking?${qs}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-user-id': companyId,
+          'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        },
+        body: JSON.stringify({}),
+      })
+    } catch (e: any) {
+      // A dropped handoff strands the rest of the run; log loudly so the gap is
+      // visible in the function logs rather than looking like a silent stall.
+      console.error(`[competitor-tracking] chain handoff FAILED at cursor ${next}:`, e?.message)
+    }
   }
 
   // Synchronous mode (the scan): process everything in this invocation. The scan
@@ -199,7 +222,7 @@ export async function POST(request: Request) {
         console.error('[competitor-tracking] background failed:', e?.message)
       } finally {
         // ALWAYS chain, even after a failure — the rest must still run.
-        chainNext(cursor + 1)
+        await chainNext(cursor + 1)
       }
     })
     return NextResponse.json({

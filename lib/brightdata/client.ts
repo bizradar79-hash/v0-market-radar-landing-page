@@ -572,6 +572,13 @@ function parseRows(text: string): any[] {
  */
 export async function scrapeSocialProfile(
   platform: SocialPlatform, profileUrl: string, counter?: RequestCounter,
+  /**
+   * Optional poll ceiling. The dev tab waits the full default; the CHAINED
+   * client scan passes a shorter one so a slow collection can't blow the
+   * per-competitor budget — the snapshot is stored as 'processing' and read on
+   * the next scan with no re-trigger cost.
+   */
+  pollTimeoutMs?: number,
 ): Promise<StructuredScrapeResult> {
   const url = (profileUrl || '').trim()
   if (!url) return { ok: false, status: 'skipped', posts: [], error: 'no_url' }
@@ -644,7 +651,8 @@ export async function scrapeSocialProfile(
 
   // Poll until a TERMINAL status ('ready' | 'failed'). Non-terminal statuses
   // (collecting/digesting/running/…) just mean "still working" — keep going.
-  const deadline = Date.now() + POLL_TIMEOUT_MS
+  const pollBudget = pollTimeoutMs && pollTimeoutMs > 0 ? pollTimeoutMs : POLL_TIMEOUT_MS
+  const deadline = Date.now() + pollBudget
   let lastStatus = ''
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS)
@@ -667,7 +675,7 @@ export async function scrapeSocialProfile(
   if (Date.now() >= deadline) {
     return {
       ok: false, status: 'processing', posts: [], url, snapshotId,
-      error: `הסריקה עדיין רצה אחרי ${Math.round(POLL_TIMEOUT_MS / 1000)} שניות${lastStatus ? ` (סטטוס: ${lastStatus})` : ''} — לחץ "בדוק שוב" בעוד דקה (ללא עלות נוספת)`,
+      error: `הסריקה עדיין רצה אחרי ${Math.round(pollBudget / 1000)} שניות${lastStatus ? ` (סטטוס: ${lastStatus})` : ''} — לחץ "בדוק שוב" בעוד דקה (ללא עלות נוספת)`,
     }
   }
 

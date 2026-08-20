@@ -25,7 +25,16 @@ import {
 } from './summarize'
 import { findCompetitorLinksAI } from './find-links-ai'
 import { computeReviewInsights, type ReviewSnapshot } from './review-insights'
-import { fetchGoogleReviews, isReviewsConfigured } from '@/lib/seo/google-reviews'
+import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, mappedLocationLabel } from '@/lib/seo/google-reviews'
+import { norm } from '@/lib/match/hebrew-core'
+
+/**
+ * Poll ceiling for a competitor's async social collections on the TRACKING path.
+ * The dev tab can afford to wait 5 minutes; a chained scan cannot — the
+ * per-competitor budget is 150s, so a source that hasn't finished by then is
+ * stored as 'processing' and picked up on the next scan (no re-trigger cost).
+ */
+export const TRACKING_POLL_TIMEOUT_MS = Number(process.env.COMPETITOR_TRACKING_POLL_MS) || 100000
 
 export interface ResolvedLinks {
   website?: string
@@ -119,16 +128,51 @@ export async function trackCompetitor(opts: {
     const id = links.cid ? { cid: links.cid } : undefined
     const area = (opts.areaSearch || '').trim()
 
-    let r = await fetchGoogleReviews(name, area || 'Israel', id)
-    const missed = !r.found && (r.error === 'no_maps_results' || r.error === 'no_confident_name_match' || /מיקום/.test(r.error || ''))
-    if (missed && area && area !== 'Israel' && !id) {
-      const wide = await fetchGoogleReviews(name, 'Israel')
-      if (wide.found) {
-        r = { ...wide, costUSD: r.costUSD + wide.costUSD }
-      } else {
-        r = { ...wide, costUSD: r.costUSD + wide.costUSD, error: wide.error || r.error }
-      }
+    // A cached cid is exact — no search needed.
+    if (id) return shapeReviews(await fetchGoogleReviews(name, area || 'Israel', id))
+
+    // PASS PLAN. Each pass changes ONE variable, widest signal last:
+    //   1. full name  @ client's area   — best case, competitor is local
+    //   2. full name  @ country         — competitor is elsewhere in Israel
+    //   3. brand only @ country         — generic words were steering the query
+    //      ("לימון ייעוץ משכנתאות" returns the mortgage-advisor pack; "לימון"
+    //       returns the business)
+    const brandKw = searchKeyword(name)
+    const passes: Array<{ label: string; location: string; keyword: string }> = [
+      { label: 'name@area', location: area || 'Israel', keyword: name },
+    ]
+    // Compare the MAPPED locations, not the raw Hebrew: deriveArea returns
+    // 'ישראל', which never equals the ASCII 'Israel', so a national client used
+    // to fire an identical second search and learn nothing.
+    if (mappedLocationLabel(area) !== mappedLocationLabel('Israel')) {
+      passes.push({ label: 'name@country', location: 'Israel', keyword: name })
     }
+    if (norm(brandKw) !== norm(name)) {
+      passes.push({ label: 'brand@country', location: 'Israel', keyword: brandKw })
+    }
+
+    let last: Awaited<ReturnType<typeof fetchGoogleReviews>> | null = null
+    let spent = 0
+    const tried: string[] = []
+    for (const p of passes) {
+      const r = await fetchGoogleReviews(name, p.location, undefined, p.keyword)
+      spent += r.costUSD
+      tried.push(`${p.label}:${r.found ? 'found' : (r.error || 'empty')}`)
+      last = r
+      if (r.found) break
+      // Only a MISS is worth widening; a hard failure (bad credentials, provider
+      // error) will fail identically on the next pass, so stop and report it.
+      const miss = r.error === 'no_maps_results' || r.error === 'no_confident_name_match'
+      if (!miss) break
+    }
+    const r = last!
+    // Which passes ran and how each ended — so a miss is diagnosable without
+    // guessing at what we searched for.
+    return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
+  }
+
+  /** Shared mapping from a provider result to the stored snapshot. */
+  function shapeReviews(r: any, passLog?: string): ResearchReviews {
     return {
       found: r.found,
       title: r.title,
@@ -142,11 +186,11 @@ export async function trackCompetitor(opts: {
       insights: r.found ? computeReviewInsights(r) : undefined,
       capturedAt: scannedAt,
       costUSD: r.costUSD,
-      // Kept and surfaced: "no listing" and "search failed" are different
-      // outcomes, and collapsing them made this module undiagnosable.
+      passes: passLog,
       error: r.error,
     }
   }
+
   const reviewsPromise: Promise<ResearchReviews | null> = resolveReviews().catch((e: any) => ({
     found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
     capturedAt: scannedAt, error: (e?.message || 'reviews_failed').slice(0, 60),
@@ -160,7 +204,7 @@ export async function trackCompetitor(opts: {
       if (!isBrightDataConfigured()) return { source, status: 'skipped', error: 'scraper_not_configured' }
       try {
         if (source !== 'website') {
-          const t = await scrapeSocialProfile(source as SocialPlatform, url, counter)
+          const t = await scrapeSocialProfile(source as SocialPlatform, url, counter, TRACKING_POLL_TIMEOUT_MS)
           const recent = filterRecentPosts(t.posts)
           return {
             source,
