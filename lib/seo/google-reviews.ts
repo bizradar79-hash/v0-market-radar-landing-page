@@ -4,18 +4,30 @@
  * another endpoint family on the provider we already pay for.
  *
  * TWO CALLS, on purpose:
- *  1. my_business_info/live  — LIVE, one request: rating, votes_count, cid,
- *     place_id, address. This is also how we RESOLVE the business identity.
+ *  1. serp/google/maps/live/advanced — LIVE Google MAPS SEARCH. Returns ranked
+ *     candidates, each with cid, place_id, title, rating.value, rating.votes_count
+ *     and address. This resolves the business AND gives us the standing, so no
+ *     separate my_business_info call is needed.
  *  2. reviews/task_post + task_get — review TEXT is task-based (no live
- *     variant exists), so it's posted then polled. We pass the `cid` resolved
- *     in step 1 so the reviews are certainly the same business, not a
- *     same-named one in another city.
+ *     variant exists), so it's posted then polled, keyed on the `cid` resolved
+ *     in step 1 — certainly the same business, not a same-named one elsewhere.
+ *
+ * WHY MAPS SEARCH AND NOT my_business_info: that endpoint is a Knowledge-Panel
+ * style EXACT lookup — it resolves one unambiguous entity or returns nothing, and
+ * for Hebrew business names it returned task_40102 "No Search Results" even for a
+ * business with 119 reviews. Maps search is what a person typing into Google Maps
+ * does; Google Maps handles Hebrew natively, and we get a candidate LIST we can
+ * match against instead of an all-or-nothing answer.
  *
  * Cost is read from DataForSEO's own `cost` field on each response — EXACT,
  * never estimated (same discipline as the BrightData request counting).
  */
+import { norm } from '@/lib/match/hebrew-core'
+
 const BASE = 'https://api.dataforseo.com/v3/business_data/google'
 const MY_BUSINESS_LIVE = `${BASE}/my_business_info/live`
+/** Google Maps SERP — a real Maps search, not an exact-entity lookup. */
+const MAPS_SEARCH_LIVE = 'https://api.dataforseo.com/v3/serp/google/maps/live/advanced'
 const REVIEWS_POST = `${BASE}/reviews/task_post`
 const REVIEWS_GET = `${BASE}/reviews/task_get`
 
@@ -81,6 +93,7 @@ export interface BusinessInfo {
   reviewsCount: number | null
 }
 export interface ReviewsFetch extends BusinessInfo {
+  candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
   reviews: GoogleReview[]
   /** EXACT — summed from DataForSEO's own `cost` field per task. */
   costUSD: number
@@ -124,6 +137,90 @@ async function dfsPost(url: string, body: any, auth: string, timeoutMs = 30000) 
     signal: AbortSignal.timeout(timeoutMs),
   })
   return { res, data: await res.json().catch(() => ({})) }
+}
+
+// ── Name matching ──────────────────────────────────────────────────────────
+// A Maps search returns a RANKED LIST, so we must confirm the top hit is really
+// our competitor. Matching on normalized Hebrew tokens (sofit-folded, via
+// hebrew-core) rather than raw strings, because "מאי פיננסים" and
+// "מאי פיננסים - יועץ משכנתאות" are the same business.
+const MIN_NAME_SCORE = Number(process.env.DFS_MIN_NAME_SCORE) || 0.6
+
+export function nameScore(query: string, candidate: string): number {
+  const q = norm(query).split(/\s+/).filter((t) => t.length >= 2)
+  const c = new Set(norm(candidate).split(/\s+/).filter(Boolean))
+  if (!q.length || !c.size) return 0
+  const hit = q.filter((t) => c.has(t)).length
+  // Share of the QUERY's tokens present in the candidate: a longer candidate
+  // title ("… - יועץ משכנתאות בדימונה") must not be penalised for extra words.
+  return hit / q.length
+}
+
+export interface MapsMatch extends BusinessInfo {
+  costUSD: number
+  error?: string
+  /** Every candidate considered, for diagnosing a wrong / missing match. */
+  candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
+}
+
+/**
+ * Step 1 — find the business with a real Google Maps search, then CONFIRM the
+ * match by name before trusting it. Never throws.
+ */
+export async function searchBusinessOnMaps(
+  name: string, locationName = 'Israel',
+): Promise<MapsMatch> {
+  const auth = authHeader()
+  if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
+  try {
+    const { res, data } = await dfsPost(MAPS_SEARCH_LIVE, [{
+      keyword: name.slice(0, 700),
+      ...dfsLocation(locationName),
+      language_code: 'he',
+    }], auth, 45000)
+    const { node, error, cost } = taskOf(data)
+    if (!res.ok || error) {
+      return { found: false, rating: null, reviewsCount: null, costUSD: cost, error: error || `http_${res.status}` }
+    }
+
+    const items: any[] = node?.result?.[0]?.items || []
+    const scored = items
+      .filter((it) => it && (it.title || it.cid))
+      .map((it) => ({
+        it,
+        score: nameScore(name, it.title || ''),
+        title: it.title || '',
+        cid: it.cid ? String(it.cid) : '',
+        address: it.address || '',
+      }))
+      .sort((a, b) => b.score - a.score)
+
+    const diag = scored.slice(0, 5).map(({ title, score, cid, address }) => ({ title, score: Math.round(score * 100) / 100, cid, address }))
+    const best = scored[0]
+    // No confident match is an HONEST empty, not a wrong business.
+    if (!best || best.score < MIN_NAME_SCORE) {
+      return {
+        found: false, rating: null, reviewsCount: null, costUSD: cost,
+        error: items.length ? 'no_confident_name_match' : 'no_maps_results',
+        candidates: diag,
+      }
+    }
+    const it = best.it
+    return {
+      found: true,
+      title: it.title || '',
+      address: it.address || '',
+      cid: best.cid,
+      placeId: it.place_id || '',
+      // Maps returns the standing too — no extra call needed.
+      rating: typeof it.rating?.value === 'number' ? it.rating.value : null,
+      reviewsCount: typeof it.rating?.votes_count === 'number' ? it.rating.votes_count : null,
+      costUSD: cost,
+      candidates: diag,
+    }
+  } catch (e: any) {
+    return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: (e?.message || 'maps_search_failed').slice(0, 60) }
+  }
 }
 
 /** Step 1 — resolve the business + its live rating / review count. */
@@ -237,17 +334,24 @@ export async function fetchGoogleReviews(
   if (!auth) {
     return { found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0, error: 'missing_credentials' }
   }
-  const info = await fetchBusinessInfo(name, locationName, id)
+
+  // An explicit id (admin override) skips the search entirely; otherwise a real
+  // Google Maps search resolves the business from name + the client's city.
+  const info: MapsMatch = id?.cid || id?.placeId
+    ? { ...(await fetchBusinessInfo(name, locationName, id)) }
+    : await searchBusinessOnMaps(name, locationName)
+
   if (!info.found) {
-    return { ...info, reviews: [], costUSD: info.costUSD, error: info.error || 'no_google_business_profile' }
+    return {
+      ...info, reviews: [], costUSD: info.costUSD,
+      error: info.error || 'no_google_business_profile',
+    }
   }
   // A business with zero reviews needs no second (billed) call.
   if (!info.reviewsCount) return { ...info, reviews: [], costUSD: info.costUSD }
 
-  // The id from discovery wins; info.cid is the fallback when we looked the
-  // business up by keyword and it happened to work.
   const r = await fetchReviewItems(
-    { cid: id?.cid || info.cid, placeId: id?.placeId, locationName }, auth,
+    { cid: id?.cid || info.cid, placeId: id?.placeId || info.placeId, locationName }, auth,
   )
   return { ...info, reviews: r.reviews, costUSD: info.costUSD + r.costUSD, error: r.error }
 }

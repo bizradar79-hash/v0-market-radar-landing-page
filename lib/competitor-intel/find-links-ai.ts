@@ -12,10 +12,13 @@
  * empty field the admin can paste into than a confident wrong link.
  */
 import { scrapeUrl, isBrightDataConfigured, RequestCounter } from '@/lib/brightdata/client'
-import { resolveMapsId } from './maps-id'
 
-export type LinkKey = 'website' | 'instagram' | 'facebook' | 'linkedin' | 'googleMaps'
-export const LINK_KEYS: LinkKey[] = ['website', 'instagram', 'facebook', 'linkedin', 'googleMaps']
+// NOTE: the Google Maps listing is deliberately NOT discovered here. Maps
+// listing URLs are not in the organic web index, so a web-search model can
+// never return one — it answered null every time. The business is resolved by
+// DataForSEO's own Maps search instead (lib/seo/google-reviews).
+export type LinkKey = 'website' | 'instagram' | 'facebook' | 'linkedin'
+export const LINK_KEYS: LinkKey[] = ['website', 'instagram', 'facebook', 'linkedin']
 
 /**
  * found      = structurally valid AND positively confirmed to exist
@@ -58,9 +61,6 @@ const HOST_RULES: Record<LinkKey, { host: RegExp; path?: RegExp }> = {
   // /<page>, /pg/<page>, /people/<name>/<id>, or /profile.php?id=<numeric id>.
   facebook: { host: /(^|\.)facebook\.com$/i, path: /^\/(profile\.php$|(pg\/|people\/)?[A-Za-z0-9.\-_%]{2,80}\/?)/ },
   linkedin: { host: /(^|\.)linkedin\.com$/i, path: /^\/(company|school)\/[^/]{2,100}\/?/ },
-  // The Google Business listing. Accepts canonical /maps/place URLs, ?cid=/
-  // ?ludocid= links, and the short forms — anything an id can be pulled from.
-  googleMaps: { host: /(^|\.)(google\.[a-z.]+|goo\.gl|maps\.app\.goo\.gl|g\.page)$/i },
 }
 const BAD_PATH = /^\/(login|signup|accounts|explore|help|policies|privacy|terms|about|home|pages|search|feed|directory|legal)(\/|$)/i
 const BAD_SITE = /google\.|gstatic|instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com|wikipedia\.org|yelp\.|zap\.co\.il|\.gov\./i
@@ -70,14 +70,6 @@ function shapeOk(key: LinkKey, url: string): string | null {
   try { u = new URL(url) } catch { return 'not_a_url' }
   if (!/^https?:$/.test(u.protocol)) return 'bad_protocol'
   const rule = HOST_RULES[key]
-  if (key === 'googleMaps') {
-    if (!rule.host.test(u.hostname)) return 'not_a_google_maps_url'
-    // A Google SEARCH url is not a listing — the id lives on a /maps link.
-    if (/(^|\.)google\.[a-z.]+$/i.test(u.hostname) && !/^\/maps/.test(u.pathname) && !u.searchParams.get('cid') && !u.searchParams.get('ludocid')) {
-      return 'not_a_maps_listing'
-    }
-    return null
-  }
   if (key === 'website') {
     if (BAD_SITE.test(u.hostname)) return 'not_own_domain'
     return null
@@ -137,9 +129,6 @@ const RENDERED_MIN = 1500
  */
 const ANTI_BOT: Record<LinkKey, boolean> = {
   website: false, instagram: false, facebook: true, linkedin: true,
-  // Google blocks automated checks aggressively; a Maps link is validated by
-  // whether an ID can be extracted from it, not by fetching the page.
-  googleMaps: true,
 }
 
 async function checkSocial(key: LinkKey, url: string, counter?: RequestCounter): Promise<Check> {
@@ -180,14 +169,6 @@ export async function validateLink(key: LinkKey, url: string, counter?: RequestC
   const shape = shapeOk(key, url)
   if (shape) return { verdict: 'invalid', reason: shape }
 
-  // 1b. GOOGLE MAPS — the useful proof is "does this yield a business id?",
-  // not "does the page load". Google would block the fetch anyway.
-  if (key === 'googleMaps') {
-    const id = await resolveMapsId(url)
-    if (id.cid || id.placeId) return { verdict: 'valid' }
-    return { verdict: 'unverified', reason: id.error || 'no_business_id' }
-  }
-
   if (key !== 'website') return checkSocial(key, url, counter)
 
   // 2. A plain website is honest over HTTP — a 404 there is a real 404.
@@ -223,12 +204,9 @@ function buildPrompt(name: string, knownWebsite?: string, city?: string): string
 - לינקדאין: עמוד החברה (/company/...), לא פרופיל אישי.
 - אינסטגרם/פייסבוק: עמוד העסק עצמו.
 - אתר: הדומיין של העסק עצמו, לא רשת חברתית ולא אינדקס עסקים.
-- גוגל מפות (googleMaps): הקישור לכרטיס העסק ב-Google Maps / Google Business.
-  חובה שיהיה קישור לכרטיס העסק עצמו (כתובת מסוג /maps/place/... או קישור עם cid),
-  ולא קישור לחיפוש (/maps/search/...). אם יש קישור מקוצר (maps.app.goo.gl) — גם הוא מתאים.
 
 החזר JSON בלבד, ללא טקסט נוסף, בפורמט:
-{"website": "https://..." או null, "instagram": "https://..." או null, "facebook": "https://..." או null, "linkedin": "https://..." או null, "googleMaps": "https://..." או null}`
+{"website": "https://..." או null, "instagram": "https://..." או null, "facebook": "https://..." או null, "linkedin": "https://..." או null}`
 }
 
 async function askGrok(name: string, knownWebsite?: string, city?: string): Promise<{ raw: Partial<Record<LinkKey, string>>; error?: string }> {

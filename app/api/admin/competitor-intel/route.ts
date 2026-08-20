@@ -173,54 +173,52 @@ export async function POST(request: Request) {
 
   /**
    * NAME IN, EVERYTHING ELSE AUTOMATIC.
-   * DataForSEO cannot find Israeli businesses by Hebrew name, so we never ask it
-   * to: the AI link-finder locates the Google Maps listing (a web search, which
-   * Grok handles well), we extract the cid/place_id from that URL, and reviews
-   * are fetched BY ID. The admin types only a name — the googleMaps URL below is
-   * an optional dev-tab override, never a requirement.
+   * The business is resolved by DataForSEO's OWN Google Maps search (name + the
+   * client's city) — Google Maps handles Hebrew natively and returns the cid
+   * directly. We no longer ask Grok for a Maps URL: Maps listing URLs are not in
+   * the organic web index, so a web search can never return one and the model
+   * correctly answered null every time.
+   * An admin-pasted Maps URL still works as an override, but is never required.
    */
-  async function resolveListing(): Promise<{ cid?: string; placeId?: string; mapsUrl?: string; reason?: string }> {
+  async function resolveOverrideId(): Promise<{ cid?: string; placeId?: string; mapsUrl?: string }> {
     const provided = (urls.googleMaps || '').trim()
-    if (provided) {
-      const id = await resolveMapsId(provided)
-      if (id.cid || id.placeId) return { ...id, mapsUrl: provided }
-      // A pasted URL we can't read shouldn't block auto-discovery.
-    }
-    const discovered = await findCompetitorLinksAI(
-      name, (urls.website || company?.website || '').trim(), undefined, area.display,
-    )
-    const found = discovered.urls.googleMaps
-    if (!found) return { reason: 'no_google_listing_found' }
-    const id = await resolveMapsId(found)
-    if (!id.cid && !id.placeId) return { reason: id.error || 'no_business_id', mapsUrl: found }
-    return { ...id, mapsUrl: found }
+    if (!provided) return {}
+    const id = await resolveMapsId(provided)
+    return (id.cid || id.placeId) ? { ...id, mapsUrl: provided } : {}
   }
 
   const reviewsPromise: Promise<ReviewSnapshot | null> = reviewsWanted
-    ? resolveListing().then(async (listing) => {
-        if (!listing.cid && !listing.placeId) {
-          return {
-            found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
-            capturedAt: new Date().toISOString(),
-            error: listing.reason === 'no_google_listing_found'
+    ? resolveOverrideId().then(async (override) => {
+        const r = await fetchGoogleReviews(
+          name,
+          // City-level where we have it — a Maps search is geo-ranked.
+          area.search || 'Israel',
+          override.cid || override.placeId ? { cid: override.cid, placeId: override.placeId } : undefined,
+        )
+        if (!r.found) {
+          const why = r.error === 'no_confident_name_match'
+            ? 'נמצאו עסקים בגוגל אך אף אחד לא תואם את השם בוודאות'
+            : r.error === 'no_maps_results'
               ? 'לא נמצא עמוד גוגל למתחרה'
-              : `נמצא עמוד גוגל אך לא ניתן לחלץ מזהה (${listing.reason})`,
+              : r.error || 'לא נמצא עמוד גוגל למתחרה'
+          return {
+            found: false, rating: null, reviewsCount: null, reviews: [],
+            costUSD: r.costUSD, candidates: r.candidates,
+            capturedAt: new Date().toISOString(), error: why,
           }
         }
-        const r = await fetchGoogleReviews(name, area.search || 'Israel', {
-          cid: listing.cid, placeId: listing.placeId,
-        })
         return {
-          found: r.found,
+          found: true,
           title: r.title,
           address: r.address,
-          cid: r.cid || listing.cid,
-          mapsUrl: listing.mapsUrl,
+          cid: r.cid || override.cid,
+          mapsUrl: override.mapsUrl || (r.cid ? `https://www.google.com/maps?cid=${r.cid}` : undefined),
           rating: r.rating,
           reviewsCount: r.reviewsCount,
           reviews: r.reviews,
+          candidates: r.candidates,
           // Deterministic, no LLM — same input always yields the same insights.
-          insights: r.found ? computeReviewInsights(r) : undefined,
+          insights: computeReviewInsights(r),
           // Stored every run so a later run can diff rating / review count
           // over time, the same way follower counts are tracked.
           capturedAt: new Date().toISOString(),

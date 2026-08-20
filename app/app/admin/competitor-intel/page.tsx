@@ -54,6 +54,7 @@ interface ReviewInsights {
 }
 interface ReviewSnapshot {
   found: boolean; title?: string; address?: string; cid?: string; mapsUrl?: string
+  candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
   rating: number | null; reviewsCount: number | null
   reviews: GoogleReviewItem[]; insights?: ReviewInsights
   capturedAt: string; costUSD: number; error?: string
@@ -157,9 +158,6 @@ export default function CompetitorIntelDevPage() {
         if (idx !== i) return c
         const urls = { ...c.urls }
         const selected = { ...c.selected }
-        // googleMaps is discovered too, but it is NOT a scraped source — it
-        // only feeds the reviews lookup, so it fills the field without a checkbox.
-        if (found.googleMaps) urls.googleMaps = found.googleMaps
         for (const src of SOURCES) {
           if (found[src]) { urls[src] = found[src]; selected[src] = true }
           // Nothing found → leave blank + unchecked; the admin can paste one.
@@ -410,13 +408,13 @@ export default function CompetitorIntelDevPage() {
                 <div className="space-y-1">
                   <Input
                     dir="ltr"
-                    placeholder="עמוד גוגל — נמצא אוטומטית לפי השם, אין צורך למלא"
+                    placeholder="עמוד גוגל (לא חובה) — עקיפה ידנית בלבד"
                     value={c.urls.googleMaps || ''}
                     onChange={e => setCompetitors(p => p.map((x, idx) => idx === i ? { ...x, urls: { ...x.urls, googleMaps: e.target.value } } : x))}
                     className="h-8 text-xs"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    לא חובה. אם ריק — המערכת מאתרת את כרטיס הגוגל של המתחרה לבד לפי השם.
+                    לא חובה. המערכת מאתרת את העסק בגוגל מפות לפי השם + עיר הלקוח. מלא רק אם האיתור האוטומטי טעה.
                   </p>
                 </div>
               )}
@@ -666,11 +664,19 @@ export default function CompetitorIntelDevPage() {
                           )}
                         </p>
                         {!run.reviews.found ? (
-                          <p className="text-xs text-muted-foreground">
-                            {run.reviews.error === 'no_google_business_profile' || !run.reviews.error
-                              ? 'לא נמצא פרופיל Google Business למתחרה הזה.'
-                              : `לא נאספו ביקורות (${run.reviews.error}).`}
-                          </p>
+                          <>
+                            <p className="text-xs text-muted-foreground">
+                              {run.reviews.error === 'no_google_business_profile' || !run.reviews.error
+                                ? 'לא נמצא פרופיל Google Business למתחרה הזה.'
+                                : run.reviews.error}
+                            </p>
+                            {/* What Maps actually returned — so a miss is explainable. */}
+                            {!!run.reviews.candidates?.length && (
+                              <p className="text-[10px] text-muted-foreground">
+                                תוצאות שנבדקו: {run.reviews.candidates.map(c => `${c.title} (${Math.round(c.score * 100)}%)`).join(' · ')}
+                              </p>
+                            )}
+                          </>
                         ) : (
                           <>
                             {run.reviews.title && (
