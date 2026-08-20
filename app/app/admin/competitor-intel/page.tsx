@@ -74,7 +74,7 @@ export default function CompetitorIntelDevPage() {
   const [finding, setFinding] = useState<number | null>(null)
   const [rechecking, setRechecking] = useState<string | null>(null)
   // Per-competitor search diagnostics so a zero-result run is explainable.
-  const [linkDiag, setLinkDiag] = useState<Record<number, Array<{ key: string; hits: number; error?: string }>>>({})
+  const [linkDiag, setLinkDiag] = useState<Record<number, Array<{ key: string; outcome: string; candidate?: string; reason?: string }>>>({})
 
   useEffect(() => {
     fetch('/api/admin/companies').then(r => r.json())
@@ -108,8 +108,11 @@ export default function CompetitorIntelDevPage() {
       ? { ...c, selected: { ...c.selected, [source]: !c.selected[source] } } : c)))
   }
 
-  // ── STEP 1: "מצא לינקים" — targeted search per platform, fills the fields.
-  // Search-only (no scraping) so it's cheap; every URL stays editable.
+  // ── STEP 1: "מצא לינקים" — AI finder (Grok + web search) fills the fields.
+  // Every URL the model proposes is VALIDATED server-side before it gets here,
+  // so a hallucinated or dead profile is dropped rather than shown. Cheap step:
+  // one model call + one validation fetch per candidate, no profile scraping.
+  // Every field remains editable by hand.
   async function findLinks(i: number) {
     const comp = competitors[i]
     if (!comp.name.trim()) {
@@ -121,7 +124,8 @@ export default function CompetitorIntelDevPage() {
       const res = await fetch('/api/admin/competitor-intel', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: comp.name.trim() }),
+        // The website (if already typed) disambiguates same-name businesses.
+        body: JSON.stringify({ name: comp.name.trim(), website: (comp.urls.website || '').trim() }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
@@ -136,22 +140,24 @@ export default function CompetitorIntelDevPage() {
         }
         return { ...c, urls, selected }
       }))
-      const diags: Array<{ key: string; hits: number; error?: string }> = data.diagnostics || []
+      const diags: Array<{ key: string; outcome: string; candidate?: string; reason?: string }> = data.diagnostics || []
       setLinkDiag(prev => ({ ...prev, [i]: diags }))
       const n = SOURCES.filter(src => found[src]).length
-      const errs = diags.filter(d => d.error)
+      const dropped = diags.filter(d => d.outcome === 'dropped').length
       if (n === 0) {
         toast({
-          title: 'לא נמצאו לינקים',
-          description: errs.length
-            ? `שגיאת חיפוש: ${errs[0].error} — אפשר להזין ידנית`
-            : 'החיפוש לא החזיר תוצאות מתאימות — אפשר להזין ידנית',
+          title: 'לא נמצאו לינקים — אפשר להזין ידנית',
+          description: data.aiError
+            ? `שגיאת חיפוש: ${data.aiError}`
+            : dropped
+              ? `${dropped} כתובות שהמודל הציע לא אומתו ולכן נפסלו`
+              : 'לא אותרו פרופילים רשמיים בוודאות',
           variant: 'destructive',
         })
       } else {
         toast({
-          title: `נמצאו ${n} מתוך ${SOURCES.length} לינקים`,
-          description: n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined,
+          title: `נמצאו ואומתו ${n} לינקים`,
+          description: dropped ? `${dropped} כתובות נפסלו באימות · אפשר להשלים ידנית` : (n < SOURCES.length ? 'ניתן להשלים ידנית את מה שחסר' : undefined),
         })
       }
     } catch (e: any) {
@@ -350,7 +356,11 @@ export default function CompetitorIntelDevPage() {
               </div>
               {linkDiag[i] && (
                 <p className="text-[10px] text-muted-foreground">
-                  תוצאות חיפוש: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${d.error ? `שגיאה (${d.error})` : d.hits}`).join(' · ')}
+                  איתור: {linkDiag[i].map(d => `${SOURCE_LABELS[d.key as Source] || d.key}: ${
+                    d.outcome === 'found' ? 'אומת' :
+                    d.outcome === 'dropped' ? `נפסל באימות (${d.reason || 'לא אומת'})` :
+                    'לא נמצא'
+                  }`).join(' · ')}
                 </p>
               )}
             </div>

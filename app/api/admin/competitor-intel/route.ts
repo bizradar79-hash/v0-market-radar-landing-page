@@ -6,10 +6,11 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 import {
-  scrapeUrl, scrapeSocialProfile, postsToText, findCompetitorLinks, fetchSnapshot,
+  scrapeUrl, scrapeSocialProfile, postsToText, fetchSnapshot,
   isBrightDataConfigured, RequestCounter, BRIGHTDATA_COST_PER_REQ, BRIGHTDATA_RECORD_COST,
   type SocialPlatform,
 } from '@/lib/brightdata/client'
+import { findCompetitorLinksAI } from '@/lib/competitor-intel/find-links-ai'
 import { summarizeCompetitor, filterRecentPosts, RECENCY_DAYS, INTEL_SOURCES, type IntelSource, type SourceResult } from '@/lib/competitor-intel/summarize'
 
 function adminDb() {
@@ -33,8 +34,9 @@ async function requireAdmin(): Promise<NextResponse | null> {
 // Keep the last N runs per company so we can compare without re-scraping.
 const RUN_HISTORY_CAP = Number(process.env.COMPETITOR_INTEL_RUN_CAP) || 6
 
-// (DISCOVER_HOST removed — link discovery is now its own step, PUT /
-// competitor-intel → findCompetitorLinks, with per-platform site: queries.)
+// (Link discovery is its own step: PUT /competitor-intel → findCompetitorLinksAI,
+// an AI finder with mandatory URL validation. The old SERP-scraping finder
+// returned non-profile junk and was replaced.)
 
 // GET ?company_id= → recent dev runs for that company
 export async function GET(request: Request) {
@@ -53,27 +55,34 @@ export async function GET(request: Request) {
   return NextResponse.json({ success: true, runs: data || [], brightdata: isBrightDataConfigured(), recencyDays: RECENCY_DAYS })
 }
 
-// PUT — STEP 1 "מצא לינקים": targeted per-platform link discovery for a name.
-// Search-only (no scraping), so it's cheap; the admin then edits/checks the URLs.
+// PUT — STEP 1 "מצא לינקים": AI-powered link discovery for a competitor name.
+// Grok (web search) proposes the official profiles; EVERY candidate is then
+// validated to actually exist before it reaches the admin's fields, because a
+// model can fabricate a plausible URL. Cost is one LLM call plus at most one
+// unlocker request per candidate — no profile scraping, no dataset collections.
 export async function PUT(request: Request) {
   const denied = await requireAdmin()
   if (denied) return denied
   const body = await request.json().catch(() => ({}))
   const name: string = (body.name || '').trim()
+  const knownWebsite: string = (body.website || '').trim()
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
 
-  if (!isBrightDataConfigured()) {
-    return NextResponse.json({ error: 'BRIGHTDATA_API_TOKEN לא מוגדר — לא ניתן לחפש לינקים' }, { status: 400 })
+  if (!process.env.XAI_API_KEY) {
+    return NextResponse.json({ error: 'XAI_API_KEY לא מוגדר — לא ניתן לחפש לינקים' }, { status: 400 })
   }
 
+  // Social validation goes through the unlocker (plain HTTP can't tell a real
+  // profile from a fake one) — every request is counted so the cost stays honest.
   const counter = new RequestCounter()
-  const { urls, diagnostics } = await findCompetitorLinks(name, counter)
+  const { urls, diagnostics, aiError } = await findCompetitorLinksAI(name, knownWebsite, counter)
   return NextResponse.json({
     success: true,
     urls,
-    // Surfaced in the UI so a zero-result run is never silent: shows per-platform
-    // hit counts and the actual search error when one occurred.
+    // Per-source outcome (found / dropped-invalid / not-found) so a zero-result
+    // run is never silent and a dropped hallucination is visible.
     diagnostics,
+    aiError,
     cost: { requests: counter.total, costUSD: counter.costUSD, perRequestUSD: BRIGHTDATA_COST_PER_REQ },
   })
 }

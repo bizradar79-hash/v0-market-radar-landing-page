@@ -702,6 +702,11 @@ export interface LinkDiscovery {
   diagnostics: Array<{ key: string; query: string; hits: number; picked: string; rawLength: number; error?: string }>
 }
 
+/**
+ * @deprecated Superseded by findCompetitorLinksAI (lib/competitor-intel/find-links-ai).
+ * Parsing Google SERPs returned non-profile junk (consent pages, google.com/webhp,
+ * platform index pages). Kept only for reference / possible fallback.
+ */
 export async function findCompetitorLinks(
   name: string, counter?: RequestCounter,
 ): Promise<LinkDiscovery> {
