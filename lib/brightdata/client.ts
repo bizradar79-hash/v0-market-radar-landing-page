@@ -247,11 +247,29 @@ interface PlatformConfig {
   input?: (url: string) => Record<string, any>
 }
 
-// How many recent posts to request where the dataset supports a limit.
-const IG_NUM_POSTS = Number(process.env.BRIGHTDATA_IG_NUM_POSTS) || 12
-// Date window for datasets that accept one (LinkedIn). Wider than our 45-day
-// briefing filter so a low-frequency poster still yields rows.
-const LOOKBACK_DAYS = Number(process.env.BRIGHTDATA_LOOKBACK_DAYS) || 90
+// ── SOURCE-LEVEL COLLECTION CAPS ──────────────────────────────────────────
+// Datasets bill PER RECORD, so an uncapped collection pulls (and charges for)
+// a competitor's entire history — one run billed 239 records (~$0.60) while we
+// only display the last 45 days. Both caps below are applied at the SOURCE so
+// we're billed for roughly what we show. Env-tunable, no redeploy needed.
+const MAX_POSTS = Number(process.env.BRIGHTDATA_MAX_POSTS) || 15
+// Collection window. Matches the 45-day briefing filter (summarize.ts) so we
+// don't pay for posts the report will discard anyway.
+const LOOKBACK_DAYS = Number(process.env.BRIGHTDATA_LOOKBACK_DAYS) || 45
+// Escape hatch: Facebook's `num_of_posts`/date fields are documented in
+// BrightData's own SDK (FacebookPostsProfilePayload → gd_lkaxegm826bjpoo9m5)
+// but missing from the endpoint's field table. If the extra fields ever make
+// the dataset error, set BRIGHTDATA_FB_LIMIT=false to fall back to bare {url}.
+const FB_LIMIT_ENABLED = process.env.BRIGHTDATA_FB_LIMIT !== 'false'
+
+function lookbackStart(): Date {
+  return new Date(Date.now() - LOOKBACK_DAYS * 86400000)
+}
+/** Instagram + Facebook want MM-DD-YYYY (NOT ISO — LinkedIn is the ISO one). */
+function mmddyyyy(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())}-${d.getFullYear()}`
+}
 
 const PLATFORM_CONFIG: Record<SocialPlatform, PlatformConfig> = {
   // instagram-posts-discover-by-url
@@ -259,23 +277,42 @@ const PLATFORM_CONFIG: Record<SocialPlatform, PlatformConfig> = {
     mode: 'discover',
     discoverBy: 'url',
     // Docs: { url, num_of_posts?, posts_to_not_include?, start_date?, end_date?, post_type? }
+    // num_of_posts docs: "the number of recent posts to collect, missing value
+    // indicates no limit". Dates are MM-DD-YYYY here.
     // post_type omitted on purpose so we get BOTH posts and reels.
-    input: (url) => ({ url, num_of_posts: IG_NUM_POSTS }),
+    input: (url) => ({
+      url,
+      num_of_posts: MAX_POSTS,
+      start_date: mmddyyyy(lookbackStart()),
+      end_date: mmddyyyy(new Date()),
+    }),
   },
   // linkedin-posts-discover-by-profile-url
   linkedin: {
     mode: 'discover',
     discoverBy: 'profile_url',
     // Docs: { url, start_date?, end_date?, only_authored_posts? } — ISO 8601.
+    // NO count-limit parameter exists for this dataset (confirmed in the docs
+    // and in BrightData's SDK payloads) — the date window IS the only cap, so
+    // it's kept tight at LOOKBACK_DAYS rather than the old 90.
     input: (url) => {
       const end = new Date()
       const start = new Date(end.getTime() - LOOKBACK_DAYS * 86400000)
       return { url, start_date: start.toISOString(), end_date: end.toISOString() }
     },
   },
-  // facebook-pages-posts-COLLECT-by-url — NO discovery params (this is what
-  // works; adding them breaks it).
-  facebook: { mode: 'collect' },
+  // facebook-pages-posts-COLLECT-by-url — NO discovery QUERY params (adding
+  // type/discover_by breaks this dataset). BODY fields are a different surface:
+  // BrightData's SDK payload for this exact dataset (FacebookPostsProfilePayload
+  // → gd_lkaxegm826bjpoo9m5, "Posts by Profile URL") accepts num_of_posts and
+  // MM-DD-YYYY start_date/end_date, even though the endpoint's field table omits
+  // them. Without these the page's ENTIRE history is collected and billed.
+  facebook: {
+    mode: 'collect',
+    input: (url) => (FB_LIMIT_ENABLED
+      ? { url, num_of_posts: MAX_POSTS, start_date: mmddyyyy(lookbackStart()), end_date: mmddyyyy(new Date()) }
+      : { url }),
+  },
   // TikTok — unchanged from the original working call.
   tiktok: { mode: 'collect' },
 }
