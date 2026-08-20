@@ -31,7 +31,10 @@ const MODULE_ROUTES: Record<string, string[]> = {
   // links and bypasses the staleness gate), which is the point of the button.
   // This is the ONLY competitor entry reachable from the module-sync screen;
   // `competitors` above is the old, disabled engine.
-  competitor_tracking: ['/api/competitor-tracking?force=true'],
+  // background=true → the route returns immediately and finishes the loop in
+  // after(), so the run survives the admin closing the dialog or the tab. This
+  // is the same pattern /api/sync/start uses for the onboarding scan.
+  competitor_tracking: ['/api/competitor-tracking?force=true&background=true'],
   // Leads — distribution-channel-driven partner search (or customer fallback).
   // force=true here bypasses the route's 7-day cache AND the sync/run ≥5-leads
   // skip, so re-running after editing channels actually regenerates.

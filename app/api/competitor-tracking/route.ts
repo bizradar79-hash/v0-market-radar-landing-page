@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { getFullContext } from '@/lib/context'
 import { deriveArea } from '@/lib/geo/area'
@@ -31,9 +31,22 @@ function adminDb() {
  *  - link discovery runs once and is cached in resolved_links
  *  - post counts are capped at the scraper (BRIGHTDATA_MAX_POSTS + lookback)
  *  - no LLM anywhere on this path
+ *
+ * EXECUTION MODE. Tracking five competitors means several minutes of async
+ * scrapes. Two modes:
+ *  - default (background=true): the loop runs inside after(), so the HTTP
+ *    response returns immediately and the work continues on the server. Closing
+ *    the browser tab cannot kill it — same reason /api/sync/start uses after().
+ *  - background=false: await the loop and return the per-competitor results.
+ *    Used by the scan (sync/run), which is itself already server-side and needs
+ *    the summary for its step message.
  */
 export async function POST(request: Request) {
-  const force = new URL(request.url).searchParams.get('force') === 'true'
+  const params = new URL(request.url).searchParams
+  const force = params.get('force') === 'true'
+  // The admin module-sync button opts INTO background so the run survives the
+  // admin closing the dialog or the tab.
+  const background = params.get('background') === 'true'
 
   const ctx = await getFullContext()
   const company: any = ctx?.company
@@ -68,14 +81,15 @@ export async function POST(request: Request) {
   // per request/record, so we pass the EXACT dollar figures rather than tokens.
   const cost = new ScanCostCollector(companyId, 'competitor_tracking')
 
-  let tracked = 0
-  let skipped = 0
-  let costUSD = 0
   const details: Array<{ name: string; status: string; message?: string }> = []
 
   // Sequential on purpose: each competitor can fire several BrightData
   // collections, and running five in parallel risks provider rate limits and a
   // 300s wall-clock overrun.
+  async function runAll(): Promise<{ tracked: number; skipped: number; costUSD: number }> {
+  let tracked = 0
+  let skipped = 0
+  let costUSD = 0
   for (const name of names) {
     const row = byName.get(name)
     if (!force && isFresh(row?.scanned_at)) {
@@ -124,9 +138,28 @@ export async function POST(request: Request) {
       details.push({ name, status: 'error', message: (e?.message || 'failed').slice(0, 120) })
     }
   }
-
   await cost.flush()
+  return { tracked, skipped, costUSD }
+  }
 
+  // BACKGROUND: respond now, keep working. after() keeps the serverless
+  // invocation alive past the response, independent of the browser.
+  if (background) {
+    after(async () => {
+      try {
+        const r = await runAll()
+        console.log(`[competitor-tracking] background done for ${companyId}: ${r.tracked}/${names.length} tracked, ${r.skipped} fresh, $${r.costUSD.toFixed(4)}`)
+      } catch (e: any) {
+        console.error('[competitor-tracking] background failed:', e?.message)
+      }
+    })
+    return NextResponse.json({
+      success: true, background: true, total: names.length,
+      message: `הסריקה רצה ברקע עבור ${names.length} מתחרים — אפשר לסגור את החלון`,
+    })
+  }
+
+  const { tracked, skipped, costUSD } = await runAll()
   return NextResponse.json({
     success: true,
     tracked,

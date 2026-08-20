@@ -321,6 +321,8 @@ export async function POST(request: Request) {
     // never throws — a competitor with no public footprint yields a stored row
     // with a note, not a broken scan.
     await runStep('competitor_tracking', async () => {
+      // NOT background here: sync/run is already server-side (after() + chaining)
+      // and needs the real summary for its step message.
       const r = await callModule(origin, '/api/competitor-tracking', companyId!, false)
       if (!r.ok) return { status: 'error', message: r.body?.error ?? `HTTP ${r.status}` }
       const b = r.body || {}

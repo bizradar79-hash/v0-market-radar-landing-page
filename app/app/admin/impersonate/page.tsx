@@ -379,7 +379,9 @@ export default function ImpersonatePage() {
       // Competitor tracking returns real per-competitor detail — surface it
       // instead of a bare "עודכן", so a run that found nothing says so.
       const ct = data.results?.find((r: any) => String(r.route).includes('/api/competitor-tracking'))?.body
-      const detail = ct
+      const detail = ct?.background
+        ? `${ct.message} — התוצאות יופיעו במסך "מעקב מתחרים" בסיום`
+        : ct
         ? (ct.total === 0
             ? 'לא הוגדרו מתחרים ישירים ללקוח הזה'
             : `${ct.tracked}/${ct.total} מתחרים נסרקו${ct.costUSD ? ` · $${ct.costUSD}` : ''}` +
@@ -1017,8 +1019,8 @@ export default function ImpersonatePage() {
                 לחץ על מודול להרצה בנפרד. כל לחיצה קוראת ל-API עם force=true.
                 <br />
                 <span className="text-xs">
-                  ⏱ <b>מעקב מתחרים</b> רץ בפועל על כל מתחרה (סריקת רשתות + ביקורות גוגל) —
-                  זה יכול לקחת כמה דקות. חזרה מיידית של ✅ אינה תקינה.
+                  ⏱ <b>מעקב מתחרים</b> רץ <b>בשרת ברקע</b> — אפשר לסגור את החלון ואת הדפדפן,
+                  הסריקה תמשיך עד לסיום כל המתחרים. התוצאות יופיעו במסך "מעקב מתחרים".
                 </span>
               </p>
               <div className="grid grid-cols-3 gap-2">

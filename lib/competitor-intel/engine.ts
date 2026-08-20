@@ -104,28 +104,53 @@ export async function trackCompetitor(opts: {
   const links = await resolveLinks(name, opts.cachedLinks?.website || '', opts.cachedLinks || null, !!opts.force)
 
   // ── Google reviews, in parallel with the scrapes ─────────────────────────
-  // A cached cid skips the Maps search entirely (one fewer billed call).
-  const reviewsPromise: Promise<ResearchReviews | null> = isReviewsConfigured()
-    ? fetchGoogleReviews(name, opts.areaSearch || 'Israel', links.cid ? { cid: links.cid } : undefined)
-        .then((r) => ({
-          found: r.found,
-          title: r.title,
-          address: r.address,
-          cid: r.cid,
-          mapsUrl: r.cid ? `https://www.google.com/maps?cid=${r.cid}` : links.mapsUrl,
-          rating: r.rating,
-          reviewsCount: r.reviewsCount,
-          reviews: r.reviews,
-          insights: r.found ? computeReviewInsights(r) : undefined,
-          capturedAt: scannedAt,
-          costUSD: r.costUSD,
-          error: r.error,
-        }))
-        .catch((e: any) => ({
-          found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
-          capturedAt: scannedAt, error: (e?.message || 'reviews_failed').slice(0, 60),
-        }))
-    : Promise.resolve(null)
+  // A cached cid skips the Maps search entirely (one fewer billed call, and
+  // immune to the name-matching being wrong on a later run).
+  //
+  // RESOLUTION IS TWO-PASS. The first pass uses the client's own area, which is
+  // the right geo signal — but DataForSEO only accepts locations from its own
+  // catalog, so a city we can't map degrades to country level, and a city we CAN
+  // map may still be too tight for a competitor based elsewhere. When the first
+  // pass finds nothing, we retry at country level before concluding the business
+  // has no listing. Failing to do that reported "לא נמצא עמוד גוגל" for
+  // businesses that are plainly on Google.
+  const resolveReviews = async (): Promise<ResearchReviews | null> => {
+    if (!isReviewsConfigured()) return null
+    const id = links.cid ? { cid: links.cid } : undefined
+    const area = (opts.areaSearch || '').trim()
+
+    let r = await fetchGoogleReviews(name, area || 'Israel', id)
+    const missed = !r.found && (r.error === 'no_maps_results' || r.error === 'no_confident_name_match' || /מיקום/.test(r.error || ''))
+    if (missed && area && area !== 'Israel' && !id) {
+      const wide = await fetchGoogleReviews(name, 'Israel')
+      if (wide.found) {
+        r = { ...wide, costUSD: r.costUSD + wide.costUSD }
+      } else {
+        r = { ...wide, costUSD: r.costUSD + wide.costUSD, error: wide.error || r.error }
+      }
+    }
+    return {
+      found: r.found,
+      title: r.title,
+      address: r.address,
+      cid: r.cid,
+      mapsUrl: r.cid ? `https://www.google.com/maps?cid=${r.cid}` : links.mapsUrl,
+      rating: r.rating,
+      reviewsCount: r.reviewsCount,
+      reviews: r.reviews,
+      candidates: r.candidates,
+      insights: r.found ? computeReviewInsights(r) : undefined,
+      capturedAt: scannedAt,
+      costUSD: r.costUSD,
+      // Kept and surfaced: "no listing" and "search failed" are different
+      // outcomes, and collapsing them made this module undiagnosable.
+      error: r.error,
+    }
+  }
+  const reviewsPromise: Promise<ResearchReviews | null> = resolveReviews().catch((e: any) => ({
+    found: false, rating: null, reviewsCount: null, reviews: [], costUSD: 0,
+    capturedAt: scannedAt, error: (e?.message || 'reviews_failed').slice(0, 60),
+  }))
 
   // ── Sources: each one independent, one failure never blocks the others ───
   const sources: SourceResult[] = await Promise.all(
@@ -161,6 +186,8 @@ export async function trackCompetitor(opts: {
   )
 
   const reviews = await reviewsPromise
+  // CACHE the resolved cid — the next scan queries reviews by id and skips the
+  // Maps search entirely (cheaper, and can't regress into a bad name match).
   if (reviews?.cid) links.cid = reviews.cid
   if (reviews?.mapsUrl) links.mapsUrl = reviews.mapsUrl
 

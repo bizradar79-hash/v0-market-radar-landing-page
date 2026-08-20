@@ -40,10 +40,39 @@ interface ReviewsBlock {
   rating: number | null; reviewsCount: number | null
   insights?: ReviewInsights; error?: string
 }
+interface SocialPost {
+  caption?: string; date?: string
+  likes?: number | null; comments?: number | null; views?: number | null
+  postUrl?: string
+}
+interface SourceRow { source: string; status: string; posts?: SocialPost[] }
+
+// The posts LIST is a tighter window than the insights above it: the insights
+// summarise 45 days, this shows what they actually published lately.
+const POSTS_WINDOW_DAYS = 14
+const MAX_POSTS_SHOWN = 6
+
+function recentPosts(sources: SourceRow[] | null): Array<SocialPost & { source: string }> {
+  const cutoff = Date.now() - POSTS_WINDOW_DAYS * 86400000
+  const out: Array<SocialPost & { source: string }> = []
+  for (const s of sources || []) {
+    for (const p of s.posts || []) {
+      const t = p.date ? new Date(p.date).getTime() : NaN
+      // Undated posts are excluded rather than assumed recent.
+      if (isNaN(t) || t < cutoff) continue
+      out.push({ ...p, source: s.source })
+    }
+  }
+  return out
+    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
+    .slice(0, MAX_POSTS_SHOWN)
+}
+
 interface TrackedCompetitor {
   id: string
   competitor_name: string
   resolved_links: Record<string, string>
+  sources: SourceRow[] | null
   insights: DerivedInsights | null
   reviews: ReviewsBlock | null
   scanned_at: string
@@ -73,7 +102,7 @@ export default function CompetitorTrackingPage() {
 
       const [{ data: tracked }, { data: company }] = await Promise.all([
         supabase.from('competitor_tracking')
-          .select('id, competitor_name, resolved_links, insights, reviews, scanned_at')
+          .select('id, competitor_name, resolved_links, sources, insights, reviews, scanned_at')
           .eq('company_id', user.id)
           .order('competitor_name'),
         supabase.from('companies').select('business_profile').eq('id', user.id).single(),
@@ -135,6 +164,7 @@ export default function CompetitorTrackingPage() {
         const ins = row.insights || {}
         const rev = row.reviews
         const links = row.resolved_links || {}
+        const posts = recentPosts(row.sources)
         return (
           <Card key={row.id} className="border-border bg-card">
             <CardHeader className="pb-3">
@@ -200,6 +230,44 @@ export default function CompetitorTrackingPage() {
                     {ins.followers!.map(f => `${SOURCE_LABELS[f.source] || f.source} ${f.followers.toLocaleString()}`).join(' · ')}
                   </p>
                 )}
+
+                {/* Actual posts from the last 14 days. Nothing rendered when
+                    there are none — the 45-day insights above already cover it. */}
+                {posts.length > 0 && (
+                  <div className="mt-1 space-y-1.5 border-t border-border pt-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      פרסומים ב-{POSTS_WINDOW_DAYS} הימים האחרונים
+                    </p>
+                    {posts.map((p, i) => {
+                      const eng = (p.likes ?? 0) + (p.comments ?? 0)
+                      const body = (
+                        <>
+                          <span className="text-[10px] text-muted-foreground">
+                            {p.date ? new Date(p.date).toLocaleDateString('he-IL') : ''} · {SOURCE_LABELS[p.source] || p.source}
+                          </span>
+                          <span className="block text-xs text-foreground">
+                            {(p.caption || '').trim().slice(0, 140) || '(ללא כיתוב)'}
+                            {(p.caption || '').length > 140 ? '…' : ''}
+                          </span>
+                          {(eng > 0 || p.views != null) && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {eng > 0 ? `${eng.toLocaleString()} לייקים ותגובות` : ''}
+                              {p.views != null ? `${eng > 0 ? ' · ' : ''}${p.views.toLocaleString()} צפיות` : ''}
+                            </span>
+                          )}
+                        </>
+                      )
+                      return p.postUrl ? (
+                        <a key={i} href={p.postUrl} target="_blank" rel="noopener noreferrer"
+                           className="block rounded-md bg-background p-2 hover:bg-muted/60">
+                          {body}
+                        </a>
+                      ) : (
+                        <div key={i} className="rounded-md bg-background p-2">{body}</div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* ── ביקורות גוגל ── */}
@@ -208,7 +276,17 @@ export default function CompetitorTrackingPage() {
                   <MessageSquare className="h-4 w-4 text-primary" />ביקורות גוגל
                 </p>
                 {!rev?.found ? (
-                  <p className="text-sm text-muted-foreground">לא נמצא עמוד גוגל למתחרה הזה.</p>
+                  // Distinguish the failure modes — collapsing them all into
+                  // "no listing" made a search problem look like a real absence.
+                  <p className="text-sm text-muted-foreground">
+                    {!rev
+                      ? 'ביקורות גוגל לא נאספו בסריקה הזו.'
+                      : rev.error === 'no_confident_name_match'
+                        ? 'נמצאו עסקים בגוגל אך אף אחד לא תאם את השם בוודאות.'
+                        : rev.error && rev.error !== 'no_maps_results' && rev.error !== 'no_google_business_profile'
+                          ? `לא נאספו ביקורות: ${rev.error}`
+                          : 'לא נמצא עמוד גוגל למתחרה הזה.'}
+                  </p>
                 ) : (
                   <>
                     {rev.insights?.standing && (
