@@ -244,17 +244,45 @@ export function shareBrandToken(query: string, candidate: string): boolean {
  * pack, while "לימון" finds the business. So when a name has a distinctive brand
  * word we search on THAT, and still match the full name against the results.
  */
-export function searchKeyword(name: string): string {
+export function searchKeyword(name: string, industryContext?: string): string {
   const brand = brandTokens(name)
   const all = norm(name).split(/\s+/).filter(Boolean)
   // Only narrow when stripping actually removed generic noise and left something
   // substantial; otherwise the original name is the better query.
-  if (!brand.length || brand.length === all.length) return name.trim()
+  if (!brand.length || brand.length === all.length) return withContext(name.trim(), industryContext)
   const kept = name.trim().split(/\s+/).filter((w) => {
     const n = norm(w)
     return brand.some((b) => n === b || n.includes(b) || b.includes(n))
   })
-  return kept.length ? kept.join(' ') : name.trim()
+  return withContext(kept.length ? kept.join(' ') : name.trim(), industryContext)
+}
+
+/**
+ * Append the BUSINESS-TYPE context to a Maps query.
+ *
+ * A bare brand word is far too broad on Google Maps: "לימון" returns cafés,
+ * juice bars and shops across the country and the mortgage firm never makes the
+ * result depth, so every candidate fails the brand check and we reported
+ * "no confident match". "ידע" happened to work only because it is a rarer word.
+ * A competitor shares the CLIENT's industry by definition, so the client's own
+ * industry term is a safe, free disambiguator: "לימון" → "לימון משכנתאות".
+ */
+export function withContext(query: string, industryContext?: string): string {
+  const ctx = (industryContext || '').trim()
+  if (!ctx) return query
+  const q = norm(query)
+  // Don't repeat a word the name already carries.
+  const add = ctx.split(/\s+/).filter((w) => w.trim() && !q.includes(norm(w))).slice(0, 2)
+  return add.length ? `${query} ${add.join(' ')}`.trim() : query
+}
+
+/** Bare hostname, for comparing a Maps listing's site to a known website. */
+export function hostOf(url?: string): string {
+  if (!url) return ''
+  try {
+    return new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname
+      .replace(/^www\./i, '').toLowerCase()
+  } catch { return '' }
 }
 
 export interface MapsMatch extends BusinessInfo {
@@ -270,6 +298,8 @@ export interface MapsMatch extends BusinessInfo {
  */
 export async function searchBusinessOnMaps(
   name: string, locationName = 'Israel', keywordOverride?: string,
+  /** The competitor's known website — an exact domain match beats any name score. */
+  knownWebsite?: string,
 ): Promise<MapsMatch> {
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
@@ -284,6 +314,7 @@ export async function searchBusinessOnMaps(
       return { found: false, rating: null, reviewsCount: null, costUSD: cost, error: error || `http_${res.status}` }
     }
 
+    const knownHost = hostOf(knownWebsite)
     const items: any[] = node?.result?.[0]?.items || []
     const scored = items
       .filter((it) => it && (it.title || it.cid))
@@ -293,6 +324,9 @@ export async function searchBusinessOnMaps(
         // A candidate without a shared brand word can never be selected, no
         // matter how the score lands.
         brandOk: shareBrandToken(name, it.title || ''),
+        // STRONGEST signal available: the listing points at the same website we
+        // already discovered for this competitor. Identity, not similarity.
+        domainMatch: !!knownHost && hostOf(it.domain || it.url || it.website) === knownHost,
         votes: typeof it.rating?.votes_count === 'number' ? it.rating.votes_count : 0,
         title: it.title || '',
         cid: it.cid ? String(it.cid) : '',
@@ -300,11 +334,13 @@ export async function searchBusinessOnMaps(
       }))
       // Among acceptable candidates prefer the MOST-REVIEWED one: on Google a
       // real business outweighs a stub or duplicate listing of the same name.
-      .sort((a, b) => (b.score - a.score) || (b.votes - a.votes))
+      .sort((a, b) => (Number(b.domainMatch) - Number(a.domainMatch)) || (b.score - a.score) || (b.votes - a.votes))
 
+    // A domain match is accepted on its own; otherwise the brand guard + score
+    // still gate, and among those the most-reviewed listing wins.
     const acceptable = scored
-      .filter((x) => x.brandOk && x.score >= MIN_NAME_SCORE)
-      .sort((a, b) => (b.votes - a.votes) || (b.score - a.score))
+      .filter((x) => x.domainMatch || (x.brandOk && x.score >= MIN_NAME_SCORE))
+      .sort((a, b) => (Number(b.domainMatch) - Number(a.domainMatch)) || (b.votes - a.votes) || (b.score - a.score))
 
     const diag = scored.slice(0, 5).map(({ title, score, cid, address }) => ({ title, score: Math.round(score * 100) / 100, cid, address }))
     const best = acceptable[0]
@@ -442,6 +478,7 @@ export async function fetchGoogleReviews(
   name: string, locationName = 'Israel',
   id?: { cid?: string; placeId?: string },
   keywordOverride?: string,
+  knownWebsite?: string,
 ): Promise<ReviewsFetch> {
   const auth = authHeader()
   if (!auth) {
@@ -452,7 +489,7 @@ export async function fetchGoogleReviews(
   // Google Maps search resolves the business from name + the client's city.
   const info: MapsMatch = id?.cid || id?.placeId
     ? { ...(await fetchBusinessInfo(name, locationName, id)) }
-    : await searchBusinessOnMaps(name, locationName, keywordOverride)
+    : await searchBusinessOnMaps(name, locationName, keywordOverride, knownWebsite)
 
   if (!info.found) {
     return {

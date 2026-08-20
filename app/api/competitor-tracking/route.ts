@@ -81,6 +81,19 @@ export async function POST(request: Request) {
 
   const area = deriveArea(company, bp)
 
+  /**
+   * BUSINESS-TYPE CONTEXT for the Google Maps lookup. A direct competitor is by
+   * definition in the client's own industry, so the client's industry term is a
+   * free, safe disambiguator: searching Maps for "לימון" nationally returns
+   * cafés and juice bars, while "לימון משכנתאות" returns the business.
+   * Kept to a couple of words — a long phrase narrows Maps too far.
+   */
+  const industryContext = [
+    Array.isArray(bp.industryTags) ? bp.industryTags[0] : '',
+    company.industry,
+    bp.coreActivity,
+  ].map((v: any) => String(v || '').trim()).find(Boolean)?.split(/[,·|]/)[0]?.trim().split(/\s+/).slice(0, 2).join(' ') || ''
+
   // Existing rows carry the cached links + the freshness stamp.
   const { data: existing } = await db
     .from('competitor_tracking')
@@ -102,7 +115,13 @@ export async function POST(request: Request) {
    */
   async function runOne(name: string): Promise<{ tracked: boolean; skipped: boolean; costUSD: number }> {
     const row = byName.get(name)
-    if (!force && isFresh(row?.scanned_at)) {
+    // A BACKGROUND run is always admin-initiated ("סרוק עכשיו"), so the
+    // staleness gate must not apply: skipping wrote no row, the progress panel
+    // counts a competitor as done only when a row lands in this run, and the
+    // most-recently-scanned competitor (typically the last in the list) sat at
+    // ⏳ forever while the chain had in fact completed. The gate still protects
+    // the automatic weekly scan, which is what it exists for.
+    if (!force && !background && isFresh(row?.scanned_at)) {
       details.push({ name, status: 'skipped', message: `fresh (< ${TRACKING_MIN_DAYS}d)` })
       return { tracked: false, skipped: true, costUSD: 0 }
     }
@@ -111,6 +130,7 @@ export async function POST(request: Request) {
         trackCompetitor({
           name,
           areaSearch: area.search,
+        industryContext,
           cachedLinks: (row?.resolved_links || null) as ResolvedLinks | null,
           // Only an explicit force re-runs link discovery; otherwise the cache wins.
           force,
@@ -222,6 +242,9 @@ export async function POST(request: Request) {
         console.error('[competitor-tracking] background failed:', e?.message)
       } finally {
         // ALWAYS chain, even after a failure — the rest must still run.
+        if (cursor + 1 >= names.length) {
+          console.log(`[competitor-tracking] ${companyId} RUN COMPLETE — ${names.length}/${names.length} competitors processed`)
+        }
         await chainNext(cursor + 1)
       }
     })

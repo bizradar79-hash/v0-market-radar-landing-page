@@ -25,7 +25,7 @@ import {
 } from './summarize'
 import { findCompetitorLinksAI } from './find-links-ai'
 import { computeReviewInsights, type ReviewSnapshot } from './review-insights'
-import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, mappedLocationLabel } from '@/lib/seo/google-reviews'
+import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, withContext, mappedLocationLabel } from '@/lib/seo/google-reviews'
 import { norm } from '@/lib/match/hebrew-core'
 
 /**
@@ -102,6 +102,12 @@ export async function trackCompetitor(opts: {
   name: string
   /** deriveArea(company).search — the client's area, for the Maps lookup. */
   areaSearch?: string
+  /**
+   * The client's BUSINESS TYPE (industry term, e.g. "משכנתאות"). A competitor
+   * shares the client's industry by definition, so this narrows the Maps search
+   * from a bare brand word to the actual business.
+   */
+  industryContext?: string
   cachedLinks?: ResolvedLinks | null
   /** Re-resolve links and ignore any cache. */
   force?: boolean
@@ -137,7 +143,13 @@ export async function trackCompetitor(opts: {
     //   3. brand only @ country         — generic words were steering the query
     //      ("לימון ייעוץ משכנתאות" returns the mortgage-advisor pack; "לימון"
     //       returns the business)
-    const brandKw = searchKeyword(name)
+    // Business-type context: the client's industry, which their competitors
+    // share. Turns the too-broad "לימון" into "לימון משכנתאות".
+    const ctx = (opts.industryContext || '').trim()
+    const brandKw = searchKeyword(name, ctx)
+    const nameWithCtx = withContext(name, ctx)
+    const site = links.website || ''
+
     const passes: Array<{ label: string; location: string; keyword: string }> = [
       { label: 'name@area', location: area || 'Israel', keyword: name },
     ]
@@ -147,15 +159,19 @@ export async function trackCompetitor(opts: {
     if (mappedLocationLabel(area) !== mappedLocationLabel('Israel')) {
       passes.push({ label: 'name@country', location: 'Israel', keyword: name })
     }
-    if (norm(brandKw) !== norm(name)) {
-      passes.push({ label: 'brand@country', location: 'Israel', keyword: brandKw })
+    // Context passes: the name (or just the brand) plus the industry term.
+    if (norm(nameWithCtx) !== norm(name)) {
+      passes.push({ label: 'name+industry@country', location: 'Israel', keyword: nameWithCtx })
+    }
+    if (norm(brandKw) !== norm(nameWithCtx) && norm(brandKw) !== norm(name)) {
+      passes.push({ label: 'brand+industry@country', location: 'Israel', keyword: brandKw })
     }
 
     let last: Awaited<ReturnType<typeof fetchGoogleReviews>> | null = null
     let spent = 0
     const tried: string[] = []
     for (const p of passes) {
-      const r = await fetchGoogleReviews(name, p.location, undefined, p.keyword)
+      const r = await fetchGoogleReviews(name, p.location, undefined, p.keyword, site)
       spent += r.costUSD
       tried.push(`${p.label}:${r.found ? 'found' : (r.error || 'empty')}`)
       last = r
