@@ -70,17 +70,25 @@ const REPORT_BASE = 'https://www.nsradar.co.il'
 
 type ModuleState = 'idle' | 'running' | 'ok' | 'error'
 
+// Only modules that ACTUALLY RUN appear here. Removed on purpose:
+//  • 'competitors'  — the old auto-discovery module (flagged off). Its button
+//    called sync-profile-competitors, which only copies names into a table and
+//    short-circuits when rows exist → an instant green check that ran no engine.
+//  • 'tenders'      — module disabled (TENDERS_ENABLED).
+//  • 'reviews'      — Google reviews are now PART of competitor tracking, not a
+//    separate module. sync-competitor-ratings belonged to the old engine.
+// Their MODULE_ROUTES entries stay in the API (reversible), just unreachable here.
 const SYNC_MODULES = [
+  // Slow by nature: real scrapes + reviews per competitor. See the note in the
+  // dialog — a run of several minutes is expected, not a hang.
+  { id: 'competitor_tracking', label: 'מעקב מתחרים', emoji: '👥', slow: true },
   { id: 'news',        label: 'חדשות',      emoji: '📰' },
   { id: 'conferences', label: 'כנסים',      emoji: '🏛️' },
-  { id: 'tenders',     label: 'מכרזים',     emoji: '📋' },
-  { id: 'competitors', label: 'מתחרים',     emoji: '👥' },
   { id: 'leads',       label: 'לידים',      emoji: '🎯' },
   { id: 'seo',         label: 'SEO',         emoji: '📈' },
   { id: 'geo',         label: 'GEO',         emoji: '🌐' },
   { id: 'trends',      label: 'טרנדים',     emoji: '📊' },
   { id: 'keyword_trends', label: 'טרנדים לפי מילות מפתח', emoji: '🔑' },
-  { id: 'reviews',     label: 'ביקורות',    emoji: '⭐' },
   { id: 'report',      label: 'דוח שבועי',  emoji: '📄' },
 ]
 
@@ -367,9 +375,19 @@ export default function ImpersonatePage() {
         [userId]: { ...(prev[userId] || {}), [moduleId]: ok ? 'ok' : 'error' },
       }))
       const data = await res.json().catch(() => ({}))
+      const label = SYNC_MODULES.find(m => m.id === moduleId)?.label
+      // Competitor tracking returns real per-competitor detail — surface it
+      // instead of a bare "עודכן", so a run that found nothing says so.
+      const ct = data.results?.find((r: any) => String(r.route).includes('/api/competitor-tracking'))?.body
+      const detail = ct
+        ? (ct.total === 0
+            ? 'לא הוגדרו מתחרים ישירים ללקוח הזה'
+            : `${ct.tracked}/${ct.total} מתחרים נסרקו${ct.costUSD ? ` · $${ct.costUSD}` : ''}` +
+              (Array.isArray(ct.details) ? ` — ${ct.details.map((d: any) => `${d.name}: ${d.status === 'ok' ? d.message : d.status}`).join(' · ')}` : ''))
+        : `${data.company_name}`
       toast({
-        title: ok ? `✅ ${SYNC_MODULES.find(m => m.id === moduleId)?.label} עודכן` : `❌ שגיאה ב-${SYNC_MODULES.find(m => m.id === moduleId)?.label}`,
-        description: ok ? `${data.company_name}` : (data.results?.[0]?.body?.error ?? 'שגיאה לא ידועה'),
+        title: ok ? `✅ ${label} עודכן` : `❌ שגיאה ב-${label}`,
+        description: ok ? detail : (data.results?.[0]?.body?.error ?? 'שגיאה לא ידועה'),
         variant: ok ? 'default' : 'destructive',
       })
       // Reset to idle after 4s
@@ -997,6 +1015,11 @@ export default function ImpersonatePage() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 לחץ על מודול להרצה בנפרד. כל לחיצה קוראת ל-API עם force=true.
+                <br />
+                <span className="text-xs">
+                  ⏱ <b>מעקב מתחרים</b> רץ בפועל על כל מתחרה (סריקת רשתות + ביקורות גוגל) —
+                  זה יכול לקחת כמה דקות. חזרה מיידית של ✅ אינה תקינה.
+                </span>
               </p>
               <div className="grid grid-cols-3 gap-2">
                 {SYNC_MODULES.map(mod => {

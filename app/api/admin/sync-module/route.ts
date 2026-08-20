@@ -1,5 +1,7 @@
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// 300s: competitor tracking genuinely takes minutes (async BrightData
+// collections poll to ready per competitor). 120s would have cut it off.
+export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
 import { COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
@@ -27,6 +29,8 @@ const MODULE_ROUTES: Record<string, string[]> = {
   ],
   // NEW competitor module — an admin refresh FORCES a fresh run (re-resolves
   // links and bypasses the staleness gate), which is the point of the button.
+  // This is the ONLY competitor entry reachable from the module-sync screen;
+  // `competitors` above is the old, disabled engine.
   competitor_tracking: ['/api/competitor-tracking?force=true'],
   // Leads — distribution-channel-driven partner search (or customer fallback).
   // force=true here bypasses the route's 7-day cache AND the sync/run ≥5-leads
