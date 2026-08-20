@@ -88,7 +88,9 @@ export function priceFor(model: string): ModelPrice {
   return key ? PRICING[key] : FALLBACK_PRICE
 }
 
-export type AiProvider = 'xai' | 'openai' | 'gemini' | 'groq' | 'dataforseo'
+// 'brightdata' / 'dataforseo' are NOT token-priced — they bill per request or
+// per record, so those callers pass an explicit costUSD instead of usage data.
+export type AiProvider = 'xai' | 'openai' | 'gemini' | 'groq' | 'dataforseo' | 'brightdata'
 
 export interface CostEntry {
   module: string
@@ -167,6 +169,12 @@ export class ScanCostCollector {
     // Optional explicit token counts (when the caller already parsed usage).
     promptTokens?: number
     completionTokens?: number
+    /**
+     * Explicit dollar cost, for providers that don't bill by token
+     * (BrightData per request/record, DataForSEO per task). Bypasses the
+     * token price table entirely — the figure is already exact.
+     */
+    costUSD?: number
   }): void {
     try {
       const webSearch = !!opts.webSearch
@@ -179,7 +187,9 @@ export class ScanCostCollector {
         completionTokens = u.completionTokens
         sources = u.sources
       }
-      const costUSD = computeCost(opts.model, promptTokens, completionTokens, webSearch, sources)
+      const costUSD = opts.costUSD != null
+        ? opts.costUSD
+        : computeCost(opts.model, promptTokens, completionTokens, webSearch, sources)
       this.entries.push({
         module: this.module,
         provider: opts.provider,

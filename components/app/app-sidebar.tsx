@@ -47,6 +47,7 @@ interface UserData {
 interface NavCounts {
   tenders: number
   competitors: number
+  competitorTracking: number
   trends: number
   news: number
   conferences: number
@@ -66,10 +67,12 @@ const getNavGroups = (counts: NavCounts) => [
   {
     title: "📊 מודיעין שוק",
     items: [
+      // NEW competitor module, first in market intelligence (per the plan).
+      { href: "/app/competitor-tracking", label: "מעקב מתחרים", icon: Target, badge: counts.competitorTracking || undefined },
       // Old competitor module feature-flagged off — nav entry hidden. The page
       // and its data remain (the client report still links to it).
       ...(OLD_COMPETITOR_MODULE_ENABLED
-        ? [{ href: "/app/competitors", label: "מתחרים", icon: Target, badge: counts.competitors || undefined }]
+        ? [{ href: "/app/competitors", label: "מתחרים (ישן)", icon: Target, badge: counts.competitors || undefined }]
         : []),
       { href: "/app/trends", label: "טרנדים", icon: TrendingUp, badge: counts.trends || undefined },
       { href: "/app/seo-geo", label: "דירוג SEO/GEO", icon: BarChart2 },
@@ -104,6 +107,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const [counts, setCounts] = useState<NavCounts>({
     tenders: 0,
     competitors: 0,
+    competitorTracking: 0,
     trends: 0,
     news: 0,
     conferences: 0,
@@ -119,12 +123,14 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
       { count: trendsCount },
       { count: newsCount },
       { count: conferencesCount },
+      { count: competitorTrackingCount },
     ] = await Promise.all([
       supabase.from("tenders").select("*", { count: "exact", head: true }),
       supabase.from("competitors").select("*", { count: "exact", head: true }),
       supabase.from("trends").select("*", { count: "exact", head: true }),
       supabase.from("news").select("*", { count: "exact", head: true }),
       supabase.from("conferences").select("*", { count: "exact", head: true }),
+      supabase.from("competitor_tracking").select("*", { count: "exact", head: true }),
     ])
 
     // Fetch saved items count
@@ -140,6 +146,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     setCounts({
       tenders: tendersCount || 0,
       competitors: competitorsCount || 0,
+      competitorTracking: competitorTrackingCount || 0,
       trends: trendsCount || 0,
       news: newsCount || 0,
       conferences: conferencesCount || 0,

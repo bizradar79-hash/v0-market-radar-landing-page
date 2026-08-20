@@ -25,6 +25,9 @@ const MODULE_ROUTES: Record<string, string[]> = {
     '/api/sync-profile-competitors',
     ...(COMPETITOR_AUTODISCOVERY_ENABLED ? ['/api/find-competitors'] : []),
   ],
+  // NEW competitor module — an admin refresh FORCES a fresh run (re-resolves
+  // links and bypasses the staleness gate), which is the point of the button.
+  competitor_tracking: ['/api/competitor-tracking?force=true'],
   // Leads — distribution-channel-driven partner search (or customer fallback).
   // force=true here bypasses the route's 7-day cache AND the sync/run ≥5-leads
   // skip, so re-running after editing channels actually regenerates.

@@ -48,6 +48,7 @@ interface DashboardData {
   channelsCount: number
   tendersCount: number
   competitorsCount: number
+  competitorTrackingCount: number
   trendsCount: number
   conferencesCount: number
   newsCount: number
@@ -87,6 +88,7 @@ export default function AppDashboardPage() {
     const [
       { count: tendersCount },
       { count: competitorsCount },
+      { count: competitorTrackingCount },
       { count: trendsCount },
       { count: conferencesCount },
       { count: newsCount },
@@ -100,6 +102,7 @@ export default function AppDashboardPage() {
     ] = await Promise.all([
       supabase.from("tenders").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("competitors").select("*", { count: "exact", head: true }).eq("company_id", userId),
+      supabase.from("competitor_tracking").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("trends").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("conferences").select("*", { count: "exact", head: true }).eq("company_id", userId),
       supabase.from("news").select("*", { count: "exact", head: true }).eq("company_id", userId),
@@ -315,6 +318,7 @@ export default function AppDashboardPage() {
       channelsCount: topChannels.length,
       tendersCount: tendersCount || 0,
       competitorsCount: competitorsCount || 0,
+      competitorTrackingCount: competitorTrackingCount || 0,
       trendsCount: trendsCount || 0,
       conferencesCount: conferencesCount || 0,
       newsCount: newsCount || 0,
@@ -369,6 +373,8 @@ export default function AppDashboardPage() {
     ...(TENDERS_ENABLED
       ? [{ key: "tenders", label: "מכרזים", icon: FileText, href: "/app/tenders", value: data?.tendersCount || 0, color: "bg-purple-100 text-purple-700" }]
       : []),
+    // NEW competitor module — takes the old module's KPI slot.
+    { key: "competitor_tracking", label: "מעקב מתחרים", icon: Target, href: "/app/competitor-tracking", value: data?.competitorTrackingCount || 0, color: "bg-red-100 text-red-700" },
     // Old competitor module feature-flagged off — card hidden, nothing deleted.
     ...(OLD_COMPETITOR_MODULE_ENABLED
       ? [{ key: "competitors", label: "מתחרים", icon: Target, href: "/app/competitors", value: data?.competitorsCount || 0, color: "bg-red-100 text-red-700" }]
