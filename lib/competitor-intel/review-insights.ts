@@ -42,8 +42,10 @@ export interface ReviewSnapshot {
   mapsUrl?: string
   /** Maps-search candidates + name scores, for diagnosing a missing match. */
   candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
-  /** Which resolution passes ran and how each ended (name@area, brand@country…). */
+  /** Which resolution paths ran and how each ended (ai-maps-url, maps(...), web-search). */
   passes?: string
+  /** True when the business came from Google's top ranking, not a name match. */
+  viaTopResult?: boolean
   rating: number | null
   reviewsCount: number | null
   reviews: GoogleReview[]

@@ -194,11 +194,12 @@ export async function POST(request: Request) {
           // City-level where we have it — a Maps search is geo-ranked.
           area.search || 'Israel',
           override.cid || override.placeId ? { cid: override.cid, placeId: override.placeId } : undefined,
+          undefined, undefined,
+          // Same top-result trust as the production resolver.
+          true,
         )
         if (!r.found) {
-          const why = r.error === 'no_confident_name_match'
-            ? 'נמצאו עסקים בגוגל אך אף אחד לא תואם את השם בוודאות'
-            : r.error === 'no_maps_results'
+          const why = r.error === 'no_maps_results'
               ? 'לא נמצא עמוד גוגל למתחרה'
               : r.error || 'לא נמצא עמוד גוגל למתחרה'
           return {

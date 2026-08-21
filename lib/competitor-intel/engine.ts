@@ -25,7 +25,9 @@ import {
 } from './summarize'
 import { findCompetitorLinksAI } from './find-links-ai'
 import { computeReviewInsights, type ReviewSnapshot } from './review-insights'
-import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, withContext, mappedLocationLabel } from '@/lib/seo/google-reviews'
+import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, withContext } from '@/lib/seo/google-reviews'
+import { resolveMapsId } from './maps-id'
+import { searchWebDetailed } from '@/lib/brightdata/client'
 import { norm } from '@/lib/match/hebrew-core'
 
 /**
@@ -87,6 +89,7 @@ async function resolveLinks(
     return {
       ...(cached || {}),
       website: urls.website || cached?.website,
+      mapsUrl: (urls as any).googleMaps || cached?.mapsUrl,
       instagram: urls.instagram || cached?.instagram,
       facebook: urls.facebook || cached?.facebook,
       linkedin: urls.linkedin || cached?.linkedin,
@@ -129,61 +132,89 @@ export async function trackCompetitor(opts: {
   // pass finds nothing, we retry at country level before concluding the business
   // has no listing. Failing to do that reported "לא נמצא עמוד גוגל" for
   // businesses that are plainly on Google.
+  /**
+   * RESOLVE THE BUSINESS THE WAY A HUMAN DOES, then read its reviews by id.
+   *
+   * Name-similarity matching is no longer on the critical path: it kept
+   * rejecting real businesses whose Google listing title differs from the name
+   * the client typed. Instead we try, in order, to FIND THE RIGHT PAGE — and
+   * the first path that yields a cid wins:
+   *
+   *   0. cached cid            — resolved once, never re-fought
+   *   1. AI link-finder Maps URL → parse cid/place_id from it
+   *   2. DataForSEO Maps search "name + industry + city" → TOP result's cid
+   *      (Google's own ranking, exactly what clicking result #1 gives you)
+   *   3. plain web search "name industry city" → any Maps/cid link → parse
+   *
+   * Only when all of them come up empty do we report "no Google page".
+   */
   const resolveReviews = async (): Promise<ResearchReviews | null> => {
     if (!isReviewsConfigured()) return null
-    const id = links.cid ? { cid: links.cid } : undefined
     const area = (opts.areaSearch || '').trim()
-
-    // A cached cid is exact — no search needed.
-    if (id) return shapeReviews(await fetchGoogleReviews(name, area || 'Israel', id))
-
-    // PASS PLAN. Each pass changes ONE variable, widest signal last:
-    //   1. full name  @ client's area   — best case, competitor is local
-    //   2. full name  @ country         — competitor is elsewhere in Israel
-    //   3. brand only @ country         — generic words were steering the query
-    //      ("לימון ייעוץ משכנתאות" returns the mortgage-advisor pack; "לימון"
-    //       returns the business)
-    // Business-type context: the client's industry, which their competitors
-    // share. Turns the too-broad "לימון" into "לימון משכנתאות".
     const ctx = (opts.industryContext || '').trim()
-    const brandKw = searchKeyword(name, ctx)
-    const nameWithCtx = withContext(name, ctx)
     const site = links.website || ''
+    const tried: string[] = []
 
-    const passes: Array<{ label: string; location: string; keyword: string }> = [
-      { label: 'name@area', location: area || 'Israel', keyword: name },
-    ]
-    // Compare the MAPPED locations, not the raw Hebrew: deriveArea returns
-    // 'ישראל', which never equals the ASCII 'Israel', so a national client used
-    // to fire an identical second search and learn nothing.
-    if (mappedLocationLabel(area) !== mappedLocationLabel('Israel')) {
-      passes.push({ label: 'name@country', location: 'Israel', keyword: name })
+    // ── PATH 0: cached id ───────────────────────────────────────────────────
+    if (links.cid) {
+      tried.push('cached-cid')
+      const r = await fetchGoogleReviews(name, area || 'Israel', { cid: links.cid })
+      return shapeReviews(r, tried.join(' · '))
     }
-    // Context passes: the name (or just the brand) plus the industry term.
-    if (norm(nameWithCtx) !== norm(name)) {
-      passes.push({ label: 'name+industry@country', location: 'Israel', keyword: nameWithCtx })
+
+    // ── PATH 1: a Maps URL the AI finder already produced ────────────────────
+    if (links.mapsUrl) {
+      const id = await resolveMapsId(links.mapsUrl)
+      tried.push(`ai-maps-url:${id.cid || id.placeId ? 'id' : (id.error || 'none')}`)
+      if (id.cid || id.placeId) {
+        const r = await fetchGoogleReviews(name, area || 'Israel', { cid: id.cid, placeId: id.placeId })
+        if (r.found) return shapeReviews(r, tried.join(' · '))
+      }
     }
-    if (norm(brandKw) !== norm(nameWithCtx) && norm(brandKw) !== norm(name)) {
-      passes.push({ label: 'brand+industry@country', location: 'Israel', keyword: brandKw })
-    }
+
+    // ── PATH 2: DataForSEO Maps search, TRUSTING THE TOP RESULT ─────────────
+    // Queries go from most specific to broadest; each trusts Google's #1 hit.
+    const queries = [
+      withContext(`${name} ${area}`.trim(), ctx),
+      withContext(name, ctx),
+      searchKeyword(name, ctx),
+      name,
+    ].filter((q, i, a) => q && a.findIndex((x) => norm(x) === norm(q)) === i)
 
     let last: Awaited<ReturnType<typeof fetchGoogleReviews>> | null = null
     let spent = 0
-    const tried: string[] = []
-    for (const p of passes) {
-      const r = await fetchGoogleReviews(name, p.location, undefined, p.keyword, site)
+    for (const q of queries) {
+      const r = await fetchGoogleReviews(name, area || 'Israel', undefined, q, site, true)
       spent += r.costUSD
-      tried.push(`${p.label}:${r.found ? 'found' : (r.error || 'empty')}`)
+      tried.push(`maps("${q}"):${r.found ? (r.viaTopResult ? 'top-result' : 'match') : (r.error || 'empty')}`)
       last = r
-      if (r.found) break
-      // Only a MISS is worth widening; a hard failure (bad credentials, provider
-      // error) will fail identically on the next pass, so stop and report it.
-      const miss = r.error === 'no_maps_results' || r.error === 'no_confident_name_match'
-      if (!miss) break
+      if (r.found) return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
+      // A hard failure (credentials, provider error) repeats identically — stop.
+      if (r.error !== 'no_maps_results') break
     }
-    const r = last!
-    // Which passes ran and how each ended — so a miss is diagnosable without
-    // guessing at what we searched for.
+
+    // ── PATH 3: plain web search for a Maps/cid link ────────────────────────
+    try {
+      // withContext skips a word the name already carries, so a name like
+      // "לימון ייעוץ משכנתאות" doesn't become "… משכנתאות משכנתאות".
+      const q = [withContext(name, ctx), area].filter(Boolean).join(' ')
+      const { hits } = await searchWebDetailed(`${q} google maps`, 10)
+      const mapsHit = hits.find((h) => /google\.[a-z.]+\/maps|maps\.app\.goo\.gl|[?&](cid|ludocid)=/i.test(h.url))
+      tried.push(`web-search:${mapsHit ? 'maps-link' : 'none'}`)
+      if (mapsHit) {
+        const id = await resolveMapsId(mapsHit.url)
+        if (id.cid || id.placeId) {
+          const r = await fetchGoogleReviews(name, area || 'Israel', { cid: id.cid, placeId: id.placeId })
+          spent += r.costUSD
+          if (r.found) return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
+          last = r
+        }
+      }
+    } catch (e: any) {
+      tried.push(`web-search:error(${(e?.message || '').slice(0, 30)})`)
+    }
+
+    const r = last || { found: false, rating: null, reviewsCount: null, reviews: [], costUSD: spent }
     return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
   }
 
@@ -199,6 +230,7 @@ export async function trackCompetitor(opts: {
       reviewsCount: r.reviewsCount,
       reviews: r.reviews,
       candidates: r.candidates,
+      viaTopResult: r.viaTopResult,
       insights: r.found ? computeReviewInsights(r) : undefined,
       capturedAt: scannedAt,
       costUSD: r.costUSD,

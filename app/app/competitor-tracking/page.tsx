@@ -281,9 +281,7 @@ export default function CompetitorTrackingPage() {
                   <p className="text-sm text-muted-foreground">
                     {!rev
                       ? 'ביקורות גוגל לא נאספו בסריקה הזו.'
-                      : rev.error === 'no_confident_name_match'
-                        ? 'נמצאו עסקים בגוגל אך אף אחד לא תאם את השם בוודאות.'
-                        : rev.error && rev.error !== 'no_maps_results' && rev.error !== 'no_google_business_profile'
+                      : rev.error && rev.error !== 'no_maps_results' && rev.error !== 'no_google_business_profile'
                           ? `לא נאספו ביקורות: ${rev.error}`
                           : 'לא נמצא עמוד גוגל למתחרה הזה.'}
                   </p>

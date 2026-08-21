@@ -105,6 +105,7 @@ export interface BusinessInfo {
 }
 export interface ReviewsFetch extends BusinessInfo {
   candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
+  viaTopResult?: boolean
   reviews: GoogleReview[]
   /** EXACT — summed from DataForSEO's own `cost` field per task. */
   costUSD: number
@@ -288,6 +289,8 @@ export function hostOf(url?: string): string {
 export interface MapsMatch extends BusinessInfo {
   costUSD: number
   error?: string
+  /** True when the match came from Google's ranking rather than a name match. */
+  viaTopResult?: boolean
   /** Every candidate considered, for diagnosing a wrong / missing match. */
   candidates?: Array<{ title: string; score: number; cid?: string; address?: string }>
 }
@@ -300,6 +303,14 @@ export async function searchBusinessOnMaps(
   name: string, locationName = 'Israel', keywordOverride?: string,
   /** The competitor's known website — an exact domain match beats any name score. */
   knownWebsite?: string,
+  /**
+   * TRUST GOOGLE'S RANKING. When the query is specific (name + industry + city),
+   * the top Maps hit IS the business — that's what a human clicking the first
+   * result gets. Without this, a strict similarity gate kept rejecting real
+   * businesses ("לימון") because their listing title differed from the stored
+   * name. With it, we only fall back to the top result when nothing scored.
+   */
+  trustTopResult?: boolean,
 ): Promise<MapsMatch> {
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
@@ -343,15 +354,19 @@ export async function searchBusinessOnMaps(
       .sort((a, b) => (Number(b.domainMatch) - Number(a.domainMatch)) || (b.votes - a.votes) || (b.score - a.score))
 
     const diag = scored.slice(0, 5).map(({ title, score, cid, address }) => ({ title, score: Math.round(score * 100) / 100, cid, address }))
+    // 1st choice: a domain match or a confident name match.
+    // 2nd choice (trustTopResult): Google's own #1 result for a specific
+    // name+industry+city query. Finding the right PAGE beats string similarity.
     const best = acceptable[0]
-    // No acceptable match is an HONEST empty, not a wrong business.
+      || (trustTopResult && scored.length ? scored[0] : undefined)
     if (!best) {
       return {
         found: false, rating: null, reviewsCount: null, costUSD: cost,
-        error: items.length ? 'no_confident_name_match' : 'no_maps_results',
+        error: 'no_maps_results',
         candidates: diag,
       }
     }
+    const viaTopResult = !acceptable.length
     const it = best.it
     return {
       found: true,
@@ -364,6 +379,8 @@ export async function searchBusinessOnMaps(
       reviewsCount: typeof it.rating?.votes_count === 'number' ? it.rating.votes_count : null,
       costUSD: cost,
       candidates: diag,
+      // Recorded so a top-result acceptance is never mistaken for an exact match.
+      viaTopResult,
     }
   } catch (e: any) {
     return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: (e?.message || 'maps_search_failed').slice(0, 60) }
@@ -488,6 +505,7 @@ export async function fetchGoogleReviews(
   id?: { cid?: string; placeId?: string },
   keywordOverride?: string,
   knownWebsite?: string,
+  trustTopResult?: boolean,
 ): Promise<ReviewsFetch> {
   const auth = authHeader()
   if (!auth) {
@@ -498,7 +516,7 @@ export async function fetchGoogleReviews(
   // Google Maps search resolves the business from name + the client's city.
   const info: MapsMatch = id?.cid || id?.placeId
     ? { ...(await fetchBusinessInfo(name, locationName, id)) }
-    : await searchBusinessOnMaps(name, locationName, keywordOverride, knownWebsite)
+    : await searchBusinessOnMaps(name, locationName, keywordOverride, knownWebsite, trustTopResult)
 
   if (!info.found) {
     return {
