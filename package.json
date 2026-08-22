@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "npx --yes tsx --test lib/competitor-intel/__tests__/*.test.mts"
   },
   "dependencies": {
     "@ai-sdk/groq": "^3.0.29",

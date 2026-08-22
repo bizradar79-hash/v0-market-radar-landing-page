@@ -10,12 +10,18 @@ import { MAX_DIRECT_COMPETITORS } from '@/lib/flags'
 import { trackCompetitor, isFresh, TRACKING_MIN_DAYS, type ResolvedLinks } from '@/lib/competitor-intel/engine'
 
 /**
- * Per-competitor wall-clock budget. MUST stay comfortably below maxDuration
- * (300s): if the platform kills the invocation first, the finally{} never runs
- * and the chain dies silently. 150s leaves ~150s of headroom for the upsert and
- * the awaited handoff, so the timeout always fires before the platform does.
+ * Per-competitor wall-clock budget, passed INTO the engine as a deadline.
+ *
+ * It used to be a Promise.race around the whole run. That race is what lost a
+ * completed result: a run had already resolved 143 reviews when the 150s timer
+ * fired, the race rejected, the catch skipped the upsert entirely, and the
+ * PREVIOUS run's failure row survived — so a success was reported to the logs
+ * and a failure was persisted. A deadline the engine honours internally lets the
+ * run return normally with whatever it has, and we always persist that.
  */
-const COMPETITOR_BUDGET_MS = Number(process.env.COMPETITOR_TIME_BUDGET_MS) || 150000
+const COMPETITOR_BUDGET_MS = Number(process.env.COMPETITOR_TIME_BUDGET_MS) || 200000
+/** Absolute backstop, only for a genuinely stuck run. Below maxDuration (300s). */
+const HARD_STOP_MS = Number(process.env.COMPETITOR_HARD_STOP_MS) || 275000
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 function adminDb() {
@@ -146,14 +152,19 @@ async function handlePost(request: Request) {
         trackCompetitor({
           name,
           areaSearch: area.search,
-        industryContext,
+          industryContext,
           cachedLinks: (row?.resolved_links || null) as ResolvedLinks | null,
           // Only an explicit force re-runs link discovery; otherwise the cache wins.
           force,
+          // The engine stops STARTING new work past this and returns normally,
+          // so a slow run yields a result to persist instead of being discarded.
+          // The race below is now only a stuck-process backstop.
+          deadlineAt: Date.now() + COMPETITOR_BUDGET_MS,
         }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('competitor_time_budget_exceeded')), COMPETITOR_BUDGET_MS)),
+          setTimeout(() => reject(new Error('competitor_hard_stop')), HARD_STOP_MS)),
       ])
+      console.log(`[COMPETITOR-INTEL][${name}] PERSISTING reviews.found=${result.reviews?.found ?? 'n/a'} rating=${result.reviews?.rating ?? '-'} count=${result.reviews?.reviewsCount ?? '-'} passes=${result.reviews?.passes || '-'}`)
       const { error } = await db.from('competitor_tracking').upsert({
         company_id: companyId,
         competitor_name: name,
@@ -181,7 +192,10 @@ async function handlePost(request: Request) {
       })
       return { tracked: true, skipped: false, costUSD: result.cost.totalUSD }
     } catch (e: any) {
-      // BEST EFFORT: one bad or slow competitor must never stop the chain.
+      // BEST EFFORT: a bad competitor must never take down the run. Nothing is
+      // written here, so any EXISTING row is left untouched — which is why the
+      // stale-failure symptom was so confusing. Log loudly.
+      console.error(`[COMPETITOR-INTEL][${name}] RUN FAILED — nothing persisted, previous row kept:`, e?.message)
       details.push({ name, status: 'error', message: (e?.message || 'failed').slice(0, 120) })
       return { tracked: false, skipped: false, costUSD: 0 }
     }

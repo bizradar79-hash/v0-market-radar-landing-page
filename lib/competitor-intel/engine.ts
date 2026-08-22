@@ -27,6 +27,7 @@ import { findCompetitorLinksAI } from './find-links-ai'
 import { computeReviewInsights, type ReviewSnapshot } from './review-insights'
 import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, withContext } from '@/lib/seo/google-reviews'
 import { resolveMapsId } from './maps-id'
+import { resolveReviewsPaths } from './resolve-reviews'
 import { searchWebDetailed } from '@/lib/brightdata/client'
 import { norm } from '@/lib/match/hebrew-core'
 
@@ -114,6 +115,12 @@ export async function trackCompetitor(opts: {
   cachedLinks?: ResolvedLinks | null
   /** Re-resolve links and ignore any cache. */
   force?: boolean
+  /**
+   * Wall-clock stop (epoch ms). Resolution paths are not STARTED past it, so
+   * the run returns normally with whatever it has instead of being discarded by
+   * a caller-side timeout — the bug that lost a completed 143-review result.
+   */
+  deadlineAt?: number
 }): Promise<TrackingResult> {
   const name = (opts.name || '').trim()
   const counter = new RequestCounter()
@@ -161,32 +168,8 @@ export async function trackCompetitor(opts: {
     const area = (opts.areaSearch || '').trim()
     const ctx = (opts.industryContext || '').trim()
     const site = links.website || ''
-    const tried: string[] = []
     L(`REVIEWS start — industry="${ctx || '(none)'}" area="${area || '(none)'}" website="${site || '(none)'}" cachedCid=${links.cid || '(none)'} aiMapsUrl=${links.mapsUrl || '(none)'}`)
 
-    // ── PATH 0: cached id ───────────────────────────────────────────────────
-    if (links.cid) {
-      tried.push('cached-cid')
-      L(`PATH 0 cached cid=${links.cid} → reviews by id`)
-      const r = await fetchGoogleReviews(name, area || 'Israel', { cid: links.cid })
-      L(`PATH 0 result found=${r.found} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} reviews=${r.reviews.length} err=${r.error || '-'}`)
-      return shapeReviews(r, tried.join(' · '))
-    }
-
-    // ── PATH 1: a Maps URL the AI finder already produced ────────────────────
-    if (links.mapsUrl) {
-      const id = await resolveMapsId(links.mapsUrl)
-      tried.push(`ai-maps-url:${id.cid || id.placeId ? 'id' : (id.error || 'none')}`)
-      L(`PATH 1 AI maps url "${links.mapsUrl}" → cid=${id.cid || '-'} place_id=${id.placeId || '-'} err=${id.error || '-'}`)
-      if (id.cid || id.placeId) {
-        const r = await fetchGoogleReviews(name, area || 'Israel', { cid: id.cid, placeId: id.placeId })
-        L(`PATH 1 result found=${r.found} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} err=${r.error || '-'}`)
-        if (r.found) return shapeReviews(r, tried.join(' · '))
-      }
-    }
-
-    // ── PATH 2: DataForSEO Maps search, TRUSTING THE TOP RESULT ─────────────
-    // Queries go from most specific to broadest; each trusts Google's #1 hit.
     const queries = [
       withContext(`${name} ${area}`.trim(), ctx),
       withContext(name, ctx),
@@ -194,45 +177,27 @@ export async function trackCompetitor(opts: {
       name,
     ].filter((q, i, a) => q && a.findIndex((x) => norm(x) === norm(q)) === i)
 
-    let last: Awaited<ReturnType<typeof fetchGoogleReviews>> | null = null
-    let spent = 0
-    L(`PATH 2 Maps queries: ${queries.map((q) => `"${q}"`).join(' → ')}`)
-    for (const q of queries) {
-      const r = await fetchGoogleReviews(name, area || 'Israel', undefined, q, site, true)
-      spent += r.costUSD
-      tried.push(`maps("${q}"):${r.found ? (r.viaTopResult ? 'top-result' : 'match') : (r.error || 'empty')}`)
-      L(`PATH 2 query="${q}" → found=${r.found} via=${r.viaTopResult ? 'TOP-RESULT' : 'name-match'} title="${r.title || '-'}" cid=${r.cid || '-'} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} reviews=${r.reviews.length} err=${r.error || '-'} candidates=${JSON.stringify((r.candidates || []).map((c) => `${c.title}|${c.score}`))}`)
-      last = r
-      if (r.found) return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
-      // A hard failure (credentials, provider error) repeats identically — stop.
-      if (r.error !== 'no_maps_results') break
-    }
-
-    // ── PATH 3: plain web search for a Maps/cid link ────────────────────────
-    try {
-      // withContext skips a word the name already carries, so a name like
-      // "לימון ייעוץ משכנתאות" doesn't become "… משכנתאות משכנתאות".
-      const q = [withContext(name, ctx), area].filter(Boolean).join(' ')
-      const { hits } = await searchWebDetailed(`${q} google maps`, 10)
-      const mapsHit = hits.find((h) => /google\.[a-z.]+\/maps|maps\.app\.goo\.gl|[?&](cid|ludocid)=/i.test(h.url))
-      tried.push(`web-search:${mapsHit ? 'maps-link' : 'none'}`)
-      L(`PATH 3 web search "${q} google maps" → ${hits.length} hits, mapsLink=${mapsHit?.url || '(none)'}`)
-      if (mapsHit) {
-        const id = await resolveMapsId(mapsHit.url)
-        if (id.cid || id.placeId) {
-          const r = await fetchGoogleReviews(name, area || 'Israel', { cid: id.cid, placeId: id.placeId })
-          spent += r.costUSD
-          if (r.found) return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
-          last = r
-        }
-      }
-    } catch (e: any) {
-      tried.push(`web-search:error(${(e?.message || '').slice(0, 30)})`)
-    }
-
-    const r = last || { found: false, rating: null, reviewsCount: null, reviews: [], costUSD: spent }
-    L(`REVIEWS UNRESOLVED after all paths — ${tried.join(' · ')} (cost $${spent.toFixed(4)})`)
-    return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
+    // FIRST SUCCESS WINS — see lib/competitor-intel/resolve-reviews (unit-tested
+    // against the exact production scenario that lost a 143-review result).
+    const outcome = await resolveReviewsPaths({
+      cachedCid: links.cid,
+      aiMapsUrl: links.mapsUrl,
+      queries,
+      webQuery: `${[withContext(name, ctx), area].filter(Boolean).join(' ')} google maps`,
+      deadlineAt: opts.deadlineAt,
+      log: L,
+      byId: (id) => fetchGoogleReviews(name, area || 'Israel', id),
+      byQuery: (q) => fetchGoogleReviews(name, area || 'Israel', undefined, q, site, true),
+      parseMapsUrl: async (url) => {
+        const id = await resolveMapsId(url)
+        return { cid: id.cid, placeId: id.placeId, error: id.error }
+      },
+      webSearch: async (q) => {
+        const { hits } = await searchWebDetailed(q, 10)
+        return hits.map((h) => h.url)
+      },
+    })
+    return shapeReviews(outcome.reviews, outcome.passes)
   }
 
   /** Shared mapping from a provider result to the stored snapshot. */
