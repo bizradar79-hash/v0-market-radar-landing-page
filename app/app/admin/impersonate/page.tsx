@@ -365,6 +365,10 @@ export default function ImpersonatePage() {
   type CtRow = {
     name: string; done: boolean; sourcesOk: number
     reviewsFound: boolean; reviewsError: string | null; scannedAt?: string | null
+    reviewsRating?: number | null; reviewsCount?: number | null
+    reviewsPasses?: string | null; viaTopResult?: boolean
+    cid?: string | null; costUSD?: number | null
+    sourceDetail?: Array<{ source: string; status: string; postsRecent: number; error: string | null }>
   }
   const [ctList, setCtList] = useState<CtRow[]>([])
   const [ctRunning, setCtRunning] = useState<string | null>(null)
@@ -384,9 +388,18 @@ export default function ImpersonatePage() {
     loadCtList(moduleSyncUser.id)
   }, [moduleSyncUser, loadCtList])
 
-  /** Run ONE competitor and report its real result. Never throws. */
+  /**
+   * Run ONE competitor: TRIGGER, then POLL.
+   *
+   * The trigger used to hold the browser's fetch open for the whole run — which
+   * for a real competitor is minutes of BrightData polling — and the network
+   * layer aborted it, surfacing as "Failed to fetch" with no server error to
+   * inspect. The POST now returns in milliseconds and the work continues
+   * server-side; we watch the status endpoint for the row to land.
+   */
   async function runCompetitor(userId: string, name: string): Promise<boolean> {
     setCtRunning(name)
+    setCtResult(p => ({ ...p, [name]: '⟳ רץ בשרת…' }))
     try {
       const res = await fetch('/api/admin/competitor-tracking-status', {
         method: 'POST',
@@ -394,17 +407,40 @@ export default function ImpersonatePage() {
         body: JSON.stringify({ company_id: userId, competitor: name }),
       })
       const d = await res.json().catch(() => ({}))
-      if (!res.ok) {
+      if (!res.ok || !d.started) {
         setCtResult(p => ({ ...p, [name]: `❌ ${d.error || `HTTP ${res.status}`}` }))
         return false
       }
-      const srcs = (d.sources || []).filter((x: any) => x.status === 'ok').length
-      const rev = d.reviews?.found
-        ? `ביקורות ${d.reviews.rating ?? '?'}★ (${d.reviews.reviewsCount ?? '?'})`
-        : `ללא ביקורות${d.reviews?.error ? ` — ${d.reviews.error}` : ''}`
-      setCtResult(p => ({ ...p, [name]: `✅ ${srcs} מקורות · ${rev}${d.costUSD ? ` · $${d.costUSD}` : ''}` }))
-      await loadCtList(userId)
-      return true
+      const since: string = d.startedAt
+
+      // Poll until the row for THIS run appears (or we give up watching —
+      // the server keeps going either way, and a refresh will show it).
+      const DEADLINE_MS = 8 * 60 * 1000
+      const t0 = Date.now()
+      while (Date.now() - t0 < DEADLINE_MS) {
+        await new Promise(r => setTimeout(r, 8000))
+        try {
+          const sres = await fetch(`/api/admin/competitor-tracking-status?company_id=${userId}&since=${encodeURIComponent(since)}`)
+          const sdata = await sres.json()
+          if (!sres.ok) continue
+          setCtList(sdata.competitors || [])
+          const row = (sdata.competitors || []).find((c: any) => c.name === name)
+          if (row?.done) {
+            const rev = row.reviewsFound
+              ? `ביקורות ${row.reviewsRating ?? '?'}★ (${row.reviewsCount ?? '?'})${row.viaTopResult ? ' [top-result]' : ''}`
+              : `ללא ביקורות${row.reviewsError ? ` — ${row.reviewsError}` : ''}`
+            const secs = Math.round((Date.now() - t0) / 1000)
+            setCtResult(p => ({
+              ...p,
+              [name]: `✅ ${row.sourcesOk} מקורות · ${rev}${row.costUSD ? ` · $${row.costUSD.toFixed(4)}` : ''} · ${secs}s`,
+            }))
+            return true
+          }
+          setCtResult(p => ({ ...p, [name]: `⟳ רץ בשרת… ${Math.round((Date.now() - t0) / 1000)}s` }))
+        } catch { /* transient — keep polling */ }
+      }
+      setCtResult(p => ({ ...p, [name]: '⏳ עדיין רץ בשרת — רענן בעוד דקה' }))
+      return false
     } catch (e: any) {
       setCtResult(p => ({ ...p, [name]: `❌ ${e?.message || 'שגיאה'}` }))
       return false
@@ -1135,6 +1171,11 @@ export default function ImpersonatePage() {
                             ? `נסרק ${new Date(c.scannedAt).toLocaleDateString('he-IL')} · ${c.sourcesOk} מקורות · ביקורות: ${c.reviewsFound ? 'נמצאו' : (c.reviewsError || 'לא נמצאו')}`
                             : 'טרם נסרק'}
                       </p>
+                      {c.reviewsPasses && (
+                        <p className="text-[9px] text-muted-foreground/80 break-all" title="מסלול פתרון עמוד הגוגל">
+                          {c.reviewsPasses}
+                        </p>
+                      )}
                     </div>
                     <Button
                       size="sm" variant="outline" className="h-7 shrink-0 text-[11px]"

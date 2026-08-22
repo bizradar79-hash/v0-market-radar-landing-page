@@ -55,7 +55,25 @@ function adminDb() {
  * strictly more reliable and fully observable — and if the tab closes, whatever
  * finished is already saved.
  */
+/**
+ * Wrapper so this route ALWAYS answers with JSON. An unhandled throw would
+ * otherwise surface to the caller as a naked 500 (or a dropped connection),
+ * which is indistinguishable from a network failure — exactly the kind of
+ * opaque "Failed to fetch" we just spent a round diagnosing.
+ */
 export async function POST(request: Request) {
+  try {
+    return await handlePost(request)
+  } catch (e: any) {
+    console.error('[COMPETITOR-INTEL] route crashed:', e?.stack || e?.message)
+    return NextResponse.json(
+      { error: (e?.message || 'competitor_tracking_failed').slice(0, 300) },
+      { status: 500 },
+    )
+  }
+}
+
+async function handlePost(request: Request) {
   const params = new URL(request.url).searchParams
   const force = params.get('force') === 'true'
   /** Run a SINGLE named competitor and return its result. */

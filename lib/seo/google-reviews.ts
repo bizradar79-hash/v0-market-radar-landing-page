@@ -315,11 +315,13 @@ export async function searchBusinessOnMaps(
   const auth = authHeader()
   if (!auth) return { found: false, rating: null, reviewsCount: null, costUSD: 0, error: 'missing_credentials' }
   try {
-    const { res, data } = await dfsPost(MAPS_SEARCH_LIVE, [{
+    const task = {
       keyword: (keywordOverride || name).slice(0, 700),
       ...dfsLocation(locationName),
       language_code: 'he',
-    }], auth, 45000)
+    }
+    console.log(`[COMPETITOR-INTEL][${name}] DFS maps/live/advanced REQ ${JSON.stringify(task)}`)
+    const { res, data } = await dfsPost(MAPS_SEARCH_LIVE, [task], auth, 45000)
     const { node, error, cost } = taskOf(data)
     if (!res.ok || error) {
       return { found: false, rating: null, reviewsCount: null, costUSD: cost, error: error || `http_${res.status}` }
@@ -327,6 +329,7 @@ export async function searchBusinessOnMaps(
 
     const knownHost = hostOf(knownWebsite)
     const items: any[] = node?.result?.[0]?.items || []
+    console.log(`[COMPETITOR-INTEL][${name}] DFS maps RES http=${res.status} items=${items.length} titles=${JSON.stringify(items.slice(0, 6).map((i: any) => i?.title))}`)
     const scored = items
       .filter((it) => it && (it.title || it.cid))
       .map((it) => ({
@@ -411,11 +414,9 @@ export async function fetchBusinessInfo(
       : id?.placeId
         ? { keyword: `place_id:${id.placeId}` }
         : { keyword: name.slice(0, 700) }
-    const { res, data } = await dfsPost(MY_BUSINESS_LIVE, [{
-      ...identity,
-      ...dfsLocation(locationName),
-      language_code: 'he',
-    }], auth)
+    const mbTask = { ...identity, ...dfsLocation(locationName), language_code: 'he' }
+    console.log(`[COMPETITOR-INTEL][${name}] DFS my_business_info REQ ${JSON.stringify(mbTask)}`)
+    const { res, data } = await dfsPost(MY_BUSINESS_LIVE, [mbTask], auth)
     const { node, error, cost } = taskOf(data)
     if (!res.ok || error) {
       return { found: false, rating: null, reviewsCount: null, costUSD: cost, error: error || `http_${res.status}` }
@@ -457,11 +458,13 @@ async function fetchReviewItems(
     else if (opts.placeId) task.place_id = opts.placeId
     else return { reviews: [], costUSD: cost, error: 'no_business_id' }
 
+    console.log(`[COMPETITOR-INTEL] DFS reviews/task_post REQ ${JSON.stringify(task)}`)
     const posted = await dfsPost(REVIEWS_POST, [task], auth)
     const p = taskOf(posted.data)
     cost += p.cost
     if (p.error) return { reviews: [], costUSD: cost, error: p.error }
     const id = p.node?.id
+    console.log(`[COMPETITOR-INTEL] DFS reviews/task_post RES task=${id || '(none)'} err=${p.error || '-'}`)
     if (!id) return { reviews: [], costUSD: cost, error: 'no_task_id' }
 
     // Poll — there is no live reviews endpoint, so waiting is the only option.
@@ -480,6 +483,7 @@ async function fetchReviewItems(
         return { reviews: [], costUSD: cost, error: `task_${st}: ${(node?.status_message || '').slice(0, 120)}` }
       }
       const items: any[] = node?.result?.[0]?.items || []
+      console.log(`[COMPETITOR-INTEL] DFS reviews/task_get RES status=${st} items=${items.length}`)
       const reviews: GoogleReview[] = items
         .filter((it) => it && (it.review_text || it.rating))
         .map((it) => ({

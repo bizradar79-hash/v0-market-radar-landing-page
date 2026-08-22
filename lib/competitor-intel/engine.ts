@@ -119,7 +119,11 @@ export async function trackCompetitor(opts: {
   const counter = new RequestCounter()
   const scannedAt = new Date().toISOString()
 
+  const log = (msg: string) => console.log(`[COMPETITOR-INTEL][${name}] ${msg}`)
+  const tStart = Date.now()
+  log(`RUN start force=${!!opts.force} cachedLinks=${JSON.stringify(opts.cachedLinks || {})}`)
   const links = await resolveLinks(name, opts.cachedLinks?.website || '', opts.cachedLinks || null, !!opts.force)
+  log(`LINKS resolved: ${JSON.stringify({ website: links.website, instagram: links.instagram, facebook: links.facebook, linkedin: links.linkedin, mapsUrl: links.mapsUrl, cid: links.cid })}`)
 
   // ── Google reviews, in parallel with the scrapes ─────────────────────────
   // A cached cid skips the Maps search entirely (one fewer billed call, and
@@ -149,16 +153,23 @@ export async function trackCompetitor(opts: {
    * Only when all of them come up empty do we report "no Google page".
    */
   const resolveReviews = async (): Promise<ResearchReviews | null> => {
-    if (!isReviewsConfigured()) return null
+    const L = (msg: string) => console.log(`[COMPETITOR-INTEL][${name}] ${msg}`)
+    if (!isReviewsConfigured()) {
+      L('REVIEWS skipped — DATAFORSEO_LOGIN/PASSWORD not configured')
+      return null
+    }
     const area = (opts.areaSearch || '').trim()
     const ctx = (opts.industryContext || '').trim()
     const site = links.website || ''
     const tried: string[] = []
+    L(`REVIEWS start — industry="${ctx || '(none)'}" area="${area || '(none)'}" website="${site || '(none)'}" cachedCid=${links.cid || '(none)'} aiMapsUrl=${links.mapsUrl || '(none)'}`)
 
     // ── PATH 0: cached id ───────────────────────────────────────────────────
     if (links.cid) {
       tried.push('cached-cid')
+      L(`PATH 0 cached cid=${links.cid} → reviews by id`)
       const r = await fetchGoogleReviews(name, area || 'Israel', { cid: links.cid })
+      L(`PATH 0 result found=${r.found} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} reviews=${r.reviews.length} err=${r.error || '-'}`)
       return shapeReviews(r, tried.join(' · '))
     }
 
@@ -166,8 +177,10 @@ export async function trackCompetitor(opts: {
     if (links.mapsUrl) {
       const id = await resolveMapsId(links.mapsUrl)
       tried.push(`ai-maps-url:${id.cid || id.placeId ? 'id' : (id.error || 'none')}`)
+      L(`PATH 1 AI maps url "${links.mapsUrl}" → cid=${id.cid || '-'} place_id=${id.placeId || '-'} err=${id.error || '-'}`)
       if (id.cid || id.placeId) {
         const r = await fetchGoogleReviews(name, area || 'Israel', { cid: id.cid, placeId: id.placeId })
+        L(`PATH 1 result found=${r.found} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} err=${r.error || '-'}`)
         if (r.found) return shapeReviews(r, tried.join(' · '))
       }
     }
@@ -183,10 +196,12 @@ export async function trackCompetitor(opts: {
 
     let last: Awaited<ReturnType<typeof fetchGoogleReviews>> | null = null
     let spent = 0
+    L(`PATH 2 Maps queries: ${queries.map((q) => `"${q}"`).join(' → ')}`)
     for (const q of queries) {
       const r = await fetchGoogleReviews(name, area || 'Israel', undefined, q, site, true)
       spent += r.costUSD
       tried.push(`maps("${q}"):${r.found ? (r.viaTopResult ? 'top-result' : 'match') : (r.error || 'empty')}`)
+      L(`PATH 2 query="${q}" → found=${r.found} via=${r.viaTopResult ? 'TOP-RESULT' : 'name-match'} title="${r.title || '-'}" cid=${r.cid || '-'} rating=${r.rating ?? '-'} count=${r.reviewsCount ?? '-'} reviews=${r.reviews.length} err=${r.error || '-'} candidates=${JSON.stringify((r.candidates || []).map((c) => `${c.title}|${c.score}`))}`)
       last = r
       if (r.found) return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
       // A hard failure (credentials, provider error) repeats identically — stop.
@@ -201,6 +216,7 @@ export async function trackCompetitor(opts: {
       const { hits } = await searchWebDetailed(`${q} google maps`, 10)
       const mapsHit = hits.find((h) => /google\.[a-z.]+\/maps|maps\.app\.goo\.gl|[?&](cid|ludocid)=/i.test(h.url))
       tried.push(`web-search:${mapsHit ? 'maps-link' : 'none'}`)
+      L(`PATH 3 web search "${q} google maps" → ${hits.length} hits, mapsLink=${mapsHit?.url || '(none)'}`)
       if (mapsHit) {
         const id = await resolveMapsId(mapsHit.url)
         if (id.cid || id.placeId) {
@@ -215,6 +231,7 @@ export async function trackCompetitor(opts: {
     }
 
     const r = last || { found: false, rating: null, reviewsCount: null, reviews: [], costUSD: spent }
+    L(`REVIEWS UNRESOLVED after all paths — ${tried.join(' · ')} (cost $${spent.toFixed(4)})`)
     return shapeReviews({ ...r, costUSD: spent }, tried.join(' · '))
   }
 
@@ -278,6 +295,8 @@ export async function trackCompetitor(opts: {
   )
 
   const reviews = await reviewsPromise
+  log(`SOURCES: ${sources.map((x) => `${x.source}=${x.status}${x.postsRecent != null ? `(${x.postsRecent} recent)` : ''}${x.error ? `[${x.error}]` : ''}`).join(' ')}`)
+  log(`REVIEWS: found=${reviews?.found ?? 'n/a'} rating=${reviews?.rating ?? '-'} count=${reviews?.reviewsCount ?? '-'} passes=${reviews?.passes || '-'} err=${reviews?.error || '-'}`)
   // CACHE the resolved cid — the next scan queries reviews by id and skips the
   // Maps search entirely (cheaper, and can't regress into a bad name match).
   if (reviews?.cid) links.cid = reviews.cid
@@ -302,6 +321,7 @@ export async function trackCompetitor(opts: {
 
   const gotSomething =
     sources.some((s) => s.status === 'ok') || !!reviews?.found
+  log(`RUN done in ${Math.round((Date.now() - tStart) / 1000)}s — cost $${cost.totalUSD.toFixed(4)}`)
   return {
     competitorName: name,
     resolvedLinks: links,
