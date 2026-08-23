@@ -121,57 +121,11 @@ function ReportShowcase() {
 
       {/* 8 module cards */}
       <div className="mt-6 grid gap-5 md:grid-cols-2">
-        {/* 1. Actions */}
-        <ModuleCard title="🎯 המלצות לפעולה" caption="כל שבוע: מה לעשות, לפי סדר דחיפות.">
-          <Rpt>
-            <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
-              <div className="action-num">1</div>
-              <div className="action-body">
-                <div className="action-title">{a.title}</div>
-                <div className="action-why">{a.why}</div>
-                <div className="action-src">{a.src}</div>
-              </div>
-              <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 2. Tenders — feature-flagged off (hidden, not deleted) */}
-        {TENDERS_ENABLED && t && (
-        <ModuleCard title="📋 מכרזים" caption="מכרזים רלוונטיים ממקורות רשמיים, לפני שהם נסגרים.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className={`row${t.hot ? " hot-row" : ""}`}>
-                <div className="row-main">
-                  <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
-                  <div className="row-sub">{t.sub}</div>
-                </div>
-                <div className="row-side"><span className="deadline">{t.side}</span></div>
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-        )}
-
-        {/* 3. Partners / channels */}
-        <ModuleCard title="🤝 שותפים וערוצי הפצה" caption="שותפים אמיתיים באזור שלך, לפי הערוצים שתגדיר.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="channel-tag">{g.channel}</div>
-              {g.leads.map((l, i) => (
-                <div className="row" key={i}>
-                  <div className="row-main">
-                    <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
-                    <div className="row-sub">{l.sub}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 4. Competitors — the tracking module: reviews, followers, posts */}
-        <ModuleCard title="🔍 מעקב מתחרים" caption="הדירוג שלהם בגוגל, כמה עוקבים יש להם ומה הם מפרסמים — כל שבוע.">
+        {/* 1. Competitor tracking — the flagship, first in the showcase. */}
+        <ModuleCard
+          title="🔍 מעקב מתחרים"
+          caption="מזין שמות של עד 5 מתחרים — ומקבל כל שבוע מה פרסמו, מה כתבו עליהם בגוגל וכמה עוקבים יש להם."
+        >
           <Rpt>
             <div className="card" style={{ marginBottom: 0 }}>
               <div className="trk">
@@ -192,25 +146,66 @@ function ReportShowcase() {
                     </div>
                   ))}
                 </div>
-                {ct.reviews?.sentiment && (
-                  <div className={`trk-line ${ct.reviews.sentiment.dir === 'up' ? 'up' : 'down'}`}>
-                    {ct.reviews.sentiment.dir === 'up' ? '📈' : '📉'} {ct.reviews.sentiment.text}
+                {ct.posts[0] && (
+                  <div className="trk-post notable">
+                    <div className="meta">
+                      <span className={`plat ${ct.posts[0].platform}`}>{ct.posts[0].platformLabel}</span>
+                      {ct.posts[0].date}
+                    </div>
+                    <div className="txt">{ct.posts[0].caption}</div>
+                    {ct.posts[0].engagement && <div className="trk-eng">{ct.posts[0].engagement}</div>}
                   </div>
                 )}
-                {ct.posts[0] && (
-                  <>
-                    <div className="trk-sub">📱 פרסומים אחרונים</div>
-                    <div className="trk-post notable">
-                      <div className="meta">
-                        <span className={`plat ${ct.posts[0].platform}`}>{ct.posts[0].platformLabel}</span>
-                        {ct.posts[0].date}
-                      </div>
-                      <div className="txt">{ct.posts[0].caption}</div>
-                      {ct.posts[0].engagement && <div className="trk-eng">{ct.posts[0].engagement}</div>}
-                    </div>
-                  </>
-                )}
               </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 2. Actions */}
+        <ModuleCard title="🎯 המלצות לפעולה" caption="כל שבוע: מה לעשות, לפי סדר דחיפות.">
+          <Rpt>
+            <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
+              <div className="action-num">1</div>
+              <div className="action-body">
+                <div className="action-title">{a.title}</div>
+                <div className="action-why">{a.why}</div>
+                <div className="action-src">{a.src}</div>
+              </div>
+              <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
+            </div>
+          </Rpt>
+        </ModuleCard>
+
+        {/* 3. Tenders — feature-flagged off (hidden, not deleted) */}
+        {TENDERS_ENABLED && t && (
+        <ModuleCard title="📋 מכרזים" caption="מכרזים רלוונטיים ממקורות רשמיים, לפני שהם נסגרים.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className={`row${t.hot ? " hot-row" : ""}`}>
+                <div className="row-main">
+                  <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
+                  <div className="row-sub">{t.sub}</div>
+                </div>
+                <div className="row-side"><span className="deadline">{t.side}</span></div>
+              </div>
+            </div>
+          </Rpt>
+        </ModuleCard>
+        )}
+
+        {/* 4. Partners / channels */}
+        <ModuleCard title="🤝 שותפים וערוצי הפצה" caption="שותפים אמיתיים באזור שלך, לפי הערוצים שתגדיר.">
+          <Rpt>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <div className="channel-tag">{g.channel}</div>
+              {g.leads.map((l, i) => (
+                <div className="row" key={i}>
+                  <div className="row-main">
+                    <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
+                    <div className="row-sub">{l.sub}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </Rpt>
         </ModuleCard>
@@ -304,8 +299,13 @@ const HERO_ALERTS = [
   ...(TENDERS_ENABLED
     ? [{ icon: "📋", title: "מכרז חדש רלוונטי אליך — נסגר בעוד 7 ימים", src: "מקור: מכרזים ממשלתיים", chip: "דדליין", color: "#dc2626", chipBg: "#dc2626" }]
     : [{ icon: "📰", title: "זוהתה כתבה חדשה שרלוונטית לעסק שלך", src: "מקור: חדשות רלוונטיות", chip: "עדכון", color: "#475569", chipBg: "#475569" }]),
+  // Competitor tracking leads the stack — it's the flagship module.
+  // Copy states only what we actually measure: posts we scraped and Google
+  // reviews we read. (The previous "מתחרה עדכן מחירים" card was dropped: we
+  // don't detect pricing changes, so it promised something we can't deliver.)
+  { icon: "🔍", title: "המתחרה שלך פרסם 5 פוסטים וקיבל 7 ביקורות חדשות", src: "מקור: מעקב מתחרים", chip: "מעקב מתחרים", color: "#d97706", chipBg: "#d97706" },
+  { icon: "⭐", title: "הדירוג של מתחרה בגוגל ירד ל-4.1 — לקוחות מתלוננים על זמינות", src: "מקור: מעקב מתחרים", chip: "הזדמנות", color: "#0d9488", chipBg: "#0d9488" },
   { icon: "🤖", title: "העסק שלך במקום 2 בהמלצות צ'אט ג'י.פי.טי", src: "מקור: דירוג במנועי AI", chip: "הישג", color: "#16a34a", chipBg: "#16a34a" },
-  { icon: "👀", title: "מתחרה עדכן מחירים השבוע", src: "מקור: מעקב מתחרים", chip: "שינוי אצל מתחרה", color: "#d97706", chipBg: "#d97706" },
   { icon: "🤝", title: "3 שותפים פוטנציאליים חדשים באזור שלך", src: "מקור: ערוצי הפצה", chip: "הזדמנות", color: "#0d9488", chipBg: "#0d9488" },
   { icon: "📈", title: "מילת מפתח בתחום שלך עלתה 18% מהרבעון הקודם", src: "מקור: מגמות מפתח", chip: "טרנד", color: "#0d9488", chipBg: "#0d9488" },
 ]
@@ -387,6 +387,9 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 // ── Main ──────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
+  // Fictional competitors from the demo report — the flagship section renders
+  // the REAL report components against them (no screenshots, no real business).
+  const [ctA, ctB] = DEMO_REPORT.competitorTracking || []
   return (
     <div dir="rtl" className="min-h-screen bg-white text-gray-900">
       <Header />
@@ -406,8 +409,8 @@ export default function LandingPage() {
               <span style={{ color: "#0D9488" }}>בדוח אחד שבועי</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-lg text-gray-500 leading-relaxed lg:mx-0">
-              שותפים חדשים, מה קורה אצל המתחרים, טרנדים של השוק, והדירוג שלך בגוגל ובמנועי AI —
-              מרוכז לדוח אחד, כל שבוע, מותאם לעסק שלך.
+              בדיוק מה שהמתחרים שלך מפרסמים, מה כותבים עליהם בגוגל, שותפים חדשים, טרנדים של השוק
+              והדירוג שלך בגוגל ובמנועי AI — מרוכז לדוח אחד, כל שבוע, מותאם לעסק שלך.
             </p>
 
             <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center lg:justify-start">
@@ -453,6 +456,124 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── FLAGSHIP: COMPETITOR TRACKING ────────────────────────────────── */}
+      {/* Placed immediately after the trust strip: this is the headline feature,
+          not one of eight. The fragment below is the REAL report component with
+          the REAL report CSS, rendered from the demo company's (fictional)
+          competitor data — same as the rest of the showcase, no screenshots. */}
+      <section id="competitors" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <div className="mb-3 flex justify-center">
+          <span
+            className="rounded-full px-3.5 py-1 text-xs font-extrabold"
+            style={{ backgroundColor: "#0D948815", color: "#0D9488" }}
+          >
+            חדש · המודול המבוקש ביותר
+          </span>
+        </div>
+        <h2 className="text-center text-3xl font-extrabold leading-tight sm:text-4xl" style={{ color: "#0F172A" }}>
+          דע בדיוק מה המתחרים שלך עושים —<br />
+          <span style={{ color: "#0D9488" }}>פוסטים, ביקורות וכל מהלך, כל שבוע</span>
+        </h2>
+        <p className="mx-auto mt-5 max-w-2xl text-center text-lg text-gray-500 leading-relaxed">
+          אתה מזין רק <b>שמות</b> של עד 5 מתחרים. אנחנו מאתרים לבד את האתר, האינסטגרם, הפייסבוק,
+          הלינקדאין ועמוד הגוגל שלהם — ומביאים כל שבוע מה הם פרסמו, כמה עוקבים יש להם,
+          ומה הלקוחות שלהם כותבים עליהם בגוגל.
+        </p>
+
+        <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-start">
+          {/* What it actually does — honest, feature-by-feature. */}
+          <div className="space-y-4">
+            {[
+              { icon: "📱", t: "כל פוסט שהם מפרסמים", d: "אינסטגרם, פייסבוק ולינקדאין — עם התאריך, הטקסט, כמה לייקים וכמה תגובות קיבלו, וקישור ישיר לפוסט." },
+              { icon: "⭐", t: "הביקורות שלהם בגוגל", d: "הדירוג ומספר הביקורות, כמה ביקורות חדשות נוספו החודש, והאם הן טובות או חלשות מהממוצע שלהם." },
+              { icon: "👥", t: "כמות העוקבים", d: "כמה עוקבים יש להם בכל רשת — ואיך זה משתנה מסריקה לסריקה." },
+              { icon: "💡", t: "תובנות, לא רק נתונים", d: "מי הכי פעיל, על מה הם הכי מדברים, איזה פוסט הכי עבד להם, ואיפה נפתחה לך הזדמנות." },
+            ].map((f) => (
+              <div key={f.t} className="flex gap-3.5 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                <span className="text-2xl leading-none">{f.icon}</span>
+                <div>
+                  <div className="text-base font-bold" style={{ color: "#0F172A" }}>{f.t}</div>
+                  <p className="mt-1 text-sm text-gray-500 leading-relaxed">{f.d}</p>
+                </div>
+              </div>
+            ))}
+            <p className="px-1 text-xs text-gray-400">
+              המתחרים בדוגמה בדויים. בדוח שלך יופיעו המתחרים שאתה מגדיר.
+            </p>
+          </div>
+
+          {/* LIVE fragment from the demo report. */}
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <Rpt>
+              <div className="card" style={{ marginBottom: 0 }}>
+                {[ctA, ctB].filter(Boolean).map((c, ci) => (
+                  <div className="trk" key={ci}>
+                    <div className="trk-head">
+                      <span className="trk-name">{c!.name}</span>
+                      <span className="trk-links">
+                        {c!.links.slice(0, 3).map((l, j) => <a key={j}>{l.label}</a>)}
+                      </span>
+                    </div>
+                    <div className="trk-nums">
+                      {c!.reviews && (
+                        <div className="trk-num stars">
+                          <div className="big">{c!.reviews.rating}★</div>
+                          <div className="cap">{c!.reviews.total?.toLocaleString("he-IL")} ביקורות בגוגל</div>
+                        </div>
+                      )}
+                      {c!.followers.slice(0, 2).map((f, j) => (
+                        <div className="trk-num" key={j}>
+                          <div className="big">{f.count.toLocaleString("he-IL")}</div>
+                          <div className="cap">עוקבים · {f.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {c!.reviews?.sentiment && (
+                      <div className={`trk-line ${c!.reviews.sentiment.dir === "up" ? "up" : "down"}`}>
+                        {c!.reviews.sentiment.dir === "up" ? "📈" : "📉"} {c!.reviews.sentiment.text}
+                      </div>
+                    )}
+                    {c!.posts.slice(0, 2).map((p, j) => (
+                      <div className={`trk-post${p.notable ? " notable" : ""}`} key={j}>
+                        <div className="meta">
+                          <span className={`plat ${p.platform}`}>{p.platformLabel}</span>
+                          {p.date}
+                        </div>
+                        <div className="txt">{p.caption}</div>
+                        {p.engagement && <div className="trk-eng">{p.engagement}</div>}
+                      </div>
+                    ))}
+                    {c!.insights[0] && (
+                      <>
+                        <div className="trk-sub">תובנות (45 יום)</div>
+                        <div className="trk-ins">· {c!.insights[0]}</div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Rpt>
+          </div>
+        </div>
+
+        <div className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+          <Link
+            href="/signup"
+            className="rounded-xl px-8 py-3.5 text-center text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
+            style={{ backgroundColor: "#0D9488" }}
+          >
+            התחל לעקוב אחרי המתחרים שלך ←
+          </Link>
+          <Link
+            href="/r/demo"
+            className="rounded-xl border-2 px-8 py-3.5 text-center text-base font-bold transition-all hover:bg-gray-50"
+            style={{ borderColor: "#0D9488", color: "#0D9488" }}
+          >
+            צפה בדוח לדוגמה
+          </Link>
+        </div>
+      </section>
+
       {/* ── PAIN ─────────────────────────────────────────────────────────── */}
       <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
         <h2 className="mb-10 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
@@ -480,7 +601,7 @@ export default function LandingPage() {
             מה נכנס לדוח השבועי שלך
           </h2>
           <p className="mb-2 text-center text-lg font-bold" style={{ color: "#0D9488" }}>
-            7 מנועי מודיעין, דוח אחד
+            {TENDERS_ENABLED ? 8 : 7} מנועי מודיעין, דוח אחד
           </p>
           <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
             לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
