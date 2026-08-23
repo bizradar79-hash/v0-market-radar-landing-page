@@ -5,6 +5,10 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
+import {
+  PLATFORM_LABELS, platformStyle, recentPostsFrom, notablePostsFrom,
+  engagementLabel, googleListingUrl, POSTS_WINDOW_DAYS, type DisplayPost,
+} from "@/lib/competitor-intel/display"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -13,9 +17,9 @@ import {
   Flame, Users, Hash, CalendarDays, ExternalLink, AlertTriangle, Settings,
 } from "lucide-react"
 
-const SOURCE_LABELS: Record<string, string> = {
-  website: 'אתר', instagram: 'אינסטגרם', facebook: 'פייסבוק', linkedin: 'לינקדאין',
-}
+// Display logic is SHARED with the weekly report (lib/competitor-intel/display)
+// so the module page and the report can never drift apart.
+const SOURCE_LABELS = PLATFORM_LABELS
 
 interface DerivedInsights {
   cadence?: { total: number; level: string; text: string }
@@ -47,27 +51,6 @@ interface SocialPost {
 }
 interface SourceRow { source: string; status: string; posts?: SocialPost[] }
 
-// The posts LIST is a tighter window than the insights above it: the insights
-// summarise 45 days, this shows what they actually published lately.
-const POSTS_WINDOW_DAYS = 14
-const MAX_POSTS_SHOWN = 6
-
-function recentPosts(sources: SourceRow[] | null): Array<SocialPost & { source: string }> {
-  const cutoff = Date.now() - POSTS_WINDOW_DAYS * 86400000
-  const out: Array<SocialPost & { source: string }> = []
-  for (const s of sources || []) {
-    for (const p of s.posts || []) {
-      const t = p.date ? new Date(p.date).getTime() : NaN
-      // Undated posts are excluded rather than assumed recent.
-      if (isNaN(t) || t < cutoff) continue
-      out.push({ ...p, source: s.source })
-    }
-  }
-  return out
-    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
-    .slice(0, MAX_POSTS_SHOWN)
-}
-
 interface TrackedCompetitor {
   id: string
   competitor_name: string
@@ -76,6 +59,40 @@ interface TrackedCompetitor {
   insights: DerivedInsights | null
   reviews: ReviewsBlock | null
   scanned_at: string
+}
+
+/**
+ * One post. The PLATFORM is a coloured badge rather than grey run-on text —
+ * a competitor cross-posting to Instagram AND Facebook shows twice on purpose,
+ * and the badge is what makes that read as two channels, not a duplicate.
+ * Likes and comments stay SEPARATE and exact; the whole row links to the post.
+ */
+function PostRow({ p }: { p: DisplayPost }) {
+  const st = platformStyle(p.platform)
+  const body = (
+    <>
+      <span className="flex items-center gap-1.5">
+        <span
+          className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+          style={{ backgroundColor: st.bg, color: st.fg }}
+        >
+          {p.platformLabel}
+        </span>
+        <span className="text-[10px] text-muted-foreground">{p.dateLabel}</span>
+        {p.url && <ExternalLink className="h-3 w-3 text-muted-foreground" />}
+      </span>
+      <span className="mt-1 block text-xs text-foreground">{p.caption}</span>
+      {engagementLabel(p) && (
+        <span className="text-[10px] font-medium text-muted-foreground">{engagementLabel(p)}</span>
+      )}
+    </>
+  )
+  return p.url ? (
+    <a href={p.url} target="_blank" rel="noopener noreferrer"
+       className="block rounded-md bg-background p-2 hover:bg-muted/60">{body}</a>
+  ) : (
+    <div className="rounded-md bg-background p-2">{body}</div>
+  )
 }
 
 function Stars({ value }: { value: number }) {
@@ -164,21 +181,29 @@ export default function CompetitorTrackingPage() {
         const ins = row.insights || {}
         const rev = row.reviews
         const links = row.resolved_links || {}
-        const posts = recentPosts(row.sources)
+        const posts = recentPostsFrom(row.sources)
+        const notable = notablePostsFrom(row.sources, ins)
+        const googleUrl = googleListingUrl(links, rev)
         return (
           <Card key={row.id} className="border-border bg-card">
             <CardHeader className="pb-3">
               <CardTitle className="flex flex-wrap items-center gap-2 text-base text-foreground">
                 <Target className="h-4 w-4 text-primary" />
                 {row.competitor_name}
-                {rev?.found && rev.rating != null && (
-                  <span className="flex items-center gap-1.5 text-sm font-normal">
-                    <Stars value={rev.rating} />
-                    <span className="text-muted-foreground">
-                      {rev.rating}{rev.reviewsCount != null ? ` · ${rev.reviewsCount.toLocaleString()} ביקורות` : ''}
+                {rev?.found && rev.rating != null && (() => {
+                  const inner = (
+                    <span className="flex items-center gap-1.5 text-sm font-normal">
+                      <Stars value={rev.rating!} />
+                      <span className="text-muted-foreground">
+                        {rev.rating}{rev.reviewsCount != null ? ` · ${rev.reviewsCount.toLocaleString()} ביקורות` : ''}
+                      </span>
                     </span>
-                  </span>
-                )}
+                  )
+                  const url = googleListingUrl(row.resolved_links || {}, rev)
+                  return url
+                    ? <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline">{inner}</a>
+                    : inner
+                })()}
               </CardTitle>
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 {['website', 'instagram', 'facebook', 'linkedin'].map(k => links[k] ? (
@@ -231,41 +256,24 @@ export default function CompetitorTrackingPage() {
                   </p>
                 )}
 
-                {/* Actual posts from the last 14 days. Nothing rendered when
-                    there are none — the 45-day insights above already cover it. */}
-                {posts.length > 0 && (
-                  <div className="mt-1 space-y-1.5 border-t border-border pt-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      פרסומים ב-{POSTS_WINDOW_DAYS} הימים האחרונים
-                    </p>
-                    {posts.map((p, i) => {
-                      const eng = (p.likes ?? 0) + (p.comments ?? 0)
-                      const body = (
-                        <>
-                          <span className="text-[10px] text-muted-foreground">
-                            {p.date ? new Date(p.date).toLocaleDateString('he-IL') : ''} · {SOURCE_LABELS[p.source] || p.source}
-                          </span>
-                          <span className="block text-xs text-foreground">
-                            {(p.caption || '').trim().slice(0, 140) || '(ללא כיתוב)'}
-                            {(p.caption || '').length > 140 ? '…' : ''}
-                          </span>
-                          {(eng > 0 || p.views != null) && (
-                            <span className="text-[10px] text-muted-foreground">
-                              {eng > 0 ? `${eng.toLocaleString()} לייקים ותגובות` : ''}
-                              {p.views != null ? `${eng > 0 ? ' · ' : ''}${p.views.toLocaleString()} צפיות` : ''}
-                            </span>
-                          )}
-                        </>
-                      )
-                      return p.postUrl ? (
-                        <a key={i} href={p.postUrl} target="_blank" rel="noopener noreferrer"
-                           className="block rounded-md bg-background p-2 hover:bg-muted/60">
-                          {body}
-                        </a>
-                      ) : (
-                        <div key={i} className="rounded-md bg-background p-2">{body}</div>
-                      )
-                    })}
+                {/* PostRow is shared between the recent list and the notable
+                    posts, so both carry platform + exact counts + a link. */}
+                {(posts.length > 0 || notable.length > 0) && (
+                  <div className="mt-1 space-y-2 border-t border-border pt-2">
+                    {notable.length > 0 && (
+                      <>
+                        <p className="text-xs font-medium text-muted-foreground">🔥 הפוסטים שהכי עבדו להם</p>
+                        {notable.map((p, i) => <PostRow key={`n${i}`} p={p} />)}
+                      </>
+                    )}
+                    {posts.length > 0 && (
+                      <>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          פרסומים ב-{POSTS_WINDOW_DAYS} הימים האחרונים
+                        </p>
+                        {posts.map((p, i) => <PostRow key={`r${i}`} p={p} />)}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -287,8 +295,21 @@ export default function CompetitorTrackingPage() {
                   </p>
                 ) : (
                   <>
+                    {/* The standing is the click target: it opens the
+                        competitor's real Google listing, built from the cid we
+                        resolved during tracking. */}
                     {rev.insights?.standing && (
-                      <p className="text-sm text-foreground">{rev.insights.standing.text}</p>
+                      googleUrl ? (
+                        <a
+                          href={googleUrl} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-md bg-amber-100/70 px-2 py-1 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+                        >
+                          {rev.insights.standing.text}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : (
+                        <p className="text-sm text-foreground">{rev.insights.standing.text}</p>
+                      )
                     )}
                     {rev.insights?.noRecentReviews ? (
                       <p className="text-sm text-muted-foreground">

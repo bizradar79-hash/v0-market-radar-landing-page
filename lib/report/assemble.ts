@@ -12,6 +12,10 @@ import { deriveArea } from '@/lib/geo/area'
 import { readGeoQuestions } from '@/lib/geo/read'
 import { filterUpcomingConferences, conferenceDateLabel, parseConferenceDate } from '@/lib/conferences/date'
 import { TENDERS_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
+import {
+  PLATFORM_LABELS as SHARED_LABELS, recentPostsFrom, notablePostsFrom,
+  engagementLabel, googleListingUrl, type DisplayPost,
+} from '@/lib/competitor-intel/display'
 
 const FIELD_SEP = '␟'
 
@@ -68,7 +72,17 @@ export interface ReportData {
       sentiment?: { dir: 'up' | 'down' | 'flat'; text: string }
     }
     followers: Array<{ label: string; count: number; growth?: { dir: 'up' | 'down'; text: string } }>
-    posts: Array<{ date: string; platform: string; caption: string; engagement?: string }>
+    /** Clickable Google listing, built from the cid resolved during tracking. */
+    googleUrl?: string
+    posts: Array<{
+      date: string
+      platform: string          // key, for the badge colour
+      platformLabel: string     // prominent label
+      caption: string
+      engagement?: string       // explicit "👍 N · 💬 N", never a merged total
+      url?: string
+      notable?: boolean
+    }>
     insights: string[]
     scannedAt?: string
   }>
@@ -321,16 +335,13 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // Pure projection of stored competitor_tracking rows. ZERO model calls, zero
   // scraping: whatever the last tracking run persisted is what the client sees,
   // which is also exactly what the module page shows.
-  const POSTS_WINDOW_DAYS = 14
-  const PLATFORM_LABELS: Record<string, string> = {
-    website: 'אתר', instagram: 'אינסטגרם', facebook: 'פייסבוק', linkedin: 'לינקדאין',
-  }
   const competitorTracking: NonNullable<ReportData['competitorTracking']> = (trackingRaw || [])
     .map((row: any) => {
       const links = (row?.resolved_links || {}) as Record<string, string>
       const rv = (row?.reviews || {}) as any
       const ins = (row?.insights || {}) as any
       const sources: any[] = Array.isArray(row?.sources) ? row.sources : []
+      const PLATFORM_LABELS = SHARED_LABELS
 
       // ⭐ Reviews — skipped entirely when no Google business resolved.
       let reviews: any
@@ -354,25 +365,24 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         .filter((f: any) => typeof f?.followers === 'number' && f.followers > 0)
         .map((f: any) => ({ label: PLATFORM_LABELS[f.source] || f.source, count: f.followers }))
 
-      // 📱 Recent posts — tighter window than the 45-day insights above them.
-      const cutoff = Date.now() - POSTS_WINDOW_DAYS * 86400000
-      const posts = sources
-        .flatMap((src: any) => (Array.isArray(src?.posts) ? src.posts : []).map((p: any) => ({ ...p, source: src.source })))
-        .filter((p: any) => {
-          const t = p?.date ? new Date(p.date).getTime() : NaN
-          return !isNaN(t) && t >= cutoff   // undated posts are never assumed recent
-        })
-        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 3)
-        .map((p: any) => {
-          const eng = (p.likes ?? 0) + (p.comments ?? 0)
-          return {
-            date: heDate(p.date),
-            platform: PLATFORM_LABELS[p.source] || p.source,
-            caption: String(p.caption || '').trim().slice(0, 120) || '(ללא כיתוב)',
-            engagement: eng > 0 ? `${eng.toLocaleString('he-IL')} לייקים ותגובות` : undefined,
-          }
-        })
+      // 📱 Posts — SHARED with the module page (lib/competitor-intel/display),
+      // so both surfaces show the same platform badge, the same explicit
+      // like/comment counts, and the same links. Cross-posted content appears
+      // once per platform on purpose; the badge is what disambiguates it.
+      const toReportPost = (p: DisplayPost, notable?: boolean) => ({
+        date: p.dateLabel,
+        platform: p.platform,
+        platformLabel: p.platformLabel,
+        caption: p.caption,
+        engagement: engagementLabel(p) || undefined,
+        url: p.url || undefined,
+        notable,
+      })
+      const notable = notablePostsFrom(sources, ins, 2).map((p) => toReportPost(p, true))
+      const recent = recentPostsFrom(sources, { max: 3 })
+        .filter((p) => !notable.some((n) => n.url && n.url === p.url))
+        .map((p) => toReportPost(p))
+      const posts = [...notable, ...recent]
 
       // 45-day deterministic insights, already computed at scan time.
       const insights = [
@@ -388,6 +398,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
           .map((k) => ({ label: PLATFORM_LABELS[k], url: links[k] })),
         reviews,
         followers,
+        googleUrl: googleListingUrl(links, rv) || undefined,
         posts,
         insights,
         scannedAt: row?.scanned_at || undefined,

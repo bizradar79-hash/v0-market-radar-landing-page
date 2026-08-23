@@ -105,9 +105,20 @@ export const REPORT_CSS = `
   .rpt .trk-line.up{color:var(--green)}
   .rpt .trk-line.down{color:var(--red)}
   .rpt .trk-sub{font-size:12px;font-weight:800;color:var(--ink-faint);margin-top:14px;letter-spacing:.02em}
-  .rpt .trk-post{border-inline-start:3px solid var(--line);padding:2px 11px;margin-top:8px}
+  .rpt .trk-post{border-inline-start:3px solid var(--line);padding:4px 11px;margin-top:9px}
+  .rpt .trk-post.notable{border-inline-start-color:var(--amber)}
+  .rpt .trk-post a.txt-link{text-decoration:none;color:inherit}
+  .rpt .trk-post a.txt-link:hover .txt{text-decoration:underline}
+  .rpt .plat{display:inline-block;font-size:10.5px;font-weight:800;border-radius:6px;padding:1.5px 7px;margin-inline-end:7px;vertical-align:1px}
+  .rpt .plat.instagram{background:#fce7f3;color:#be185d}
+  .rpt .plat.facebook{background:#dbeafe;color:#1d4ed8}
+  .rpt .plat.linkedin{background:#e0f2fe;color:#0369a1}
+  .rpt .plat.website{background:#e7f5f2;color:#0f766e}
   .rpt .trk-post .meta{font-size:11px;color:var(--ink-faint);font-weight:600}
-  .rpt .trk-post .txt{font-size:13.5px;color:var(--ink);margin-top:2px;line-height:1.5}
+  .rpt .trk-post .txt{font-size:13.5px;color:var(--ink);margin-top:3px;line-height:1.5}
+  .rpt .trk-eng{font-size:11.5px;color:var(--ink-soft);font-weight:700;margin-top:3px}
+  .rpt a.trk-num-link{text-decoration:none;display:block}
+  .rpt a.trk-num-link:hover .trk-num.stars{box-shadow:0 3px 14px -5px rgba(217,119,6,.45)}
   .rpt .trk-ins{font-size:13.5px;color:var(--ink-soft);margin-top:6px;line-height:1.55}
   .rpt .comp-intro{padding:16px 22px;border-bottom:1px solid var(--line);color:var(--ink-soft);font-size:14.5px;background:#f8fbfa}
   .rpt .opp-text{font-size:13px;color:var(--amber);line-height:1.5}
@@ -289,16 +300,23 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   {/* ⭐ + 👥 — the numbers that matter, rendered big. */}
                   {(c.reviews || c.followers.length > 0) && (
                     <div className="trk-nums">
-                      {c.reviews && (
-                        <div className="trk-num stars">
-                          <div className="big">{c.reviews.rating != null ? `${c.reviews.rating}★` : '—'}</div>
-                          <div className="cap">
-                            {c.reviews.total != null
-                              ? `${c.reviews.total.toLocaleString('he-IL')} ביקורות בגוגל`
-                              : 'דירוג בגוגל'}
+                      {c.reviews && (() => {
+                        const tile = (
+                          <div className="trk-num stars">
+                            <div className="big">{c.reviews!.rating != null ? `${c.reviews!.rating}★` : '—'}</div>
+                            <div className="cap">
+                              {c.reviews!.total != null
+                                ? `${c.reviews!.total.toLocaleString('he-IL')} ביקורות בגוגל ↗`
+                                : 'דירוג בגוגל ↗'}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )
+                        // Clicking the rating opens the competitor's real
+                        // Google listing (URL built from the resolved cid).
+                        return c.googleUrl
+                          ? <a className="trk-num-link" href={c.googleUrl} target="_blank" rel="noopener noreferrer">{tile}</a>
+                          : tile
+                      })()}
                       {c.followers.map((f, j) => (
                         <div className="trk-num" key={j}>
                           <div className="big">{f.count.toLocaleString('he-IL')}</div>
@@ -321,12 +339,26 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   {c.posts.length > 0 && (
                     <>
                       <div className="trk-sub">📱 פרסומים אחרונים</div>
-                      {c.posts.map((p, j) => (
-                        <div className="trk-post" key={j}>
-                          <div className="meta">{p.date}{p.date && ' · '}{p.platform}{p.engagement ? ` · ${p.engagement}` : ''}</div>
-                          <div className="txt">{p.caption}</div>
-                        </div>
-                      ))}
+                      {c.posts.map((p, j) => {
+                        const body = (
+                          <>
+                            <div className="meta">
+                              <span className={`plat ${p.platform}`}>{p.platformLabel}</span>
+                              {p.date}
+                              {p.notable && <span className="pill amber">הכי עבד להם</span>}
+                            </div>
+                            <div className="txt">{p.caption}</div>
+                            {p.engagement && <div className="trk-eng">{p.engagement}</div>}
+                          </>
+                        )
+                        return (
+                          <div className={`trk-post${p.notable ? ' notable' : ''}`} key={j}>
+                            {p.url
+                              ? <a className="txt-link" href={p.url} target="_blank" rel="noopener noreferrer">{body}</a>
+                              : body}
+                          </div>
+                        )
+                      })}
                     </>
                   )}
 

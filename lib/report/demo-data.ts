@@ -58,13 +58,17 @@ export const DEMO_REPORT: ReportData = {
         recent: '7 ביקורות חדשות ב-45 יום, ממוצע 4.8',
         sentiment: { dir: 'down' as const, text: 'הביקורות האחרונות חלשות מהממוצע (4.8 מול 4.9)' },
       },
+      googleUrl: 'https://www.google.com/maps?cid=13294732576479516349',
       followers: [
         { label: 'אינסטגרם', count: 8420 },
         { label: 'פייסבוק', count: 3110 },
       ],
       posts: [
-        { date: '18 באוגוסט', platform: 'אינסטגרם', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '312 לייקים ותגובות' },
-        { date: '14 באוגוסט', platform: 'פייסבוק', caption: 'סיפור לקוח: חסכנו 180 אלף ש"ח במחזור משכנתא', engagement: '96 לייקים ותגובות' },
+        // Same content cross-posted to two platforms — kept as two posts on
+        // purpose; the badge is what makes that clear.
+        { date: '18 באוגוסט', platform: 'instagram', platformLabel: 'אינסטגרם', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '👍 287 · 💬 25 · 12,400 צפיות', url: 'https://instagram.com/p/example1', notable: true },
+        { date: '18 באוגוסט', platform: 'facebook', platformLabel: 'פייסבוק', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '👍 64 · 💬 9', url: 'https://facebook.com/example1' },
+        { date: '14 באוגוסט', platform: 'facebook', platformLabel: 'פייסבוק', caption: 'סיפור לקוח: חסכנו 180 אלף ש"ח במחזור משכנתא', engagement: '👍 81 · 💬 15', url: 'https://facebook.com/example2' },
       ],
       insights: [
         '9 פרסומים ב-45 הימים האחרונים (פעיל מאוד) — אינסטגרם: 6 · פייסבוק: 3',
