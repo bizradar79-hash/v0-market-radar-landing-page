@@ -25,7 +25,7 @@ export const DEMO_REPORT: ReportData = {
     sub: [
       'אתה מופיע במקום #2 בהמלצות מנועי ה־AI',
       `${TENDERS_ENABLED ? 8 : 5} הזדמנויות חדשות זוהו השבוע`,
-      '3 המתחרים שלך פרסמו <em>41</em> פוסטים השבוע',
+      '3 המתחרים שלך פרסמו <em>5</em> פוסטים השבוע',
     ].map(t => `<span class="seg">${t}</span>`).join('<span class="sep">|</span>'),
   },
 
@@ -35,20 +35,24 @@ export const DEMO_REPORT: ReportData = {
     ...(TENDERS_ENABLED ? [{ num: '3', label: 'מכרזים רלוונטיים<br>פתוחים כרגע' }] : []),
     { num: '5', label: 'שותפים פוטנציאליים<br>שזוהו' },
     { num: '2', label: 'כנסים רלוונטיים<br>קרובים' },
-    { num: '3', label: 'מתחרים במעקב<br><b>41</b> פוסטים השבוע', hot: true },
+    { num: '3', label: 'מתחרים במעקב<br><b>5</b> פוסטים השבוע' },
   ],
 
   actions: [
     ...(TENDERS_ENABLED
       ? [{ title: 'הגש הצעה למכרז ליווי פיננסי — עיריית ראשון לציון', why: 'דדליין בעוד 6 ימים, התאמה 88% לתחום הייעוץ שלך.', src: 'מקור: מכרז', chip: { kind: 'urgent' as const, text: 'דדליין' }, kind: 'urgent' as const }]
       : [{ title: 'הירשם לכנס הנדל"ן והמשכנתאות — ההרשמה נסגרת בקרוב', why: 'כנס בהתאמה גבוהה לתחום שלך — הזדמנות נטוורקינג מרכזית.', src: 'מקור: כנס', chip: { kind: 'urgent' as const, text: 'מועד קרוב' }, kind: 'urgent' as const }]),
+    // Competitor actions rank high (after real deadlines) — same order the
+    // assembler produces from competitor_tracking.
+    { title: 'משכנתא חכמה בע"מ קיבל ביקורת שלילית', why: '2★ — "חיכיתי שבועיים לתשובה מהיועץ ובסוף פניתי למישהו אחר." — הזדמנות לפנות ללקוחות שלא קיבלו מענה טוב', src: 'מקור: מעקב מתחרים', chip: { kind: 'watch' as const, text: 'הזדמנות' }, kind: 'watch' as const },
+    { title: 'פוסט של משכנתא חכמה בע"מ קיבל תגובות רבות', why: '449 לייקים ותגובות — "3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא". שווה לראות מה עבד שם.', src: 'מקור: מעקב מתחרים', chip: { kind: 'watch' as const, text: 'נקודה למחשבה' }, kind: 'watch' as const },
     { title: 'צור קשר עם 2 מתווכים חדשים שזוהו באזור', why: 'ערוץ הפניות ישיר ללקוחות משכנתא — התאמה גבוהה.', src: 'מקור: ליד', chip: { kind: 'watch', text: 'הזדמנות' }, kind: 'watch' },
     { title: 'פרסם תוכן על "מיחזור משכנתא" — הביקוש בעלייה', why: 'החיפושים עלו 23% ואתה כבר מדורג — הזדמנות לתפוס עוד תנועה.', src: 'מקור: טרנד', chip: { kind: 'watch', text: 'נקודה למחשבה' }, kind: 'watch' },
   ],
 
-  // No competitor CHANGES this week → evergreen fallback (intro + trends + amber opps).
+  // The old change-detection list is gone; "מעקב מתחרים" below is the section.
   competitors: [],
-  competitorsNote: 'לא זוהו שינויים מהותיים השבוע — אבל הנה מה שקורה אצל המתחרים:',
+  competitorsNote: null,
   // The demo report shows the NEW "מעקב מתחרים" section.
   competitorTracking: [
     {

@@ -90,7 +90,9 @@ function ReportShowcase() {
   const a = DEMO_REPORT.actions[0]
   const t = DEMO_REPORT.tenders[0] // undefined when tenders module is off (card gated below)
   const g = DEMO_REPORT.leadGroups[0]
-  const ct = DEMO_REPORT.competitorTrends![0]
+  // The landing showcases the CURRENT competitor module (מעקב מתחרים). The old
+  // competitorTrends fragment is gone — that module is disabled.
+  const ct = DEMO_REPORT.competitorTracking![0]
   const seoP = DEMO_REPORT.seoPrimary!
   const seoX = DEMO_REPORT.seoExtras || []
   const ai = DEMO_REPORT.seoAi!
@@ -168,22 +170,46 @@ function ReportShowcase() {
           </Rpt>
         </ModuleCard>
 
-        {/* 4. Competitors — trends + amber opportunity */}
-        <ModuleCard title="🔍 מתחרים" caption="מה המתחרים עושים — ואיפה ההזדמנות שלך.">
+        {/* 4. Competitors — the tracking module: reviews, followers, posts */}
+        <ModuleCard title="🔍 מעקב מתחרים" caption="הדירוג שלהם בגוגל, כמה עוקבים יש להם ומה הם מפרסמים — כל שבוע.">
           <Rpt>
             <div className="card" style={{ marginBottom: 0 }}>
-              <div className="comp-intro">לא זוהו שינויים מהותיים השבוע — אבל הנה מה שקורה אצל המתחרים:</div>
-              <div className="row">
-                <div className="row-main">
-                  <div className="row-title">{ct.name}</div>
-                  <div className="row-sub">{ct.topic}</div>
-                  {ct.opportunity && (
-                    <div className="comp-change">
-                      <span className="pill amber">נקודה למחשבה</span>
-                      <span className="opp-text">{ct.opportunity}</span>
+              <div className="trk">
+                <div className="trk-head">
+                  <span className="trk-name">{ct.name}</span>
+                </div>
+                <div className="trk-nums">
+                  {ct.reviews && (
+                    <div className="trk-num stars">
+                      <div className="big">{ct.reviews.rating}★</div>
+                      <div className="cap">{ct.reviews.total?.toLocaleString('he-IL')} ביקורות בגוגל</div>
                     </div>
                   )}
+                  {ct.followers.slice(0, 2).map((f, i) => (
+                    <div className="trk-num" key={i}>
+                      <div className="big">{f.count.toLocaleString('he-IL')}</div>
+                      <div className="cap">עוקבים · {f.label}</div>
+                    </div>
+                  ))}
                 </div>
+                {ct.reviews?.sentiment && (
+                  <div className={`trk-line ${ct.reviews.sentiment.dir === 'up' ? 'up' : 'down'}`}>
+                    {ct.reviews.sentiment.dir === 'up' ? '📈' : '📉'} {ct.reviews.sentiment.text}
+                  </div>
+                )}
+                {ct.posts[0] && (
+                  <>
+                    <div className="trk-sub">📱 פרסומים אחרונים</div>
+                    <div className="trk-post notable">
+                      <div className="meta">
+                        <span className={`plat ${ct.posts[0].platform}`}>{ct.posts[0].platformLabel}</span>
+                        {ct.posts[0].date}
+                      </div>
+                      <div className="txt">{ct.posts[0].caption}</div>
+                      {ct.posts[0].engagement && <div className="trk-eng">{ct.posts[0].engagement}</div>}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </Rpt>
