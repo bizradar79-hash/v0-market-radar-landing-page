@@ -122,7 +122,7 @@ async function handlePost(request: Request) {
   // Existing rows carry the cached links + the freshness stamp.
   const { data: existing } = await db
     .from('competitor_tracking')
-    .select('competitor_name, resolved_links, scanned_at')
+    .select('competitor_name, resolved_links, scanned_at, website_snapshot')
     .eq('company_id', companyId)
   const byName = new Map<string, any>((existing || []).map((r: any) => [r.competitor_name, r]))
 
@@ -154,6 +154,8 @@ async function handlePost(request: Request) {
           areaSearch: area.search,
           industryContext,
           cachedLinks: (row?.resolved_links || null) as ResolvedLinks | null,
+          // Last run's cleaned site text — the basis for change detection.
+          prevWebsiteSnapshot: row?.website_snapshot || null,
           // Only an explicit force re-runs link discovery; otherwise the cache wins.
           force,
           // The engine stops STARTING new work past this and returns normally,
@@ -172,6 +174,20 @@ async function handlePost(request: Request) {
         sources: result.sources,
         insights: result.insights,
         reviews: result.reviews,
+        // Website change detection: the diff verdict + the snapshot chain.
+        website: result.website
+          ? {
+              status: result.website.status,
+              changes: result.website.changes,
+              similarity: result.website.similarity,
+              checkedAt: result.website.checkedAt,
+              note: result.website.note,
+              error: result.website.error,
+            }
+          : null,
+        website_snapshot: result.website?.snapshot || null,
+        website_snapshot_prev: row?.website_snapshot || null,
+        website_snapshot_at: result.website?.checkedAt || null,
         cost: result.cost,
         scanned_at: result.scannedAt,
       }, { onConflict: 'company_id,competitor_name' })
@@ -184,6 +200,16 @@ async function handlePost(request: Request) {
       }
       if (result.cost.dataforseo) {
         cost.add({ provider: 'dataforseo', model: 'google_reviews', costUSD: result.cost.dataforseo.costUSD })
+      }
+      // Only ever present when the competitor's site actually changed.
+      if (result.cost.websiteDiff) {
+        cost.add({
+          provider: 'gemini',
+          model: result.cost.websiteDiff.model,
+          promptTokens: result.cost.websiteDiff.promptTokens,
+          completionTokens: result.cost.websiteDiff.completionTokens,
+          costUSD: result.cost.websiteDiff.costUSD,
+        })
       }
       details.push({
         name,
@@ -228,7 +254,7 @@ async function handlePost(request: Request) {
     const detail = details.find((d) => d.name === name)
     const { data: saved } = await db
       .from('competitor_tracking')
-      .select('competitor_name, resolved_links, sources, reviews, scanned_at')
+      .select('competitor_name, resolved_links, sources, reviews, website, scanned_at')
       .eq('company_id', companyId).eq('competitor_name', name).maybeSingle()
     const srcs: any[] = (saved?.sources as any) || []
     return NextResponse.json({
@@ -239,6 +265,7 @@ async function handlePost(request: Request) {
       costUSD: Math.round(r.costUSD * 10000) / 10000,
       // Per-source truth, so the admin sees what actually came back.
       sources: srcs.map((x) => ({ source: x.source, status: x.status, postsRecent: x.postsRecent ?? 0, error: x.error })),
+      website: (saved as any)?.website || null,
       reviews: saved?.reviews
         ? {
             found: (saved.reviews as any).found,

@@ -44,6 +44,7 @@ export const DEMO_REPORT: ReportData = {
       : [{ title: 'הירשם לכנס הנדל"ן והמשכנתאות — ההרשמה נסגרת בקרוב', why: 'כנס בהתאמה גבוהה לתחום שלך — הזדמנות נטוורקינג מרכזית.', src: 'מקור: כנס', chip: { kind: 'urgent' as const, text: 'מועד קרוב' }, kind: 'urgent' as const }]),
     // Competitor actions rank high (after real deadlines) — same order the
     // assembler produces from competitor_tracking.
+    { title: 'משכנתא חכמה בע"מ שינה מחיר', why: 'מחיר הליווי המלא עודכן מ-4,500 ₪ ל-5,200 ₪ — נפתח לך מרווח תמחור, שווה לבדוק איך אתה ממוצב מולם', src: 'מקור: מעקב מתחרים', chip: { kind: 'watch' as const, text: 'שינוי אצל מתחרה' }, kind: 'watch' as const },
     { title: 'משכנתא חכמה בע"מ קיבל ביקורת שלילית', why: '2★ — "חיכיתי שבועיים לתשובה מהיועץ ובסוף פניתי למישהו אחר." — הזדמנות לפנות ללקוחות שלא קיבלו מענה טוב', src: 'מקור: מעקב מתחרים', chip: { kind: 'watch' as const, text: 'הזדמנות' }, kind: 'watch' as const },
     { title: 'פוסט של משכנתא חכמה בע"מ קיבל תגובות רבות', why: '449 לייקים ותגובות — "3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא". שווה לראות מה עבד שם.', src: 'מקור: מעקב מתחרים', chip: { kind: 'watch' as const, text: 'נקודה למחשבה' }, kind: 'watch' as const },
     { title: 'צור קשר עם 2 מתווכים חדשים שזוהו באזור', why: 'ערוץ הפניות ישיר ללקוחות משכנתא — התאמה גבוהה.', src: 'מקור: ליד', chip: { kind: 'watch', text: 'הזדמנות' }, kind: 'watch' },
@@ -83,6 +84,10 @@ export const DEMO_REPORT: ReportData = {
         { date: 'לפני יומיים', platform: 'instagram', platformLabel: 'אינסטגרם', caption: '3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא — והדרך להימנע מהן', engagement: '👍 412 · 💬 37 · 18,600 צפיות', url: 'https://www.instagram.com/p/example-a', notable: true },
         { date: 'לפני יומיים', platform: 'facebook', platformLabel: 'פייסבוק', caption: '3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא — והדרך להימנע מהן', engagement: '👍 88 · 💬 14', url: 'https://www.facebook.com/example/posts/a' },
         { date: 'לפני 5 ימים', platform: 'instagram', platformLabel: 'אינסטגרם', caption: 'לקוחה שלנו סורבה בשני בנקים — וקיבלה אישור תוך 11 יום', engagement: '👍 268 · 💬 24 · 11,200 צפיות', url: 'https://www.instagram.com/p/example-b' },
+      ],
+      websiteChanges: [
+        { icon: '💰', text: 'מחיר הליווי המלא עודכן מ-4,500 ₪ ל-5,200 ₪', soWhat: 'נפתח לך מרווח תמחור — שווה לבדוק איך אתה ממוצב מולם' },
+        { icon: '🆕', text: 'נוסף שירות חדש: ליווי משכנתא לתושבי חוץ' },
       ],
       insights: [
         '9 פרסומים ב-45 הימים האחרונים (פעיל מאוד) — אינסטגרם: 6 · פייסבוק: 3',

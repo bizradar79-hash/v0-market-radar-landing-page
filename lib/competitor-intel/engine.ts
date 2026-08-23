@@ -28,6 +28,7 @@ import { computeReviewInsights, type ReviewSnapshot } from './review-insights'
 import { fetchGoogleReviews, isReviewsConfigured, searchKeyword, withContext } from '@/lib/seo/google-reviews'
 import { resolveMapsId } from './maps-id'
 import { resolveReviewsPaths } from './resolve-reviews'
+import { detectWebsiteChanges, type WebsiteChange, type WebsiteDiffResult } from './website-diff'
 import { searchWebDetailed } from '@/lib/brightdata/client'
 import { norm } from '@/lib/match/hebrew-core'
 
@@ -53,6 +54,8 @@ export interface ResolvedLinks {
 export interface TrackingCost {
   brightdata: { requests: number; records: number; costUSD: number; precision: 'exact' }
   dataforseo: { calls: number; costUSD: number; precision: 'exact' } | null
+  /** The website-diff model call — present ONLY when the site actually changed. */
+  websiteDiff: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
   totalUSD: number
 }
 
@@ -62,6 +65,17 @@ export interface TrackingResult {
   sources: SourceResult[]
   insights: DerivedInsights
   reviews: ResearchReviews | null
+  /** Meaningful website changes vs the previous scan (+ the new snapshot). */
+  website: {
+    status: WebsiteDiffResult['status']
+    changes: WebsiteChange[]
+    snapshot: string
+    hash: string
+    similarity?: number
+    checkedAt: string
+    note?: string
+    error?: string
+  } | null
   cost: TrackingCost
   scannedAt: string
   /** Set when the competitor yielded nothing at all — shown to the client. */
@@ -115,6 +129,8 @@ export async function trackCompetitor(opts: {
   cachedLinks?: ResolvedLinks | null
   /** Re-resolve links and ignore any cache. */
   force?: boolean
+  /** The previous run's cleaned website text, for change detection. */
+  prevWebsiteSnapshot?: string | null
   /**
    * Wall-clock stop (epoch ms). Resolution paths are not STARTED past it, so
    * the run returns normally with whatever it has instead of being discarded by
@@ -259,8 +275,23 @@ export async function trackCompetitor(opts: {
     }),
   )
 
+  // ── Website change detection ─────────────────────────────────────────────
+  // Gated inside detectWebsiteChanges: no previous snapshot or no material
+  // change → no model call at all.
+  const websiteSource = sources.find((x) => x.source === 'website')
+  const websiteDiff = await detectWebsiteChanges({
+    competitorName: name,
+    rawText: websiteSource?.text,
+    prevSnapshot: opts.prevWebsiteSnapshot,
+    log,
+  }).catch((e: any): WebsiteDiffResult => ({
+    status: 'failed', changes: [], snapshot: '', hash: '',
+    error: (e?.message || 'website_diff_failed').slice(0, 120),
+  }))
+
   const reviews = await reviewsPromise
   log(`SOURCES: ${sources.map((x) => `${x.source}=${x.status}${x.postsRecent != null ? `(${x.postsRecent} recent)` : ''}${x.error ? `[${x.error}]` : ''}`).join(' ')}`)
+  log(`WEBSITE: ${websiteDiff.status}${websiteDiff.similarity != null ? ` (sim ${websiteDiff.similarity.toFixed(3)})` : ''} — ${websiteDiff.changes.length} change(s)${websiteDiff.llm ? ` · $${websiteDiff.llm.costUSD.toFixed(5)}` : ' · no LLM call'}`)
   log(`REVIEWS: found=${reviews?.found ?? 'n/a'} rating=${reviews?.rating ?? '-'} count=${reviews?.reviewsCount ?? '-'} passes=${reviews?.passes || '-'} err=${reviews?.error || '-'}`)
   // CACHE the resolved cid — the next scan queries reviews by id and skips the
   // Maps search entirely (cheaper, and can't regress into a bad name match).
@@ -280,9 +311,19 @@ export async function trackCompetitor(opts: {
     dataforseo: reviews
       ? { calls: reviews.found && reviews.reviewsCount ? 2 : 1, costUSD: reviews.costUSD, precision: 'exact' }
       : null,
+    // Null on every run where the site didn't change — which is the point.
+    websiteDiff: websiteDiff.llm
+      ? {
+          model: websiteDiff.llm.model,
+          promptTokens: websiteDiff.llm.promptTokens,
+          completionTokens: websiteDiff.llm.completionTokens,
+          costUSD: websiteDiff.llm.costUSD,
+          precision: websiteDiff.llm.precision,
+        }
+      : null,
     totalUSD: 0,
   }
-  cost.totalUSD = cost.brightdata.costUSD + (cost.dataforseo?.costUSD || 0)
+  cost.totalUSD = cost.brightdata.costUSD + (cost.dataforseo?.costUSD || 0) + (cost.websiteDiff?.costUSD || 0)
 
   const gotSomething =
     sources.some((s) => s.status === 'ok') || !!reviews?.found
@@ -293,6 +334,17 @@ export async function trackCompetitor(opts: {
     sources,
     insights,
     reviews,
+    website: {
+      status: websiteDiff.status,
+      changes: websiteDiff.changes,
+      // Empty snapshot (a failed scrape) must not wipe a good baseline.
+      snapshot: websiteDiff.snapshot || String(opts.prevWebsiteSnapshot || ''),
+      hash: websiteDiff.hash,
+      similarity: websiteDiff.similarity,
+      checkedAt: scannedAt,
+      note: websiteDiff.note,
+      error: websiteDiff.error,
+    },
     cost,
     scannedAt,
     note: gotSomething ? undefined : 'לא נמצא מידע פומבי על המתחרה הזה',

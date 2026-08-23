@@ -84,6 +84,8 @@ export interface ReportData {
       notable?: boolean
     }>
     insights: string[]
+    /** Meaningful website changes since the previous scan (empty → hidden). */
+    websiteChanges?: Array<{ icon: string; text: string; soWhat?: string }>
     scannedAt?: string
   }>
   // Evergreen filler when no changes this scan: top stored competitor-trends,
@@ -130,7 +132,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         // both get it from one place — the missing-SELECT trap this report has
         // hit repeatedly cannot reopen for two separate query sites.
         db.from('competitor_tracking')
-          .select('competitor_name, resolved_links, sources, insights, reviews, scanned_at')
+          .select('competitor_name, resolved_links, sources, insights, reviews, website, scanned_at')
           .eq('company_id', companyId)
           .order('competitor_name'),
       ]),
@@ -155,8 +157,11 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     const bestPost = posts
       .filter((p: any) => (p?.likes ?? 0) + (p?.comments ?? 0) > 0)
       .sort((a: any, b: any) => ((b.likes ?? 0) + (b.comments ?? 0)) - ((a.likes ?? 0) + (a.comments ?? 0)))[0]
+    const wchanges = (Array.isArray(row?.website?.changes) ? row.website.changes : [])
+      .filter((c: any) => c && String(c.text || '').trim())
     return {
       name: String(row?.competitor_name || '').trim(),
+      websiteChanges: wchanges,
       weekPosts: weekPosts.length,
       negatives,
       newReviews: rv?.insights?.recent?.count ?? 0,
@@ -369,6 +374,24 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   type Act = ReportData['actions'][number]
   const competitorActions: Array<Act & { weight: number }> = []
   for (const t of trackStats) {
+    // A website change is the strongest competitor signal there is: it means
+    // they actually DID something — launched, repriced, repositioned.
+    if (t.websiteChanges.length > 0) {
+      const c = t.websiteChanges[0]
+      const kindLabel: Record<string, string> = {
+        price: 'שינה מחיר', product: 'השיק שירות חדש', promotion: 'פתח מבצע',
+        positioning: 'שינה את המסר השיווקי', location: 'עדכן פרטי סניף',
+      }
+      const what = kindLabel[String(c.kind)] || 'עדכן את האתר'
+      competitorActions.push({
+        weight: 4,
+        title: `${t.name} ${what}`,
+        why: `${String(c.text).slice(0, 160)}${c.soWhat ? ` — ${String(c.soWhat).slice(0, 120)}` : ''}`,
+        src: MODULE_SRC,
+        chip: { kind: 'watch' as const, text: 'שינוי אצל מתחרה' },
+        kind: 'watch' as const,
+      })
+    }
     // A fresh negative review is the strongest opening for the client.
     if (t.negatives.length > 0) {
       const ng = t.negatives[0]
@@ -523,6 +546,18 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         rv.insights?.themes?.text,
       ].filter((x: any) => typeof x === 'string' && x.trim()) as string[]
 
+      const CHANGE_ICON: Record<string, string> = {
+        product: '🆕', price: '💰', promotion: '🎯', positioning: '📣', location: '📍', other: '•',
+      }
+      const websiteChanges = (Array.isArray(row?.website?.changes) ? row.website.changes : [])
+        .filter((c: any) => c && String(c.text || '').trim())
+        .slice(0, 3)
+        .map((c: any) => ({
+          icon: CHANGE_ICON[String(c.kind)] || '•',
+          text: String(c.text).trim(),
+          soWhat: String(c.soWhat || '').trim() || undefined,
+        }))
+
       return {
         name: String(row?.competitor_name || '').trim(),
         links: ['website', 'instagram', 'facebook', 'linkedin']
@@ -533,11 +568,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         googleUrl: googleListingUrl(links, rv) || undefined,
         posts,
         insights,
+        websiteChanges,
         scannedAt: row?.scanned_at || undefined,
       }
     })
     // A competitor with nothing to show is skipped rather than rendered empty.
-    .filter((c: any) => c.name && (c.reviews || c.followers.length || c.posts.length || c.insights.length))
+    .filter((c: any) => c.name && (c.reviews || c.followers.length || c.posts.length || c.insights.length || c.websiteChanges.length))
 
   // Three-level competitors assembly (read-only — NO model calls):
   //  (a) real changes → the list above.

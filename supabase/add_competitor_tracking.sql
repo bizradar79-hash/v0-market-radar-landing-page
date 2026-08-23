@@ -54,3 +54,17 @@ alter table competitor_tracking enable row level security;
 drop policy if exists "own competitor tracking" on competitor_tracking;
 create policy "own competitor tracking" on competitor_tracking
   for select using (auth.uid() = company_id);
+
+-- ── Added later: website change detection ──────────────────────────────────
+-- The cleaned text of the competitor's site, kept so the NEXT run can compare
+-- against it. `website_snapshot` is the current version, `website_snapshot_prev`
+-- the one before it (handy for re-diffing or auditing a reported change).
+--
+-- The comparison itself is deterministic (normalized hash / similarity) and a
+-- model is called ONLY when the text actually moved — so a static competitor
+-- site costs nothing on every subsequent scan.
+alter table competitor_tracking add column if not exists website_snapshot      text;
+alter table competitor_tracking add column if not exists website_snapshot_prev text;
+alter table competitor_tracking add column if not exists website_snapshot_at   timestamptz;
+-- { status, changes:[{kind,text,soWhat}], similarity, checkedAt, note, error }
+alter table competitor_tracking add column if not exists website              jsonb;

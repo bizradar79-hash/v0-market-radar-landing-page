@@ -125,6 +125,10 @@ export const REPORT_CSS = `
   .rpt a.trk-num-link{text-decoration:none;display:block}
   .rpt a.trk-num-link:hover .trk-num.stars{box-shadow:0 3px 14px -5px rgba(217,119,6,.45)}
   .rpt .trk-ins{font-size:13.5px;color:var(--ink-soft);margin-top:6px;line-height:1.55}
+  .rpt .trk-web{background:var(--teal-wash);border:1px solid var(--teal);border-radius:11px;padding:10px 13px;margin-top:12px}
+  .rpt .trk-web .wtitle{font-size:11.5px;font-weight:800;color:var(--teal-deep);margin-bottom:4px}
+  .rpt .trk-web .witem{font-size:13.5px;color:var(--ink);line-height:1.55;margin-top:4px}
+  .rpt .trk-web .wso{display:block;font-size:12px;color:var(--ink-soft)}
   .rpt .comp-intro{padding:16px 22px;border-bottom:1px solid var(--line);color:var(--ink-soft);font-size:14.5px;background:#f8fbfa}
   .rpt .opp-text{font-size:13px;color:var(--amber);line-height:1.5}
   .rpt .src-link{font-size:12px;font-weight:700;color:var(--teal-deep);text-decoration:none;white-space:nowrap}
@@ -365,6 +369,20 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                         )
                       })}
                     </>
+                  )}
+
+                  {/* שינויים באתר — rendered only when there is something
+                      meaningful; "no change" is silence, not an empty block. */}
+                  {!!c.websiteChanges?.length && (
+                    <div className="trk-web">
+                      <div className="wtitle">🌐 שינויים באתר שלהם</div>
+                      {c.websiteChanges.map((w, j) => (
+                        <div className="witem" key={j}>
+                          {w.icon} {w.text}
+                          {w.soWhat && <span className="wso">↳ {w.soWhat}</span>}
+                        </div>
+                      ))}
+                    </div>
                   )}
 
                   {c.insights.length > 0 && (

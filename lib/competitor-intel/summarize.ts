@@ -345,7 +345,7 @@ export function computeInsights(
  * those numbers aren't discarded (callModel returns only the string). Any other
  * provider falls back to callModel + a character-based ESTIMATE, clearly labeled.
  */
-async function callWithUsage(
+export async function callWithUsage(
   provider: string, model: string, prompt: string,
 ): Promise<{ text: string; usage: LlmUsage }> {
   const price = priceFor(model)

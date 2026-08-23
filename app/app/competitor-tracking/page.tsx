@@ -51,6 +51,19 @@ interface SocialPost {
 }
 interface SourceRow { source: string; status: string; posts?: SocialPost[] }
 
+interface WebsiteChange { kind: string; text: string; soWhat?: string }
+interface WebsiteBlock {
+  status: 'baseline' | 'unchanged' | 'changed' | 'skipped' | 'failed'
+  changes: WebsiteChange[]
+  similarity?: number
+  checkedAt?: string
+  note?: string
+  error?: string
+}
+const CHANGE_ICON: Record<string, string> = {
+  product: '🆕', price: '💰', promotion: '🎯', positioning: '📣', location: '📍', other: '•',
+}
+
 interface TrackedCompetitor {
   id: string
   competitor_name: string
@@ -58,6 +71,7 @@ interface TrackedCompetitor {
   sources: SourceRow[] | null
   insights: DerivedInsights | null
   reviews: ReviewsBlock | null
+  website: WebsiteBlock | null
   scanned_at: string
 }
 
@@ -119,7 +133,7 @@ export default function CompetitorTrackingPage() {
 
       const [{ data: tracked }, { data: company }] = await Promise.all([
         supabase.from('competitor_tracking')
-          .select('id, competitor_name, resolved_links, sources, insights, reviews, scanned_at')
+          .select('id, competitor_name, resolved_links, sources, insights, reviews, website, scanned_at')
           .eq('company_id', user.id)
           .order('competitor_name'),
         supabase.from('companies').select('business_profile').eq('id', user.id).single(),
@@ -348,9 +362,28 @@ export default function CompetitorTrackingPage() {
               </div>
             </CardContent>
 
+            {/* שינויים באתר — only when there is something meaningful to say.
+                'unchanged' / 'baseline' render nothing: an empty labelled block
+                is worse than no block. */}
+            {!!row.website?.changes?.length && (
+              <CardContent className="pt-0">
+                <div className="space-y-1.5 rounded-lg border border-teal-200 bg-teal-50/60 p-3">
+                  <p className="text-xs font-semibold text-teal-800">🌐 שינויים באתר</p>
+                  {row.website!.changes.map((c, ci) => (
+                    <div key={ci} className="text-xs">
+                      <span className="text-foreground">{CHANGE_ICON[c.kind] || '•'} {c.text}</span>
+                      {c.soWhat && <span className="block text-[11px] text-muted-foreground">↳ {c.soWhat}</span>}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+
             <CardContent className="pt-0">
               <p className="text-[11px] text-muted-foreground">
                 עודכן: {new Date(row.scanned_at).toLocaleDateString('he-IL')}
+                {row.website?.status === 'unchanged' && ' · אין שינוי מהותי באתר'}
+                {row.website?.status === 'baseline' && ' · נשמר צילום ראשוני של האתר'}
               </p>
             </CardContent>
           </Card>
