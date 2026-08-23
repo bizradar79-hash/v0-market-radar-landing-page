@@ -5,6 +5,7 @@ import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends, buildKeywordIntel } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
+import { COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -115,7 +116,9 @@ export async function POST(request: Request) {
       seo_ranking: companyData?.seo_ranking,
       geo_ranking: companyData?.geo_ranking,
       industry_trends: companyData?.industry_trends,
-      competitor_trends: companyData?.competitor_trends,
+      // Module disabled (lib/flags) — omit stale stored trends from the report
+      // payload rather than letting them resurface in generated copy.
+      competitor_trends: COMPETITOR_TRENDS_ENABLED ? companyData?.competitor_trends : null,
       niche_opportunities: companyData?.niche_opportunities,
       weekly_actions: companyData?.weekly_actions,
       competitors: competitors || [],

@@ -35,3 +35,14 @@ export const COMPETITOR_AUTODISCOVERY_ENABLED =
 export const OLD_COMPETITOR_MODULE_ENABLED =
   process.env.NEXT_PUBLIC_OLD_COMPETITOR_MODULE_ENABLED === 'true' ||
   process.env.OLD_COMPETITOR_MODULE_ENABLED === 'true'
+
+// COMPETITOR TRENDS ("טרנדים אצל מתחרים"): OFF. Superseded by the competitor
+// tracking module, which reads real activity + Google reviews per competitor
+// instead of asking a model what competitors might be doing. Disabled here
+// removes the generation step from every scan (the cost) and hides every
+// client-facing surface. Route, stored data and readers are all retained.
+//   NEXT_PUBLIC_COMPETITOR_TRENDS_ENABLED=true
+//   COMPETITOR_TRENDS_ENABLED=true
+export const COMPETITOR_TRENDS_ENABLED =
+  process.env.NEXT_PUBLIC_COMPETITOR_TRENDS_ENABLED === 'true' ||
+  process.env.COMPETITOR_TRENDS_ENABLED === 'true'

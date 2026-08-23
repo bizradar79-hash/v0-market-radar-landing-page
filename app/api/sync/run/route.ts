@@ -12,7 +12,7 @@ import {
 import { formatBreakdownTable, totalOfBreakdown } from '@/lib/scan/cost-tracker'
 import { channelsSig } from '@/lib/leads/channels-sig'
 import { createReportSnapshot } from '@/lib/report/snapshot'
-import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
+import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_AUTODISCOVERY_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 import { headers } from 'next/headers'
 
 const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -148,7 +148,8 @@ export async function POST(request: Request) {
     'competitor_tracking',
     'review_analysis',
     'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
-    'competitor_trends', 'news', 'tenders', 'conferences', 'leads', 'weekly_actions',
+    ...(COMPETITOR_TRENDS_ENABLED ? ['competitor_trends'] : []),
+    'news', 'tenders', 'conferences', 'leads', 'weekly_actions',
     'niche_opportunities', 'weekly_report',
   ]
 
@@ -415,10 +416,14 @@ export async function POST(request: Request) {
     })
 
     // 5. Competitor trends
-    await runStep('competitor_trends', async () => {
-      const r = await callModule(origin, '/api/competitor-trends', companyId!)
-      return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.competitor_data?.length ?? 0} competitors` : (r.body?.error ?? `HTTP ${r.status}`) }
-    })
+    // "טרנדים אצל מתחרים" — DISABLED (lib/flags). Superseded by competitor
+    // tracking; the generation step is skipped so its model calls cost nothing.
+    if (COMPETITOR_TRENDS_ENABLED) {
+      await runStep('competitor_trends', async () => {
+        const r = await callModule(origin, '/api/competitor-trends', companyId!)
+        return { status: r.ok ? 'ok' : 'error', message: r.ok ? `${r.body?.competitor_data?.length ?? 0} competitors` : (r.body?.error ?? `HTTP ${r.status}`) }
+      })
+    }
 
     // 6. News
     await runStep('news', async () => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { MAX_DIRECT_COMPETITORS, COMPETITOR_AUTODISCOVERY_ENABLED, OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
+import { MAX_DIRECT_COMPETITORS, COMPETITOR_AUTODISCOVERY_ENABLED, OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_TRENDS_ENABLED } from "@/lib/flags"
 import Image from "next/image"
 import {
   Check,
@@ -76,7 +76,9 @@ const SCAN_STEPS = [
   { label: 'מדרג GEO...', route: '/api/generate-geo-ranking' },
   { label: 'מנתח טרנדים בתעשייה...', route: '/api/industry-trends' },
   { label: 'מנתח טרנדים לפי מילות מפתח...', route: '/api/scan-keyword-trends' },
-  { label: 'מנתח טרנדים מתחרים...', route: '/api/competitor-trends' },
+  ...(COMPETITOR_TRENDS_ENABLED
+    ? [{ label: 'מנתח טרנדים מתחרים...', route: '/api/competitor-trends' }]
+    : []),
   { label: 'מחפש חדשות...', route: '/api/generate-news' },
   { label: 'מחפש מכרזים...', route: '/api/find-tenders' },
   { label: 'מגלה לידים...', route: '/api/generate-leads' },

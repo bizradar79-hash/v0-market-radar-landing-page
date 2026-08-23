@@ -4,7 +4,7 @@ import { getFullContext } from '@/lib/context'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
-import { TENDERS_ENABLED } from '@/lib/flags'
+import { TENDERS_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -99,8 +99,11 @@ export async function POST(request: Request) {
       `"${t.name}" (${t.direction || ''}, ${t.region || ''}) — ${t.evidence || ''} [מקור: ${t.source || ''}]`
     )
 
-    // Competitor trends from new module
-    const competitorTrendsData = companyRow?.competitor_trends as { competitor_data?: any[] } | null
+    // Competitor trends — module disabled (lib/flags), so stale stored trends
+    // must not keep steering "מה לעשות השבוע". Flipping the flag restores it.
+    const competitorTrendsData = COMPETITOR_TRENDS_ENABLED
+      ? (companyRow?.competitor_trends as { competitor_data?: any[] } | null)
+      : null
     const competitorTrendLines = (competitorTrendsData?.competitor_data || []).flatMap((c: any) => {
       const lines: string[] = []
       if (c.new_activity) lines.push(`${c.competitor_name}: ${c.new_activity}`)

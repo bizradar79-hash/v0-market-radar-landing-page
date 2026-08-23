@@ -11,7 +11,7 @@ import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
 import { readGeoQuestions } from '@/lib/geo/read'
 import { filterUpcomingConferences, conferenceDateLabel, parseConferenceDate } from '@/lib/conferences/date'
-import { TENDERS_ENABLED } from '@/lib/flags'
+import { TENDERS_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 
 const FIELD_SEP = '␟'
 
@@ -297,7 +297,11 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   let competitorsNote: string | null = null
   let competitorTrends: ReportData['competitorTrends'] = []
   if (competitorsOut.length === 0) {
-    const ctData: any[] = Array.isArray(company?.competitor_trends?.competitor_data)
+    // (b) is gated: with the competitor-trends module off we stop showing the
+    // stored fallback, so the section falls cleanly through to (c) — the calm
+    // line — instead of surfacing stale, model-generated trend text. Nothing
+    // renders empty-but-labeled: ReportView already treats an empty list as (c).
+    const ctData: any[] = COMPETITOR_TRENDS_ENABLED && Array.isArray(company?.competitor_trends?.competitor_data)
       ? company.competitor_trends.competitor_data
       : []
     const storedTrends = ctData

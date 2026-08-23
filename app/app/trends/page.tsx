@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { COMPETITOR_TRENDS_ENABLED } from "@/lib/flags"
 
 // ─── Keyword-intelligence types (Google Ads search volume) ──────────────────
 interface StoredRelated {
@@ -728,96 +729,97 @@ export default function TrendsPage() {
         )}
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 3 — competitor trends                                        */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-3">
-        <div className="border-b pb-2">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Users className="h-5 w-5 text-primary" />
-            טרנדים אצל המתחרים
-          </h2>
-          <p className="text-sm text-muted-foreground">מה עושים המתחרים שלך עכשיו — וכיצד לנצל את זה</p>
-        </div>
-
-        {loadingCompetitor ? (
-          <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
-            <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
-            <p className="text-sm">בודק פעילות מתחרים...</p>
+      {/* SECTION 3 — "טרנדים אצל המתחרים": module disabled (lib/flags),
+          superseded by the competitor-tracking module. Code retained. */}
+      {COMPETITOR_TRENDS_ENABLED && (
+        <div className="space-y-3">
+          <div className="border-b pb-2">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              טרנדים אצל המתחרים
+            </h2>
+            <p className="text-sm text-muted-foreground">מה עושים המתחרים שלך עכשיו — וכיצד לנצל את זה</p>
           </div>
-        ) : !competitorTrends || competitorTrends.competitor_data.length === 0 ? (
-          <EmptyState message="לא נמצאו נתוני מתחרים — הנתונים יתעדכנו בסנכרון הבא" />
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {competitorTrends.competitor_data.map((c, i) => (
-              <Card key={i} className={c.has_opportunity ? 'border-amber-200 shadow-sm' : ''}>
-                <CardHeader className="pb-2 pt-4 px-4">
-                  <CardTitle className="text-sm flex items-center justify-between">
-                    <span>{c.competitor_name}</span>
-                    {c.competitor_website && (
-                      <a
-                        href={c.competitor_website.startsWith('http') ? c.competitor_website : `https://${c.competitor_website}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline font-normal"
-                      >
-                        {c.competitor_website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
-                      </a>
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 space-y-3">
-                  {/* Trending topics */}
-                  {c.trending_topics.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">נושאים שמקדמים</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {c.trending_topics.map((topic, ti) => (
-                          <Badge key={ti} variant="secondary" className="text-xs font-normal">{topic}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* New activity */}
-                  {c.new_activity && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">פעילות אחרונה</p>
-                      <p className="text-xs text-foreground leading-relaxed">{c.new_activity}</p>
-                    </div>
-                  )}
-
-                  {/* Opportunity box */}
-                  {c.opportunity && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
-                      <p className="text-xs font-semibold text-amber-800 flex items-center gap-1">
-                        <Lightbulb className="h-3.5 w-3.5" />הזדמנות עבורך
-                      </p>
-                      <p className="text-xs text-amber-700 leading-relaxed">{c.opportunity}</p>
-                    </div>
-                  )}
-                  {/* Real grounding sources (captured from the search — never invented) */}
-                  {Array.isArray(c.sources) && c.sources.length > 0 && (
-                    <p className="text-[10px] text-muted-foreground/60">
-                      {c.sources.slice(0, 2).map((u, ui) => (
-                        <a key={ui} href={u} target="_blank" rel="noopener noreferrer" className="ml-2 font-semibold text-primary/70 hover:text-primary hover:underline">
-                          מקור {c.sources!.length > 1 ? ui + 1 : ''} ←
+  
+          {loadingCompetitor ? (
+            <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
+              <Loader2 className="h-5 w-5 animate-spin text-primary shrink-0" />
+              <p className="text-sm">בודק פעילות מתחרים...</p>
+            </div>
+          ) : !competitorTrends || competitorTrends.competitor_data.length === 0 ? (
+            <EmptyState message="לא נמצאו נתוני מתחרים — הנתונים יתעדכנו בסנכרון הבא" />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {competitorTrends.competitor_data.map((c, i) => (
+                <Card key={i} className={c.has_opportunity ? 'border-amber-200 shadow-sm' : ''}>
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span>{c.competitor_name}</span>
+                      {c.competitor_website && (
+                        <a
+                          href={c.competitor_website.startsWith('http') ? c.competitor_website : `https://${c.competitor_website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline font-normal"
+                        >
+                          {c.competitor_website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
                         </a>
-                      ))}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {competitorTrends?.fetchedAt && (
-          <p className="text-xs text-muted-foreground">
-            עודכן: {new Date(competitorTrends.fetchedAt).toLocaleDateString('he-IL')}
-          </p>
-        )}
-      </div>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 space-y-3">
+                    {/* Trending topics */}
+                    {c.trending_topics.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground">נושאים שמקדמים</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {c.trending_topics.map((topic, ti) => (
+                            <Badge key={ti} variant="secondary" className="text-xs font-normal">{topic}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+  
+                    {/* New activity */}
+                    {c.new_activity && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-muted-foreground">פעילות אחרונה</p>
+                        <p className="text-xs text-foreground leading-relaxed">{c.new_activity}</p>
+                      </div>
+                    )}
+  
+                    {/* Opportunity box */}
+                    {c.opportunity && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+                        <p className="text-xs font-semibold text-amber-800 flex items-center gap-1">
+                          <Lightbulb className="h-3.5 w-3.5" />הזדמנות עבורך
+                        </p>
+                        <p className="text-xs text-amber-700 leading-relaxed">{c.opportunity}</p>
+                      </div>
+                    )}
+                    {/* Real grounding sources (captured from the search — never invented) */}
+                    {Array.isArray(c.sources) && c.sources.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground/60">
+                        {c.sources.slice(0, 2).map((u, ui) => (
+                          <a key={ui} href={u} target="_blank" rel="noopener noreferrer" className="ml-2 font-semibold text-primary/70 hover:text-primary hover:underline">
+                            מקור {c.sources!.length > 1 ? ui + 1 : ''} ←
+                          </a>
+                        ))}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+  
+          {competitorTrends?.fetchedAt && (
+            <p className="text-xs text-muted-foreground">
+              עודכן: {new Date(competitorTrends.fetchedAt).toLocaleDateString('he-IL')}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Trend detail modal */}
       <Dialog open={!!selectedTrend} onOpenChange={open => { if (!open) setSelectedTrend(null) }}>

@@ -4,6 +4,7 @@ import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { summarizeKeywordTrends } from '@/lib/keyword-trends/summarize'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
+import { COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
@@ -85,8 +86,11 @@ export async function POST(request: Request) {
       `"${t.name}" (${t.direction || ''}, ${t.region || ''}, ביטחון ${t.confidence || ''}%) — ${t.evidence || ''}`
     )
 
-    // Competitor trends — opportunities found
-    const competitorTrendsData = companyRow?.competitor_trends as { competitor_data?: any[] } | null
+    // Competitor trends — module disabled (lib/flags); stale stored trends must
+    // not seed niche opportunities. Flipping the flag restores it.
+    const competitorTrendsData = COMPETITOR_TRENDS_ENABLED
+      ? (companyRow?.competitor_trends as { competitor_data?: any[] } | null)
+      : null
     const competitorOpportunityLines = (competitorTrendsData?.competitor_data || [])
       .filter((c: any) => c.has_opportunity)
       .map((c: any) => `הזדמנות מול ${c.competitor_name}: ${c.opportunity}`)

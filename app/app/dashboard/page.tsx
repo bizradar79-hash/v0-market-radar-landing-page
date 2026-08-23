@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
+import { TENDERS_ENABLED, OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_TRENDS_ENABLED } from "@/lib/flags"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -681,39 +681,42 @@ export default function AppDashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* טרנדים אצל מתחרים */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <TrendingUp className="h-4 w-4 text-blue-600" />
-                    טרנדים אצל מתחרים
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {data!.competitorTrendItems.length > 0 ? (
-                    <div className="space-y-2">
-                      {data!.competitorTrendItems.map((item, i) => (
-                        <div key={i} className="rounded-lg bg-muted/50 p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold truncate">{item.competitor}</p>
-                            <Badge variant="outline" className="border-blue-200 text-blue-600 shrink-0 text-xs">
-                              {item.trend}
-                            </Badge>
+              {/* "טרנדים אצל מתחרים" — module disabled (lib/flags);
+                  card hidden, data and code retained. */}
+              {COMPETITOR_TRENDS_ENABLED && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <TrendingUp className="h-4 w-4 text-blue-600" />
+                      טרנדים אצל מתחרים
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {data!.competitorTrendItems.length > 0 ? (
+                      <div className="space-y-2">
+                        {data!.competitorTrendItems.map((item, i) => (
+                          <div key={i} className="rounded-lg bg-muted/50 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold truncate">{item.competitor}</p>
+                              <Badge variant="outline" className="border-blue-200 text-blue-600 shrink-0 text-xs">
+                                {item.trend}
+                              </Badge>
+                            </div>
+                            {item.activity && (
+                              <p className="mt-1 text-xs text-muted-foreground line-clamp-1">{item.activity}</p>
+                            )}
                           </div>
-                          {item.activity && (
-                            <p className="mt-1 text-xs text-muted-foreground line-clamp-1">{item.activity}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="py-4 text-center text-sm text-muted-foreground">נתונים יתעדכנו בסנכרון הבא</p>
-                  )}
-                  <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
-                    כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </CardContent>
-              </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-4 text-center text-sm text-muted-foreground">נתונים יתעדכנו בסנכרון הבא</p>
+                    )}
+                    <Link href="/app/trends" className="mt-4 flex items-center justify-center gap-1 text-sm text-primary hover:underline">
+                      כל הטרנדים <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* חדשות אחרונות */}
               <Card>

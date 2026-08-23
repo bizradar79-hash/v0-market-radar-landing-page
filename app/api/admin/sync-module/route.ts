@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 import { NextResponse } from 'next/server'
-import { COMPETITOR_AUTODISCOVERY_ENABLED } from '@/lib/flags'
+import { COMPETITOR_AUTODISCOVERY_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 import { createClient } from '@/lib/supabase/server'
 import { createServerClient } from '@supabase/ssr'
 
@@ -46,9 +46,16 @@ const MODULE_ROUTES: Record<string, string[]> = {
   // fan-out, so clicking "trends" never invoked generate-keyword-trends and the
   // data always showed "—"/"AI estimated". The three keys below also expose each
   // trend module as an independently-runnable button.
-  trends:         ['/api/industry-trends', '/api/competitor-trends', '/api/generate-keyword-trends'],
+  // competitor-trends is dropped from the fan-out while its flag is off.
+  trends: [
+    '/api/industry-trends',
+    ...(COMPETITOR_TRENDS_ENABLED ? ['/api/competitor-trends'] : []),
+    '/api/generate-keyword-trends',
+  ],
   industry_trends:   ['/api/industry-trends'],
-  competitor_trends: ['/api/competitor-trends'],
+  // Kept as an explicit key so flipping the flag restores it; unreachable from
+  // the module-sync screen while disabled.
+  ...(COMPETITOR_TRENDS_ENABLED ? { competitor_trends: ['/api/competitor-trends'] } : {}),
   keyword_trends:    ['/api/generate-keyword-trends'],
   reviews:        ['/api/sync-competitor-ratings', '/api/analyze-company-reviews'],
   report:         ['/api/generate-weekly-report'],

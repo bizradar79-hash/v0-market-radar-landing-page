@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, Square, RefreshCw } from "lucide-react"
-import { OLD_COMPETITOR_MODULE_ENABLED } from "@/lib/flags"
+import { OLD_COMPETITOR_MODULE_ENABLED, COMPETITOR_TRENDS_ENABLED } from "@/lib/flags"
 
 type ModuleStatus = 'pending' | 'running' | 'done' | 'skipped' | 'error'
 type ScanStatus = 'running' | 'done' | 'stopped' | 'error'
@@ -49,7 +49,8 @@ const MODULE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'geo_ranking',        label: 'דירוג GEO' },
   { id: 'industry_trends',    label: 'טרנדים בתעשייה' },
   { id: 'keyword_trends',     label: 'טרנדים לפי מילות מפתח' },
-  { id: 'competitor_trends',  label: 'טרנדים מתחרים' },
+  // Disabled with the module — no perpetually-pending row in the modal.
+  ...(COMPETITOR_TRENDS_ENABLED ? [{ id: 'competitor_trends', label: 'טרנדים מתחרים' }] : []),
   { id: 'news',               label: 'חדשות' },
   { id: 'tenders',            label: 'מכרזים' },
   { id: 'conferences',        label: 'כנסים' },
