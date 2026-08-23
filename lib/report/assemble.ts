@@ -137,6 +137,43 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       loadHiddenKeys(companyId, undefined, db),
     ])
 
+  // ── Competitor tracking stats (early: the headline + metric strip need them) ─
+  // Pure counting over stored competitor_tracking rows — no fetching, no AI.
+  const TRACK_WEEK_DAYS = 7
+  const weekCutoff = Date.now() - TRACK_WEEK_DAYS * 86400000
+  const trackedRows: any[] = Array.isArray(trackingRaw) ? trackingRaw : []
+  const trackStats = trackedRows.map((row: any) => {
+    const srcs: any[] = Array.isArray(row?.sources) ? row.sources : []
+    const posts = srcs.flatMap((sc: any) =>
+      (Array.isArray(sc?.posts) ? sc.posts : []).map((p: any) => ({ ...p, source: sc.source })))
+    const weekPosts = posts.filter((p: any) => {
+      const t = p?.date ? new Date(p.date).getTime() : NaN
+      return !isNaN(t) && t >= weekCutoff   // undated posts never counted as "this week"
+    })
+    const rv = (row?.reviews || {}) as any
+    const negatives = Array.isArray(rv?.insights?.negatives) ? rv.insights.negatives : []
+    const bestPost = posts
+      .filter((p: any) => (p?.likes ?? 0) + (p?.comments ?? 0) > 0)
+      .sort((a: any, b: any) => ((b.likes ?? 0) + (b.comments ?? 0)) - ((a.likes ?? 0) + (a.comments ?? 0)))[0]
+    return {
+      name: String(row?.competitor_name || '').trim(),
+      weekPosts: weekPosts.length,
+      negatives,
+      newReviews: rv?.insights?.recent?.count ?? 0,
+      sentimentDown: rv?.insights?.sentiment?.direction === 'down',
+      bestPost: bestPost
+        ? { engagement: (bestPost.likes ?? 0) + (bestPost.comments ?? 0), caption: String(bestPost.caption || '').slice(0, 80) }
+        : null,
+      // Must match the filter on competitorTracking below, or the card would
+      // claim more competitors than the section actually shows. A row that was
+      // scanned but yielded nothing is not "under tracking" from the client's
+      // point of view — there is nothing to look at.
+      hasData: !!(rv?.found || posts.length || (row?.insights && Object.keys(row.insights).length > 0)),
+    }
+  }).filter((t: any) => t.name && t.hasData)
+  const trackedCount = trackStats.length
+  const trackedWeekPosts = trackStats.reduce((n: number, t: any) => n + t.weekPosts, 0)
+
   // Drop admin-hidden items before anything is computed/shown.
   const competitors = filterHidden(competitorsRaw as any[], 'competitor', hiddenKeys, (c: any) => c.name)
   // Tenders module feature-flagged off → empty everywhere downstream (section,
@@ -272,13 +309,19 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const rankPhrase = remainderFacts[0]?.sentence
     || (avgSeoPos != null ? `המיקום הממוצע שלך בגוגל הוא ${avgSeoPos}` : 'הדירוג שלך יציב')
   const oppClause = newOppCount > 0 ? `${newOppCount} הזדמנויות חדשות זוהו השבוע` : ''
+  // Competitor activity joins the opening summary — only when there is real
+  // activity to report, so a quiet week says nothing rather than "0 פוסטים".
+  const competitorSentence = trackedCount > 0 && trackedWeekPosts > 0
+    ? `${trackedCount === 1 ? 'המתחרה שלך פרסם' : `${trackedCount} המתחרים שלך פרסמו`} <em>${trackedWeekPosts}</em> ${trackedWeekPosts === 1 ? 'פוסט' : 'פוסטים'} השבוע`
+    : ''
   const businessSentence = [rankPhrase, oppClause].filter(Boolean).join(', ') + '.'
 
   // Assemble: sentence 1 (big serif) = market; sentence 2 (sub) = business.
   const thesisBig = marketSentence
     ? marketSentence + '.'
     : businessSentence
-  const thesisSub = marketSentence ? businessSentence : ''
+  const thesisSub = [marketSentence ? businessSentence : '', competitorSentence ? competitorSentence + '.' : '']
+    .filter(Boolean).join(' ')
 
   // ── Metrics strip ───────────────────────────────────────────────────────────
   const metrics: ReportData['metrics'] = []
@@ -287,12 +330,83 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   if (openTenders.length) metrics.push({ num: String(openTenders.length), label: 'מכרזים רלוונטיים<br>פתוחים כרגע' })
   if (leadsSorted.length) metrics.push({ num: String(leadsSorted.length), label: 'שותפים פוטנציאליים<br>שזוהו' })
   if (upcomingConfs.length) metrics.push({ num: String(upcomingConfs.length), label: 'כנסים רלוונטיים<br>קרובים' })
+  // Competitors: TWO numbers in one card — how many are tracked, and how much
+  // they published this week. Hidden entirely when nothing is tracked.
+  if (trackedCount > 0) {
+    metrics.push({
+      num: String(trackedCount),
+      label: trackedWeekPosts > 0
+        ? `מתחרים במעקב<br><b>${trackedWeekPosts}</b> פוסטים השבוע`
+        : 'מתחרים במעקב<br>ללא פרסומים השבוע',
+      hot: trackedWeekPosts >= 10,
+    })
+  }
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   // STEP 3 traffic-light discipline: RED (urgent) ONLY for real near-deadline
   // items (tender / conference). Everything else is a growth opportunity → AMBER
   // ("הזדמנות" for leads, "נקודה למחשבה" otherwise). Never red for non-deadlines.
-  const actions: ReportData['actions'] = sortedActions.map((a) => {
+  // ── Competitor actions (deterministic, from stored tracking) ──────────────
+  // Built in code, never generated: same traffic-light discipline as the rest —
+  // competitor activity is an OPPORTUNITY (amber "נקודה למחשבה"), never red.
+  // Red stays reserved for real deadlines. Capped so they can't flood the list.
+  const COMPETITOR_ACTION_CAP = 3
+  const HIGH_POST_COUNT = Number(process.env.REPORT_COMPETITOR_BUSY_POSTS) || 4
+  const HIGH_ENGAGEMENT = Number(process.env.REPORT_COMPETITOR_HOT_ENGAGEMENT) || 100
+  const MODULE_SRC = 'מקור: מעקב מתחרים'
+  type Act = ReportData['actions'][number]
+  const competitorActions: Array<Act & { weight: number }> = []
+  for (const t of trackStats) {
+    // A fresh negative review is the strongest opening for the client.
+    if (t.negatives.length > 0) {
+      const ng = t.negatives[0]
+      competitorActions.push({
+        weight: 3,
+        title: `${t.name} קיבל ביקורת שלילית`,
+        why: `${ng.rating != null ? `${ng.rating}★ — ` : ''}${(ng.text || '').slice(0, 120)}${(ng.text || '').length > 120 ? '…' : ''} — הזדמנות לפנות ללקוחות שלא קיבלו מענה טוב`,
+        src: MODULE_SRC,
+        chip: { kind: 'watch' as const, text: 'הזדמנות' },
+        kind: 'watch' as const,
+      })
+    }
+    // A post that clearly outperformed — worth learning from.
+    if (t.bestPost && t.bestPost.engagement >= HIGH_ENGAGEMENT) {
+      competitorActions.push({
+        weight: 2,
+        title: `פוסט של ${t.name} קיבל תגובות רבות`,
+        why: `${t.bestPost.engagement.toLocaleString('he-IL')} לייקים ותגובות${t.bestPost.caption ? ` — "${t.bestPost.caption}"` : ''}. שווה לראות מה עבד שם.`,
+        src: MODULE_SRC,
+        chip: { kind: 'watch' as const, text: 'נקודה למחשבה' },
+        kind: 'watch' as const,
+      })
+    }
+    // A busy week for a competitor — check what they're pushing.
+    if (t.weekPosts >= HIGH_POST_COUNT) {
+      competitorActions.push({
+        weight: 1,
+        title: `${t.name} פרסם ${t.weekPosts} פוסטים השבוע`,
+        why: 'קצב פרסום גבוה מהרגיל — כדאי לבדוק מה הם מקדמים כרגע.',
+        src: MODULE_SRC,
+        chip: { kind: 'watch' as const, text: 'נקודה למחשבה' },
+        kind: 'watch' as const,
+      })
+    }
+  }
+  // Most meaningful first, one action per competitor so a single busy
+  // competitor can't take the whole list.
+  const seenCompetitor = new Set<string>()
+  const topCompetitorActions: Act[] = competitorActions
+    .sort((a, b) => b.weight - a.weight)
+    .filter((a) => {
+      const who = trackStats.find((t: any) => a.title.includes(t.name))?.name || a.title
+      if (seenCompetitor.has(who)) return false
+      seenCompetitor.add(who)
+      return true
+    })
+    .slice(0, COMPETITOR_ACTION_CAP)
+    .map(({ weight, ...a }) => a)
+
+  const storedActions: ReportData['actions'] = sortedActions.map((a) => {
     const sig = Array.isArray(a.signals) && a.signals[0] ? a.signals[0] : null
     const srcLabel = sig?.label ? `מקור: ${sig.label}` : (a.category ? `מקור: ${a.category}` : '')
     const isDeadline = a.category === 'מכרז' || a.category === 'כנס'
@@ -308,6 +422,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       : { kind: 'watch' as const, text: 'נקודה למחשבה' }
     return { title: a.title || '', why: a.summary || a.details || '', src: srcLabel, chip, kind: 'watch' as const }
   })
+
+  // Competitor actions sit HIGH — above the stored recommendations — but real
+  // deadlines (מכרז/כנס) keep their place at the very top, since those expire.
+  const deadlineActions = storedActions.filter((a) => a.kind === 'urgent')
+  const otherStored = storedActions.filter((a) => a.kind !== 'urgent')
+  const actions: ReportData['actions'] = [...deadlineActions, ...topCompetitorActions, ...otherStored].slice(0, 6)
 
   // ── Competitors: CHANGES ONLY ───────────────────────────────────────────────
   // STEP 4: show only competitors with a real change this scan (directional

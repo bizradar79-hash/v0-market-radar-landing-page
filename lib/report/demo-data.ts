@@ -30,6 +30,7 @@ export const DEMO_REPORT: ReportData = {
     ...(TENDERS_ENABLED ? [{ num: '3', label: 'מכרזים רלוונטיים<br>פתוחים כרגע' }] : []),
     { num: '5', label: 'שותפים פוטנציאליים<br>שזוהו' },
     { num: '2', label: 'כנסים רלוונטיים<br>קרובים' },
+    { num: '3', label: 'מתחרים במעקב<br><b>41</b> פוסטים השבוע', hot: true },
   ],
 
   actions: [
