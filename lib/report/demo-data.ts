@@ -53,38 +53,85 @@ export const DEMO_REPORT: ReportData = {
   // The old change-detection list is gone; "מעקב מתחרים" below is the section.
   competitors: [],
   competitorsNote: null,
-  // The demo report shows the NEW "מעקב מתחרים" section.
+  // "מעקב מתחרים" — the in-code fallback for /r/demo when the DB seed isn't
+  // applied. Mirrors supabase/seed_demo_competitor_tracking.sql.
+  // ⚠️  EVERY COMPETITOR HERE IS INVENTED. This is public demo content: no real
+  //     business may be named, rated or quoted.
   competitorTracking: [
     {
-      name: 'לימון ייעוץ משכנתאות',
+      name: 'משכנתא חכמה בע"מ',
       links: [
-        { label: 'אתר', url: 'https://example.co.il' },
-        { label: 'אינסטגרם', url: 'https://instagram.com/example' },
+        { label: 'אתר', url: 'https://example.com/mashkanta-hachama' },
+        { label: 'אינסטגרם', url: 'https://www.instagram.com/example_mashkanta' },
+        { label: 'פייסבוק', url: 'https://www.facebook.com/example.mashkanta' },
       ],
       reviews: {
-        rating: 4.9,
-        total: 143,
-        headline: '4.9★ · 143 ביקורות',
-        recent: '7 ביקורות חדשות ב-45 יום, ממוצע 4.8',
-        sentiment: { dir: 'down' as const, text: 'הביקורות האחרונות חלשות מהממוצע (4.8 מול 4.9)' },
+        rating: 4.6,
+        total: 154,
+        headline: '4.6★ · 154 ביקורות',
+        recent: '7 ביקורות חדשות ב-45 יום, ממוצע 4.1',
+        sentiment: { dir: 'down' as const, text: 'הביקורות האחרונות חלשות מהממוצע (4.1 מול 4.6)' },
       },
-      googleUrl: 'https://www.google.com/maps?cid=13294732576479516349',
+      googleUrl: 'https://www.google.com/maps?cid=10000000000000000001',
       followers: [
-        { label: 'אינסטגרם', count: 8420 },
-        { label: 'פייסבוק', count: 3110 },
+        { label: 'אינסטגרם', count: 9240 },
+        { label: 'פייסבוק', count: 4130 },
       ],
       posts: [
         // Same content cross-posted to two platforms — kept as two posts on
         // purpose; the badge is what makes that clear.
-        { date: '18 באוגוסט', platform: 'instagram', platformLabel: 'אינסטגרם', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '👍 287 · 💬 25 · 12,400 צפיות', url: 'https://instagram.com/p/example1', notable: true },
-        { date: '18 באוגוסט', platform: 'facebook', platformLabel: 'פייסבוק', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '👍 64 · 💬 9', url: 'https://facebook.com/example1' },
-        { date: '14 באוגוסט', platform: 'facebook', platformLabel: 'פייסבוק', caption: 'סיפור לקוח: חסכנו 180 אלף ש"ח במחזור משכנתא', engagement: '👍 81 · 💬 15', url: 'https://facebook.com/example2' },
+        { date: 'לפני יומיים', platform: 'instagram', platformLabel: 'אינסטגרם', caption: '3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא — והדרך להימנע מהן', engagement: '👍 412 · 💬 37 · 18,600 צפיות', url: 'https://www.instagram.com/p/example-a', notable: true },
+        { date: 'לפני יומיים', platform: 'facebook', platformLabel: 'פייסבוק', caption: '3 טעויות שעולות עשרות אלפי ₪ בתמהיל משכנתא — והדרך להימנע מהן', engagement: '👍 88 · 💬 14', url: 'https://www.facebook.com/example/posts/a' },
+        { date: 'לפני 5 ימים', platform: 'instagram', platformLabel: 'אינסטגרם', caption: 'לקוחה שלנו סורבה בשני בנקים — וקיבלה אישור תוך 11 יום', engagement: '👍 268 · 💬 24 · 11,200 צפיות', url: 'https://www.instagram.com/p/example-b' },
       ],
       insights: [
         '9 פרסומים ב-45 הימים האחרונים (פעיל מאוד) — אינסטגרם: 6 · פייסבוק: 3',
-        'הכי מדברים על: "מחזור" (5) · "ריבית" (4) · "תמהיל" (3)',
-        'לקוחות מזכירים: "שירות" (4) · "מקצועי" (3)',
+        'הכי פעילים באינסטגרם',
+        'הכי מדברים על: "תמהיל" (4) · "מיחזור" (3) · "ריבית" (3)',
+        'לקוחות מזכירים: "זמינות" (3) · "ליווי" (3)',
       ],
+    },
+    {
+      name: 'הבית הפיננסי',
+      links: [
+        { label: 'אתר', url: 'https://example.com/habait-hafinansi' },
+        { label: 'פייסבוק', url: 'https://www.facebook.com/example.habait' },
+        { label: 'לינקדאין', url: 'https://www.linkedin.com/company/example-habait' },
+      ],
+      reviews: {
+        rating: 4.8,
+        total: 98,
+        headline: '4.8★ · 98 ביקורות',
+        recent: '3 ביקורות חדשות ב-45 יום, ממוצע 4.9',
+        sentiment: { dir: 'up' as const, text: 'הביקורות האחרונות טובות מהממוצע (4.9 מול 4.8)' },
+      },
+      googleUrl: 'https://www.google.com/maps?cid=10000000000000000002',
+      followers: [
+        { label: 'פייסבוק', count: 2870 },
+        { label: 'לינקדאין', count: 1120 },
+      ],
+      posts: [
+        { date: 'לפני 3 ימים', platform: 'facebook', platformLabel: 'פייסבוק', caption: 'משכנתא הפוכה — למי זה באמת מתאים ומתי כדאי להימנע', engagement: '👍 96 · 💬 18', url: 'https://www.facebook.com/example/posts/c', notable: true },
+        { date: 'לפני 8 ימים', platform: 'linkedin', platformLabel: 'לינקדאין', caption: 'מגייסים יועץ משכנתאות למשרד בראשון לציון', engagement: '👍 22 · 💬 3', url: 'https://www.linkedin.com/feed/update/example' },
+      ],
+      insights: [
+        '4 פרסומים ב-45 הימים האחרונים (פעיל) — פייסבוק: 3 · לינקדאין: 1',
+        'הכי מדברים על: "ריבית" (2) · "בנקים" (2)',
+      ],
+    },
+    {
+      // No social activity — shows the section degrading cleanly: reviews only.
+      name: 'כספי ייעוץ משכנתאות',
+      links: [{ label: 'אתר', url: 'https://example.com/kaspi-mashkantaot' }],
+      reviews: {
+        rating: 4.9,
+        total: 212,
+        headline: '4.9★ · 212 ביקורות',
+      },
+      googleUrl: 'https://www.google.com/maps?cid=10000000000000000003',
+      followers: [],
+      posts: [],
+      insights: ['לא זוהתה פעילות ברשתות החברתיות'],
     },
   ],
   competitorTrends: [
