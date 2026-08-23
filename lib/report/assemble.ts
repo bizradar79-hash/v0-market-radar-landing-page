@@ -314,14 +314,26 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const competitorSentence = trackedCount > 0 && trackedWeekPosts > 0
     ? `${trackedCount === 1 ? 'המתחרה שלך פרסם' : `${trackedCount} המתחרים שלך פרסמו`} <em>${trackedWeekPosts}</em> ${trackedWeekPosts === 1 ? 'פוסט' : 'פוסטים'} השבוע`
     : ''
-  const businessSentence = [rankPhrase, oppClause].filter(Boolean).join(', ') + '.'
 
-  // Assemble: sentence 1 (big serif) = market; sentence 2 (sub) = business.
-  const thesisBig = marketSentence
-    ? marketSentence + '.'
-    : businessSentence
-  const thesisSub = [marketSentence ? businessSentence : '', competitorSentence ? competitorSentence + '.' : '']
-    .filter(Boolean).join(' ')
+  /**
+   * The summary is a row of INDEPENDENT stats, so they're separated by a pipe
+   * rather than commas and periods. Mixed Hebrew / English / numbers made the
+   * old joining read as one run-on sentence ("…מנועי ה־AI, 10 הזדמנויות…").
+   *
+   * Each segment is wrapped in its own bidi isolate: without it the pipe and a
+   * segment that STARTS with a digit or "#" reorder across the RTL/LTR boundary
+   * and the separator visually jumps between the wrong stats.
+   */
+  const SUMMARY_SEP = '<span class="sep">|</span>'
+  const joinSegments = (segs: string[]) =>
+    segs.filter(Boolean).map((t) => `<span class="seg">${t}</span>`).join(SUMMARY_SEP)
+
+  const summarySegments = [rankPhrase, oppClause, competitorSentence].filter(Boolean)
+
+  // Assemble: the big serif line is the market headline (or the first stat when
+  // there is no market signal); the sub line carries the remaining stats.
+  const thesisBig = marketSentence || summarySegments[0] || ''
+  const thesisSub = joinSegments(marketSentence ? summarySegments : summarySegments.slice(1))
 
   // ── Metrics strip ───────────────────────────────────────────────────────────
   const metrics: ReportData['metrics'] = []

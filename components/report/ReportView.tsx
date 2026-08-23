@@ -25,7 +25,12 @@ export const REPORT_CSS = `
   .rpt .thesis{background:var(--card);border-bottom:1px solid var(--line);padding:38px 0 30px}
   .rpt .thesis p.big{font-family:'Frank Ruhl Libre',serif;font-size:28px;font-weight:500;line-height:1.45;color:var(--ink);max-width:660px}
   .rpt .thesis p.big em{font-style:normal;font-weight:700;background:linear-gradient(transparent 62%,var(--teal-glow) 62%);color:var(--teal-deep);padding:0 2px}
-  .rpt .thesis .sub{margin-top:12px;color:var(--ink-soft);font-size:15.5px;max-width:620px}
+  .rpt .thesis .sub{margin-top:12px;color:var(--ink-soft);font-size:15.5px;max-width:620px;line-height:1.7}
+  .rpt .thesis .sub em{font-style:normal;font-weight:800;color:var(--teal-deep)}
+  /* Each stat is its own bidi isolate so the pipe can't drift across the
+     Hebrew/number boundary and appear to belong to the wrong segment. */
+  .rpt .seg{unicode-bidi:isolate}
+  .rpt .sep{unicode-bidi:isolate;color:var(--ink-faint);margin:0 9px;font-weight:400;opacity:.6}
   .rpt .metrics{background:var(--card);padding:26px 0 36px;border-bottom:1px solid var(--line)}
   .rpt .metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:14px}
   .rpt .metric{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:18px 16px 15px;position:relative;transition:transform .15s}
@@ -234,7 +239,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
       <div className="thesis">
         <div className="wrap">
           <p className="big" dangerouslySetInnerHTML={{ __html: r.thesis.big }} />
-          {r.thesis.sub && <p className="sub">{r.thesis.sub}</p>}
+          {r.thesis.sub && <p className="sub" dangerouslySetInnerHTML={{ __html: r.thesis.sub }} />}
         </div>
       </div>
 

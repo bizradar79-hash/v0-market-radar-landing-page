@@ -20,8 +20,13 @@ export const DEMO_REPORT: ReportData = {
   },
 
   thesis: {
-    big: 'הביקוש ל<em>"מיחזור משכנתא"</em> עלה ב־23% מהרבעון הקודם.',
-    sub: `אתה מופיע במקום #2 בהמלצות מנועי ה־AI, ${TENDERS_ENABLED ? 8 : 5} הזדמנויות חדשות זוהו השבוע.`,
+    big: 'הביקוש ל<em>"מיחזור משכנתא"</em> עלה ב־23% מהרבעון הקודם',
+    // Pipe-separated, bidi-isolated segments — same shape assembleReport builds.
+    sub: [
+      'אתה מופיע במקום #2 בהמלצות מנועי ה־AI',
+      `${TENDERS_ENABLED ? 8 : 5} הזדמנויות חדשות זוהו השבוע`,
+      '3 המתחרים שלך פרסמו <em>41</em> פוסטים השבוע',
+    ].map(t => `<span class="seg">${t}</span>`).join('<span class="sep">|</span>'),
   },
 
   metrics: [
