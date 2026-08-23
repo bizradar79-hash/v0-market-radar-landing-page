@@ -89,6 +89,26 @@ export const REPORT_CSS = `
   .rpt .rank-sub{font-size:13px;color:var(--ink-soft)}
   .rpt .channel-tag{font-size:12.5px;font-weight:800;color:var(--teal-deep);letter-spacing:.02em;padding:15px 22px 5px}
   .rpt .calm-note{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;color:var(--ink-soft);font-size:14.5px;box-shadow:0 2px 10px -4px rgba(20,33,45,.06)}
+  .rpt .trk{padding:18px 22px;border-bottom:1px solid var(--line)}
+  .rpt .trk:last-child{border-bottom:none}
+  .rpt .trk-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .rpt .trk-name{font-weight:800;font-size:16.5px;color:var(--ink)}
+  .rpt .trk-links{display:flex;gap:8px;flex-wrap:wrap}
+  .rpt .trk-links a{font-size:11.5px;color:var(--teal-deep);text-decoration:none;border-bottom:1px solid var(--teal-glow)}
+  .rpt .trk-nums{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .rpt .trk-num{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:11px 15px;min-width:118px}
+  .rpt .trk-num.stars{background:linear-gradient(160deg,var(--amber-wash),#fff 75%);border-color:var(--amber)}
+  .rpt .trk-num .big{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:25px;line-height:1.05;color:var(--ink)}
+  .rpt .trk-num.stars .big{color:var(--amber)}
+  .rpt .trk-num .cap{font-size:11.5px;color:var(--ink-soft);margin-top:5px;font-weight:600}
+  .rpt .trk-line{font-size:13.5px;color:var(--ink-soft);margin-top:8px;line-height:1.55}
+  .rpt .trk-line.up{color:var(--green)}
+  .rpt .trk-line.down{color:var(--red)}
+  .rpt .trk-sub{font-size:12px;font-weight:800;color:var(--ink-faint);margin-top:14px;letter-spacing:.02em}
+  .rpt .trk-post{border-inline-start:3px solid var(--line);padding:2px 11px;margin-top:8px}
+  .rpt .trk-post .meta{font-size:11px;color:var(--ink-faint);font-weight:600}
+  .rpt .trk-post .txt{font-size:13.5px;color:var(--ink);margin-top:2px;line-height:1.5}
+  .rpt .trk-ins{font-size:13.5px;color:var(--ink-soft);margin-top:6px;line-height:1.55}
   .rpt .comp-intro{padding:16px 22px;border-bottom:1px solid var(--line);color:var(--ink-soft);font-size:14.5px;background:#f8fbfa}
   .rpt .opp-text{font-size:13px;color:var(--amber);line-height:1.5}
   .rpt .src-link{font-size:12px;font-weight:700;color:var(--teal-deep);text-decoration:none;white-space:nowrap}
@@ -246,59 +266,90 @@ export default function ReportView({ data: r, archive, example }: { data: Report
         </section>
       )}
 
-      {/* COMPETITORS — changes only, or a calm line */}
-      {(r.competitors.length > 0 || r.competitorsNote) && (
+      {/* מעקב מתחרים — projection of the tracking module's stored data.
+          Replaces the old "מה השתנה אצל המתחרים" change-detection section and
+          its (now disabled) competitor-trends fallback. Read-only, zero AI. */}
+      {r.competitorTracking && r.competitorTracking.length > 0 ? (
         <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">מתחרים</span></div>
-            <h2>מה השתנה אצל המתחרים שלך</h2>
-            {r.competitors.length > 0 ? (
-              <div className="card">
-                {r.competitors.map((c, i) => (
-                  <div className={`row${c.hot ? ' hot-row' : ''}`} key={i}>
-                    <div className="row-main">
-                      <div className="row-title">{c.name}{c.hot && <span className="pill amber">שינוי בולט</span>}</div>
-                      {c.sub && <div className="row-sub">{c.sub}</div>}
-                      <div className="comp-change">
-                        {c.deltas.map((d, j) => <span className={`delta ${d.kind}`} key={j}>{d.text}</span>)}
-                      </div>
-                    </div>
+            <h2>מעקב מתחרים</h2>
+            <div className="card">
+              {r.competitorTracking.map((c, i) => (
+                <div className="trk" key={i}>
+                  <div className="trk-head">
+                    <span className="trk-name">{c.name}</span>
+                    <span className="trk-links">
+                      {c.links.map((l, j) => (
+                        <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>
+                      ))}
+                    </span>
                   </div>
-                ))}
-                <a className="more-link" href="/app/competitors">לניתוח המתחרים המלא במערכת ←</a>
-              </div>
-            ) : (r.competitorTrends && r.competitorTrends.length > 0) ? (
-              <div className="card">
-                <div className="comp-intro">{r.competitorsNote}</div>
-                {r.competitorTrends.map((t, i) => (
-                  <div className="row" key={i}>
-                    <div className="row-main">
-                      <div className="row-title">{t.name}</div>
-                      {t.topic && (
-                        <div className="row-sub">
-                          {t.topic}
-                          {t.sourceUrl && (
-                            <>{' '}<a className="src-link" href={t.sourceUrl} target="_blank" rel="noopener noreferrer">מקור ←</a></>
-                          )}
+
+                  {/* ⭐ + 👥 — the numbers that matter, rendered big. */}
+                  {(c.reviews || c.followers.length > 0) && (
+                    <div className="trk-nums">
+                      {c.reviews && (
+                        <div className="trk-num stars">
+                          <div className="big">{c.reviews.rating != null ? `${c.reviews.rating}★` : '—'}</div>
+                          <div className="cap">
+                            {c.reviews.total != null
+                              ? `${c.reviews.total.toLocaleString('he-IL')} ביקורות בגוגל`
+                              : 'דירוג בגוגל'}
+                          </div>
                         </div>
                       )}
-                      {t.opportunity && (
-                        <div className="comp-change">
-                          <span className="pill amber">נקודה למחשבה</span>
-                          <span className="opp-text">{t.opportunity}</span>
+                      {c.followers.map((f, j) => (
+                        <div className="trk-num" key={j}>
+                          <div className="big">{f.count.toLocaleString('he-IL')}</div>
+                          <div className="cap">
+                            עוקבים · {f.label}
+                            {f.growth && <span className={f.growth.dir === 'up' ? ' ▲' : ' ▼'}>{` ${f.growth.text}`}</span>}
+                          </div>
                         </div>
-                      )}
+                      ))}
                     </div>
-                  </div>
-                ))}
-                <a className="more-link" href="/app/competitors">לניתוח המתחרים המלא במערכת ←</a>
-              </div>
-            ) : (
-              <div className="calm-note">{r.competitorsNote}</div>
-            )}
+                  )}
+
+                  {c.reviews?.recent && <div className="trk-line">🆕 {c.reviews.recent}</div>}
+                  {c.reviews?.sentiment && (
+                    <div className={`trk-line ${c.reviews.sentiment.dir === 'up' ? 'up' : c.reviews.sentiment.dir === 'down' ? 'down' : ''}`}>
+                      {c.reviews.sentiment.dir === 'up' ? '📈' : c.reviews.sentiment.dir === 'down' ? '📉' : '➖'} {c.reviews.sentiment.text}
+                    </div>
+                  )}
+
+                  {c.posts.length > 0 && (
+                    <>
+                      <div className="trk-sub">📱 פרסומים אחרונים</div>
+                      {c.posts.map((p, j) => (
+                        <div className="trk-post" key={j}>
+                          <div className="meta">{p.date}{p.date && ' · '}{p.platform}{p.engagement ? ` · ${p.engagement}` : ''}</div>
+                          <div className="txt">{p.caption}</div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {c.insights.length > 0 && (
+                    <>
+                      <div className="trk-sub">תובנות (45 יום)</div>
+                      {c.insights.map((t, j) => <div className="trk-ins" key={j}>· {t}</div>)}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </section>
-      )}
+      ) : r.competitorsNote ? (
+        <section>
+          <div className="wrap">
+            <div className="sec-head"><span className="sec-kicker">מתחרים</span></div>
+            <h2>מעקב מתחרים</h2>
+            <div className="calm-note">{r.competitorsNote}</div>
+          </div>
+        </section>
+      ) : null}
 
       {/* TENDERS */}
       {r.tenders.length > 0 && (

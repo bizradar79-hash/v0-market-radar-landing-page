@@ -52,6 +52,26 @@ export interface ReportData {
   actions: Array<{ title: string; why: string; src: string; chip: { kind: 'urgent' | 'watch' | 'go'; text: string }; kind: 'urgent' | 'watch' | '' }>
   competitors: Array<{ name: string; sub: string; deltas: Array<{ kind: 'good' | 'bad' | 'neutral'; text: string }>; hot?: boolean }>
   competitorsNote?: string | null   // calm line / intro when no competitor changed this scan
+  /**
+   * "מעקב מתחרים" — the tracking module's stored view, read-only. Replaces the
+   * old change-detection section. Everything here comes from competitor_tracking
+   * rows; nothing is generated at report time.
+   */
+  competitorTracking?: Array<{
+    name: string
+    links: Array<{ label: string; url: string }>
+    reviews?: {
+      rating: number | null
+      total: number | null
+      headline: string          // the BIG highlighted line
+      recent?: string           // new reviews in the window
+      sentiment?: { dir: 'up' | 'down' | 'flat'; text: string }
+    }
+    followers: Array<{ label: string; count: number; growth?: { dir: 'up' | 'down'; text: string } }>
+    posts: Array<{ date: string; platform: string; caption: string; engagement?: string }>
+    insights: string[]
+    scannedAt?: string
+  }>
   // Evergreen filler when no changes this scan: top stored competitor-trends,
   // each with an optional amber "opportunity-for-you" line.
   competitorTrends?: Array<{ name: string; topic: string; opportunity?: string; sourceUrl?: string }>
@@ -83,7 +103,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const area = deriveArea(company, bp).display
   const today = new Date().toISOString().split('T')[0]
 
-  const [[{ data: competitorsRaw }, { data: tendersRaw }, { data: leadsRaw }, { data: conferencesRaw }, { data: newsRaw }], hiddenKeys] =
+  const [[{ data: competitorsRaw }, { data: tendersRaw }, { data: leadsRaw }, { data: conferencesRaw }, { data: newsRaw }, { data: trackingRaw }], hiddenKeys] =
     await Promise.all([
       Promise.all([
         db.from('competitors').select('name, website, threat_score, positioning, trend, services, google_rating, google_review_count').eq('company_id', companyId),
@@ -91,6 +111,14 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         db.from('leads').select('name, website, industry, reason, score, source, location').eq('company_id', companyId),
         db.from('conferences').select('name, date, location, description, url, category').eq('company_id', companyId),
         db.from('news').select('title, source, url, summary, category, published_at').eq('company_id', companyId).order('published_at', { ascending: false }),
+        // NEW competitor module. Fetched HERE on purpose: snapshot.ts calls
+        // assembleReport, so the live /r/[token] read and the frozen archive
+        // both get it from one place — the missing-SELECT trap this report has
+        // hit repeatedly cannot reopen for two separate query sites.
+        db.from('competitor_tracking')
+          .select('competitor_name, resolved_links, sources, insights, reviews, scanned_at')
+          .eq('company_id', companyId)
+          .order('competitor_name'),
       ]),
       loadHiddenKeys(companyId, undefined, db),
     ])
@@ -289,6 +317,85 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     const sub = c.positioning || c.services || ''
     return { name: c.name || '', sub, deltas, hot: i === 0 && c.trend === 'growing' }
   })
+  // ── מעקב מתחרים (the NEW competitor module) ──────────────────────────────
+  // Pure projection of stored competitor_tracking rows. ZERO model calls, zero
+  // scraping: whatever the last tracking run persisted is what the client sees,
+  // which is also exactly what the module page shows.
+  const POSTS_WINDOW_DAYS = 14
+  const PLATFORM_LABELS: Record<string, string> = {
+    website: 'אתר', instagram: 'אינסטגרם', facebook: 'פייסבוק', linkedin: 'לינקדאין',
+  }
+  const competitorTracking: NonNullable<ReportData['competitorTracking']> = (trackingRaw || [])
+    .map((row: any) => {
+      const links = (row?.resolved_links || {}) as Record<string, string>
+      const rv = (row?.reviews || {}) as any
+      const ins = (row?.insights || {}) as any
+      const sources: any[] = Array.isArray(row?.sources) ? row.sources : []
+
+      // ⭐ Reviews — skipped entirely when no Google business resolved.
+      let reviews: any
+      if (rv.found && (rv.rating != null || rv.reviewsCount != null)) {
+        reviews = {
+          rating: rv.rating ?? null,
+          total: rv.reviewsCount ?? null,
+          headline: rv.rating != null && rv.reviewsCount != null
+            ? `${rv.rating}★ · ${Number(rv.reviewsCount).toLocaleString('he-IL')} ביקורות`
+            : rv.rating != null ? `${rv.rating}★` : `${Number(rv.reviewsCount).toLocaleString('he-IL')} ביקורות`,
+          recent: rv.insights?.recent?.text || undefined,
+          sentiment: rv.insights?.sentiment
+            ? { dir: rv.insights.sentiment.direction, text: rv.insights.sentiment.text }
+            : undefined,
+        }
+      }
+
+      // 👥 Followers — current counts. Growth needs a prior scan; until then we
+      // show the number alone rather than a fake delta.
+      const followers = (Array.isArray(ins.followers) ? ins.followers : [])
+        .filter((f: any) => typeof f?.followers === 'number' && f.followers > 0)
+        .map((f: any) => ({ label: PLATFORM_LABELS[f.source] || f.source, count: f.followers }))
+
+      // 📱 Recent posts — tighter window than the 45-day insights above them.
+      const cutoff = Date.now() - POSTS_WINDOW_DAYS * 86400000
+      const posts = sources
+        .flatMap((src: any) => (Array.isArray(src?.posts) ? src.posts : []).map((p: any) => ({ ...p, source: src.source })))
+        .filter((p: any) => {
+          const t = p?.date ? new Date(p.date).getTime() : NaN
+          return !isNaN(t) && t >= cutoff   // undated posts are never assumed recent
+        })
+        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 3)
+        .map((p: any) => {
+          const eng = (p.likes ?? 0) + (p.comments ?? 0)
+          return {
+            date: heDate(p.date),
+            platform: PLATFORM_LABELS[p.source] || p.source,
+            caption: String(p.caption || '').trim().slice(0, 120) || '(ללא כיתוב)',
+            engagement: eng > 0 ? `${eng.toLocaleString('he-IL')} לייקים ותגובות` : undefined,
+          }
+        })
+
+      // 45-day deterministic insights, already computed at scan time.
+      const insights = [
+        ins.cadence?.text, ins.presence?.text, ins.themes?.text,
+        ins.topPosts?.[0]?.caption ? `הפוסט שהכי עבד להם: ${ins.topPosts[0].caption}` : '',
+        rv.insights?.themes?.text,
+      ].filter((x: any) => typeof x === 'string' && x.trim()) as string[]
+
+      return {
+        name: String(row?.competitor_name || '').trim(),
+        links: ['website', 'instagram', 'facebook', 'linkedin']
+          .filter((k) => links[k])
+          .map((k) => ({ label: PLATFORM_LABELS[k], url: links[k] })),
+        reviews,
+        followers,
+        posts,
+        insights,
+        scannedAt: row?.scanned_at || undefined,
+      }
+    })
+    // A competitor with nothing to show is skipped rather than rendered empty.
+    .filter((c: any) => c.name && (c.reviews || c.followers.length || c.posts.length || c.insights.length))
+
   // Three-level competitors assembly (read-only — NO model calls):
   //  (a) real changes → the list above.
   //  (b) no changes BUT stored competitor-trends → intro line + top trends, each
@@ -322,6 +429,18 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     } else if (allComp.length > 0) {
       competitorsNote = 'לא זוהו שינויים מהותיים אצל המתחרים השבוע'
     }
+  }
+
+  // The rendered section is now "מעקב מתחרים" (competitorTracking above); the
+  // legacy note/list are kept in the payload for older snapshots but must not
+  // dictate what the current report says. This has the final word.
+  if (competitorTracking.length === 0) {
+    // Nothing tracked yet: say why, rather than showing an empty section or
+    // silently dropping it when the client HAS named competitors.
+    const named = Array.isArray(bp?.directCompetitors) ? bp.directCompetitors.filter(Boolean) : []
+    competitorsNote = named.length
+      ? `המתחרים שהגדרת (${named.slice(0, 5).join(', ')}) ייסרקו בסריקה הקרובה`
+      : null
   }
 
   // ── Tenders section ─────────────────────────────────────────────────────────
@@ -523,6 +642,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     competitors: competitorsOut,
     competitorsNote,
     competitorTrends,
+    competitorTracking,
     industryTrends,
     tenders: tendersOut,
     leadGroups,

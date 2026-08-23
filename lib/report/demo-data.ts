@@ -43,6 +43,36 @@ export const DEMO_REPORT: ReportData = {
   // No competitor CHANGES this week → evergreen fallback (intro + trends + amber opps).
   competitors: [],
   competitorsNote: 'לא זוהו שינויים מהותיים השבוע — אבל הנה מה שקורה אצל המתחרים:',
+  // The demo report shows the NEW "מעקב מתחרים" section.
+  competitorTracking: [
+    {
+      name: 'לימון ייעוץ משכנתאות',
+      links: [
+        { label: 'אתר', url: 'https://example.co.il' },
+        { label: 'אינסטגרם', url: 'https://instagram.com/example' },
+      ],
+      reviews: {
+        rating: 4.9,
+        total: 143,
+        headline: '4.9★ · 143 ביקורות',
+        recent: '7 ביקורות חדשות ב-45 יום, ממוצע 4.8',
+        sentiment: { dir: 'down' as const, text: 'הביקורות האחרונות חלשות מהממוצע (4.8 מול 4.9)' },
+      },
+      followers: [
+        { label: 'אינסטגרם', count: 8420 },
+        { label: 'פייסבוק', count: 3110 },
+      ],
+      posts: [
+        { date: '18 באוגוסט', platform: 'אינסטגרם', caption: 'מדריך: איך לבחור תמהיל משכנתא נכון בריבית הנוכחית', engagement: '312 לייקים ותגובות' },
+        { date: '14 באוגוסט', platform: 'פייסבוק', caption: 'סיפור לקוח: חסכנו 180 אלף ש"ח במחזור משכנתא', engagement: '96 לייקים ותגובות' },
+      ],
+      insights: [
+        '9 פרסומים ב-45 הימים האחרונים (פעיל מאוד) — אינסטגרם: 6 · פייסבוק: 3',
+        'הכי מדברים על: "מחזור" (5) · "ריבית" (4) · "תמהיל" (3)',
+        'לקוחות מזכירים: "שירות" (4) · "מקצועי" (3)',
+      ],
+    },
+  ],
   competitorTrends: [
     { name: 'משכנתא חכמה בע"מ', topic: 'השיקו מחשבון מיחזור אונליין חדש באתר', opportunity: 'הוסף כלי דומה או מדריך מיחזור לאתר שלך כדי לא לפגר אחרי' },
     { name: 'הבית הפיננסי', topic: 'מקדמים קמפיין תוכן על "משכנתא לזוגות צעירים"', opportunity: 'נישה עם ביקוש עולה — שווה עמוד נחיתה ייעודי' },
