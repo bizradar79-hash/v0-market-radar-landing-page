@@ -3,7 +3,7 @@
 import { useState, useEffect, type ReactNode } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { REPORT_CSS, DemandSpark } from "@/components/report/ReportView"
+import { REPORT_CSS } from "@/components/report/ReportView"
 import { DEMO_REPORT } from "@/lib/report/demo-data"
 import { TENDERS_ENABLED } from "@/lib/flags"
 
@@ -32,7 +32,7 @@ function Header() {
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
-          <a href="#report" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
+          <a href="#competitors" className="hover:text-gray-900 transition-colors">מעקב מתחרים</a>
           <a href="#how" className="hover:text-gray-900 transition-colors">איך זה עובד</a>
           <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
           <a href="#faq" className="hover:text-gray-900 transition-colors">שאלות</a>
@@ -70,228 +70,6 @@ function Rpt({ children }: { children: ReactNode }) {
 }
 
 // One rank cell, matching ReportView (unranked → calm muted label, not a bare dash).
-function RankCell({ rank, warn, unranked }: { rank: string; warn?: boolean; unranked?: boolean }) {
-  return unranked
-    ? <div className="rank-unranked">לא מדורג<br />עדיין</div>
-    : <div className={`rank-num${warn ? " warn" : ""}`}>{rank}</div>
-}
-
-function ModuleCard({ title, caption, children }: { title: string; caption: string; children: ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-      <div className="mb-1 text-base font-bold" style={{ color: "#0F172A" }}>{title}</div>
-      <p className="mb-4 text-sm text-gray-500">{caption}</p>
-      {children}
-    </div>
-  )
-}
-
-function ReportShowcase() {
-  const a = DEMO_REPORT.actions[0]
-  const t = DEMO_REPORT.tenders[0] // undefined when tenders module is off (card gated below)
-  const g = DEMO_REPORT.leadGroups[0]
-  // The landing showcases the CURRENT competitor module (מעקב מתחרים). The old
-  // competitorTrends fragment is gone — that module is disabled.
-  const ct = DEMO_REPORT.competitorTracking![0]
-  const seoP = DEMO_REPORT.seoPrimary!
-  const seoX = DEMO_REPORT.seoExtras || []
-  const ai = DEMO_REPORT.seoAi!
-  const demand = DEMO_REPORT.demand!
-  const trend = DEMO_REPORT.trends[0]
-  const news = DEMO_REPORT.news[0]
-
-  return (
-    <>
-      {/* Inject the real report stylesheet + fonts once. */}
-      <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-      <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
-
-      {/* Metrics strip — the "everything at a glance" row */}
-      <Rpt>
-        <div className="metrics-grid">
-          {DEMO_REPORT.metrics.map((m, i) => (
-            <div className={`metric${m.hot ? " hot" : ""}`} key={i}>
-              <div className="num">{m.num}</div>
-              {m.badge && <div><span className={`badge ${m.badge.kind}`}>{m.badge.text}</span></div>}
-              <div className="label" dangerouslySetInnerHTML={{ __html: m.label }} />
-            </div>
-          ))}
-        </div>
-      </Rpt>
-
-      {/* 8 module cards */}
-      <div className="mt-6 grid gap-5 md:grid-cols-2">
-        {/* 1. Competitor tracking — the flagship, first in the showcase. */}
-        <ModuleCard
-          title="🔍 מעקב מתחרים"
-          caption="מזין שמות של עד 5 מתחרים — ומקבל כל שבוע מה פרסמו, מה כתבו עליהם בגוגל וכמה עוקבים יש להם."
-        >
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="trk">
-                <div className="trk-head">
-                  <span className="trk-name">{ct.name}</span>
-                </div>
-                <div className="trk-nums">
-                  {ct.reviews && (
-                    <div className="trk-num stars">
-                      <div className="big">{ct.reviews.rating}★</div>
-                      <div className="cap">{ct.reviews.total?.toLocaleString('he-IL')} ביקורות בגוגל</div>
-                    </div>
-                  )}
-                  {ct.followers.slice(0, 2).map((f, i) => (
-                    <div className="trk-num" key={i}>
-                      <div className="big">{f.count.toLocaleString('he-IL')}</div>
-                      <div className="cap">עוקבים · {f.label}</div>
-                    </div>
-                  ))}
-                </div>
-                {ct.posts[0] && (
-                  <div className="trk-post notable">
-                    <div className="meta">
-                      <span className={`plat ${ct.posts[0].platform}`}>{ct.posts[0].platformLabel}</span>
-                      {ct.posts[0].date}
-                    </div>
-                    <div className="txt">{ct.posts[0].caption}</div>
-                    {ct.posts[0].engagement && <div className="trk-eng">{ct.posts[0].engagement}</div>}
-                  </div>
-                )}
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 2. Actions */}
-        <ModuleCard title="🎯 המלצות לפעולה" caption="כל שבוע: מה לעשות, לפי סדר דחיפות.">
-          <Rpt>
-            <div className={`action${a.kind ? " " + a.kind : ""}`} style={{ marginBottom: 0 }}>
-              <div className="action-num">1</div>
-              <div className="action-body">
-                <div className="action-title">{a.title}</div>
-                <div className="action-why">{a.why}</div>
-                <div className="action-src">{a.src}</div>
-              </div>
-              <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 3. Tenders — feature-flagged off (hidden, not deleted) */}
-        {TENDERS_ENABLED && t && (
-        <ModuleCard title="📋 מכרזים" caption="מכרזים רלוונטיים ממקורות רשמיים, לפני שהם נסגרים.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className={`row${t.hot ? " hot-row" : ""}`}>
-                <div className="row-main">
-                  <div className="row-title">{t.title}{t.pill && <span className={`pill ${t.pill.kind}`}>{t.pill.text}</span>}</div>
-                  <div className="row-sub">{t.sub}</div>
-                </div>
-                <div className="row-side"><span className="deadline">{t.side}</span></div>
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-        )}
-
-        {/* 4. Partners / channels */}
-        <ModuleCard title="🤝 שותפים וערוצי הפצה" caption="שותפים אמיתיים באזור שלך, לפי הערוצים שתגדיר.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="channel-tag">{g.channel}</div>
-              {g.leads.map((l, i) => (
-                <div className="row" key={i}>
-                  <div className="row-main">
-                    <div className="row-title">{l.title}{l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}</div>
-                    <div className="row-sub">{l.sub}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 5. Google ranking */}
-        <ModuleCard title="📊 דירוג בגוגל" caption="איפה אתה מדורג על המילים שחשובות, עם נפחי חיפוש אמיתיים.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="rank-row">
-                <RankCell rank={seoP.rank} warn={seoP.warn} unranked={seoP.unranked} />
-                <div className="rank-main">
-                  <div className="rank-title">{seoP.query}</div>
-                  <div className="rank-sub">{seoP.sub}</div>
-                </div>
-              </div>
-              {seoX.slice(0, 2).map((s, i) => (
-                <div className="rank-row" key={i}>
-                  <RankCell rank={s.rank} warn={s.warn} unranked={s.unranked} />
-                  <div className="rank-main">
-                    <div className="rank-title">{s.query}</div>
-                    <div className="rank-sub">{s.sub}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 6. AI (GEO) ranking */}
-        <ModuleCard title="🤖 דירוג במנועי AI" caption="ככה אתה נראה כשלקוחות שואלים את ChatGPT.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="ai-q">שאלה במנועי AI: <b>"{ai.question}"</b></div>
-              <div className="ai-engines">
-                {ai.engines.map((e, i) => (
-                  <div className={`ai-eng ${e.appeared ? "on" : "off"}`} key={i}>
-                    <div className="eng-name">{e.name}</div>
-                    <div className="eng-rank">{e.rank}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 7. Trends + demand sparkline */}
-        <ModuleCard title="📈 טרנדים ומילות מפתח" caption="מה עולה בשוק שלך — נתוני חיפוש אמיתיים, 12 חודשים אחורה.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="demand">
-                <div className="demand-head"><b>{demand.label}</b> · "{demand.keyword}"</div>
-                <DemandSpark series={demand.series} />
-              </div>
-              <div className={`row${trend.hot ? " hot-row" : ""}`}>
-                <div className="row-main">
-                  <div className="row-title">{trend.title}{trend.hot && <span className="pill amber">🔥 חם</span>}</div>
-                  <div className="row-sub">{trend.sub}</div>
-                </div>
-                <div className="row-side"><span className={`badge ${trend.badge.kind}`}>{trend.badge.text}</span></div>
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-
-        {/* 8. News */}
-        <ModuleCard title="📰 חדשות רלוונטיות" caption="רק החדשות שנוגעות לעסק שלך.">
-          <Rpt>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div className="row">
-                <div className="row-main">
-                  <div className="row-title">{news.title}{news.pill && <span className="pill amber">{news.pill}</span>}</div>
-                  <div className="row-sub">{news.sub}</div>
-                </div>
-              </div>
-            </div>
-          </Rpt>
-        </ModuleCard>
-      </div>
-    </>
-  )
-}
-
-// ── Hero visual: industry-NEUTRAL animated alert stack ──────────────────────
-// CSS-only sequential fade/slide-in loop, pause-on-hover, reduced-motion safe.
-// Cards deliberately span different modules/industries so no niche association.
-
 const HERO_ALERTS = [
   // Tender alert is feature-flagged with the module (red = real deadline, only
   // when tenders are ON). While off: a calm news card — no artificial urgency,
@@ -574,81 +352,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── PAIN ─────────────────────────────────────────────────────────── */}
-      <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-        <h2 className="mb-10 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
-          כמה מזה מוכר לך?
-        </h2>
-        <div className="grid gap-6 sm:grid-cols-3">
-          {[
-            { icon: "🗂️", t: "לבדוק 5 אתרים ידנית", d: "מתחרים, טרנדים, חדשות ושותפים — כל אחד באתר אחר, כל שבוע מחדש." },
-            { icon: "🤷", t: "לנחש לגבי המתחרים", d: "מה הם השיקו? איפה הם חזקים? בלי מעקב מסודר — לא באמת יודעים." },
-            { icon: "⌛", t: "לגלות הזדמנות באיחור", d: "טרנד שעלה, שותף שנכנס לאזור — כשאתה שומע על זה, זה כבר מאוחר." },
-          ].map((p) => (
-            <div key={p.t} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-              <div className="mb-3 text-3xl">{p.icon}</div>
-              <h3 className="mb-2 text-base font-bold" style={{ color: "#0F172A" }}>{p.t}</h3>
-              <p className="text-sm text-gray-500 leading-relaxed">{p.d}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── REPORT SHOWCASE (live fragments, real report components/CSS) ──── */}
-      <section id="report" className="bg-gray-50 py-16">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6">
-          <h2 className="mb-3 text-center text-2xl font-extrabold sm:text-3xl" style={{ color: "#0F172A" }}>
-            מה נכנס לדוח השבועי שלך
-          </h2>
-          <p className="mb-2 text-center text-lg font-bold" style={{ color: "#0D9488" }}>
-            {TENDERS_ENABLED ? 8 : 7} מנועי מודיעין, דוח אחד
-          </p>
-          <p className="mb-10 text-center text-gray-500 max-w-xl mx-auto">
-            לא צילומי מסך — אלה רכיבים אמיתיים מתוך הדוח עצמו. מה שתראו כאן זה בדיוק מה שתקבלו.
-          </p>
-
-          {/* Phone-frame demo report — loudly labeled as a fictional example */}
-          <div className="mb-14 flex flex-col items-center">
-            <div className="relative w-full max-w-[340px]">
-              <span
-                className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-5 py-2 text-sm font-extrabold text-white shadow-lg"
-                style={{ backgroundColor: "#d97706" }}
-              >
-                🧪 דוח לדוגמה — עסק פיקטיבי להמחשה
-              </span>
-              <div
-                className="relative overflow-hidden rounded-[2.2rem] border-[10px] border-gray-900 bg-gray-900 shadow-2xl"
-                style={{ aspectRatio: "9 / 17" }}
-              >
-                <div className="absolute left-1/2 top-0 z-10 h-5 w-32 -translate-x-1/2 rounded-b-2xl bg-gray-900" />
-                <iframe
-                  src="/r/demo?embed=1"
-                  title="דוח לדוגמה — עסק פיקטיבי להמחשה"
-                  loading="lazy"
-                  className="h-full w-full rounded-[1.5rem] bg-white"
-                />
-              </div>
-            </div>
-            <p className="mt-7 max-w-md text-center text-base font-semibold text-gray-600">
-              ככה נראה הדוח שמגיע אליך בוואטסאפ, כל שבוע
-            </p>
-          </div>
-
-          <ReportShowcase />
-          <div className="mt-10 text-center">
-            <a
-              href="/r/demo"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block rounded-xl border-2 px-8 py-3.5 text-base font-bold transition-all hover:scale-105 hover:bg-white"
-              style={{ borderColor: "#0D9488", color: "#0D9488" }}
-            >
-              צפה בדוח המלא לדוגמה →
-            </a>
-          </div>
-        </div>
-      </section>
-
       {/* ── HOW IT WORKS ─────────────────────────────────────────────────── */}
       <section id="how" className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <h2 className="mb-16 text-center text-3xl font-extrabold" style={{ color: "#0F172A" }}>
@@ -783,7 +486,7 @@ export default function LandingPage() {
               <p className="text-xs text-gray-400">מודיעין שוק לעסק שלך — בדוח אחד שבועי</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
-              <a href="#report" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
+              <a href="#competitors" className="hover:text-gray-900 transition-colors">מעקב מתחרים</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
               <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">דוח לדוגמה</a>
               <a href="mailto:support@nsradar.co.il" className="hover:text-gray-900 transition-colors">צור קשר</a>
