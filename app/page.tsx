@@ -30,7 +30,7 @@ function Header() {
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-gray-600 sm:flex">
-          <a href="#competitors" className="hover:text-gray-900 transition-colors">מעקב מתחרים</a>
+          <a href="#whats-inside" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
           <a href="#how" className="hover:text-gray-900 transition-colors">איך זה עובד</a>
           <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
           <a href="#faq" className="hover:text-gray-900 transition-colors">שאלות</a>
@@ -162,7 +162,9 @@ export default function LandingPage() {
               className="mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium"
               style={{ borderColor: "#0D9488", color: "#0D9488", background: "#F0FDFA" }}
             >
-              📡 מודיעין שוק לעסק שלך — בדוח אחד
+              <span className="font-extrabold">שלב א׳</span>
+              <span className="opacity-40">·</span>
+              📡 אתה מגדיר את העסק שלך
             </div>
             <h1 className="text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl" style={{ color: "#0F172A" }}>
               כל מה שקורה בשוק שלך —<br />
@@ -216,47 +218,74 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── FLAGSHIP: COMPETITOR TRACKING ────────────────────────────────── */}
-      {/* Placed immediately after the trust strip: this is the headline feature,
-          not one of eight. Copy only — the sample competitor cards were removed;
-          anyone who wants to see real output opens the demo report. */}
-      <section id="competitors" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+      {/* ── WHAT YOU GET (stage 2) ───────────────────────────────────────── */}
+      {/* The report's actual contents, one card per module. Every line here
+          describes something the product really produces — tenders are absent
+          because that module is flagged off. */}
+      <section id="whats-inside" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <div className="mb-3 flex justify-center">
           <span
             className="rounded-full px-3.5 py-1 text-xs font-extrabold"
             style={{ backgroundColor: "#0D948815", color: "#0D9488" }}
           >
-            חדש · המודול המבוקש ביותר
+            שלב ב׳
           </span>
         </div>
         <h2 className="text-center text-3xl font-extrabold leading-tight sm:text-4xl" style={{ color: "#0F172A" }}>
-          דע בדיוק מה המתחרים שלך עושים —<br />
-          <span style={{ color: "#0D9488" }}>פוסטים, ביקורות וכל מהלך, כל שבוע</span>
+          מה המערכת מוצאת לך —<br />
+          <span style={{ color: "#0D9488" }}>וכל זה בדוח אחד, כל שבוע</span>
         </h2>
         <p className="mx-auto mt-5 max-w-2xl text-center text-lg text-gray-500 leading-relaxed">
-          אתה מזין רק <b>שמות</b> של עד 5 מתחרים. אנחנו מאתרים לבד את האתר, האינסטגרם, הפייסבוק,
-          הלינקדאין ועמוד הגוגל שלהם — ומביאים כל שבוע מה הם פרסמו, כמה עוקבים יש להם,
-          ומה הלקוחות שלהם כותבים עליהם בגוגל.
+          אתה לא צריך לחפש כלום. הרדאר סורק בשבילך את השוק, את המתחרים ואת המיקום שלך —
+          ומרכיב מזה דוח אחד עם מה שקרה ומה לעשות עם זה.
         </p>
 
-        {/* What it actually does — honest, feature-by-feature. */}
-        <div className="mt-10">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {[
-              { icon: "📱", t: "כל פוסט שהם מפרסמים", d: "אינסטגרם, פייסבוק ולינקדאין — עם התאריך, הטקסט, כמה לייקים וכמה תגובות קיבלו, וקישור ישיר לפוסט." },
-              { icon: "⭐", t: "הביקורות שלהם בגוגל", d: "הדירוג ומספר הביקורות, כמה ביקורות חדשות נוספו החודש, והאם הן טובות או חלשות מהממוצע שלהם." },
-              { icon: "👥", t: "כמות העוקבים", d: "כמה עוקבים יש להם בכל רשת — ואיך זה משתנה מסריקה לסריקה." },
-              { icon: "💡", t: "תובנות, לא רק נתונים", d: "מי הכי פעיל, על מה הם הכי מדברים, איזה פוסט הכי עבד להם, ואיפה נפתחה לך הזדמנות." },
-            ].map((f) => (
-              <div key={f.t} className="flex gap-3.5 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-                <span className="text-2xl leading-none">{f.icon}</span>
-                <div>
-                  <div className="text-base font-bold" style={{ color: "#0F172A" }}>{f.t}</div>
-                  <p className="mt-1 text-sm text-gray-500 leading-relaxed">{f.d}</p>
-                </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            {
+              icon: "📊",
+              t: "השוואה של העסק שלך מול המתחרים והשוק",
+              d: "איפה אתה עומד ביחס אליהם — דירוג, נוכחות וביקורות — ומה הפער שאפשר לסגור.",
+            },
+            {
+              icon: "🔍",
+              t: "מעקב מתחרים",
+              d: "מה הם פרסמו ברשתות (פוסטים, לייקים, תגובות), מה כתבו עליהם בגוגל, וכל שינוי מהותי באתר שלהם — מוצר חדש, מחיר או מבצע.",
+            },
+            {
+              icon: "📈",
+              t: "טרנדים ומילות מפתח",
+              d: "מה עולה ומה יורד בתחום שלך, עם נפחי חיפוש אמיתיים ומגמה של 12 חודשים אחורה.",
+            },
+            {
+              icon: "🤖",
+              t: "דירוג במנועי AI",
+              d: "איך העסק שלך מופיע כשלקוחות שואלים את ChatGPT או Gemini — ומי מוזכר במקומך.",
+            },
+            {
+              icon: "📅",
+              t: "כנסים וחדשות רלוונטיים",
+              d: "כנסים קרובים בתחום שלך עם מועדי הרשמה, וחדשות שנוגעות ישירות לעסק — בלי רעש.",
+            },
+            {
+              icon: "🔎",
+              t: "דירוג SEO בגוגל",
+              d: "המיקום שלך על מילות המפתח שחשובות לך, נמדד בפועל — לא הערכה.",
+            },
+            {
+              icon: "🤝",
+              t: "ערוצי הפצה ושותפים פוטנציאליים",
+              d: "עסקים באזור שלך שיכולים להפנות אליך לקוחות, לפי הערוצים שתגדיר.",
+            },
+          ].map((f) => (
+            <div key={f.t} className="flex gap-3.5 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+              <span className="text-2xl leading-none">{f.icon}</span>
+              <div>
+                <div className="text-base font-bold" style={{ color: "#0F172A" }}>{f.t}</div>
+                <p className="mt-1 text-sm text-gray-500 leading-relaxed">{f.d}</p>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
 
         <div className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
@@ -265,7 +294,7 @@ export default function LandingPage() {
             className="rounded-xl px-8 py-3.5 text-center text-base font-bold text-white shadow-lg transition-all hover:scale-105 hover:opacity-95"
             style={{ backgroundColor: "#0D9488" }}
           >
-            התחל לעקוב אחרי המתחרים שלך ←
+            התחל עכשיו ←
           </Link>
           <Link
             href="/r/demo"
@@ -411,7 +440,7 @@ export default function LandingPage() {
               <p className="text-xs text-gray-400">מודיעין שוק לעסק שלך — בדוח אחד שבועי</p>
             </div>
             <nav className="flex flex-wrap justify-center gap-5 text-sm text-gray-500">
-              <a href="#competitors" className="hover:text-gray-900 transition-colors">מעקב מתחרים</a>
+              <a href="#whats-inside" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
               <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">דוח לדוגמה</a>
               <a href="mailto:support@nsradar.co.il" className="hover:text-gray-900 transition-colors">צור קשר</a>
