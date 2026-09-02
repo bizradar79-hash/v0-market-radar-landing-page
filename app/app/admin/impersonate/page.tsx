@@ -375,6 +375,40 @@ export default function ImpersonatePage() {
   const [ctRunAll, setCtRunAll] = useState(false)
   const [ctResult, setCtResult] = useState<Record<string, string>>({})
 
+  // ── Last scan's per-module cost ──────────────────────────────────────────
+  // Reads the ALREADY-RECORDED scan_control.cost_breakdown via /api/scan/status
+  // — nothing is recomputed here. It exists so a $4 scan can be explained from
+  // the admin screen instead of by reading function logs.
+  type CostRow = {
+    id: string; calls: number; costUSD: number
+    providers: Record<string, { calls: number; costUSD: number }>
+  }
+  const [costRows, setCostRows] = useState<CostRow[] | null>(null)
+  const [costTotal, setCostTotal] = useState<{ calls: number; usd: number }>({ calls: 0, usd: 0 })
+
+  const loadCost = useCallback(async (userId: string) => {
+    try {
+      const res = await fetch(`/api/scan/status?company_id=${userId}`)
+      const data = await res.json()
+      const cb = data?.scan_control?.cost_breakdown
+      if (!res.ok || !cb || typeof cb !== 'object') { setCostRows(null); return }
+      const rows: CostRow[] = Object.entries(cb)
+        .filter(([k]) => k !== 'total')
+        .map(([id, v]: [string, any]) => ({
+          id,
+          calls: v?.calls ?? 0,
+          costUSD: v?.costUSD ?? 0,
+          providers: v?.providers ?? {},
+        }))
+        .sort((a, b) => b.costUSD - a.costUSD)
+      setCostRows(rows)
+      setCostTotal({
+        calls: rows.reduce((n, r) => n + r.calls, 0),
+        usd: rows.reduce((n, r) => n + r.costUSD, 0),
+      })
+    } catch { setCostRows(null) }
+  }, [])
+
   const loadCtList = useCallback(async (userId: string) => {
     try {
       const res = await fetch(`/api/admin/competitor-tracking-status?company_id=${userId}`)
@@ -384,9 +418,10 @@ export default function ImpersonatePage() {
   }, [])
 
   useEffect(() => {
-    if (!moduleSyncUser) { setCtList([]); setCtResult({}); return }
+    if (!moduleSyncUser) { setCtList([]); setCtResult({}); setCostRows(null); return }
     loadCtList(moduleSyncUser.id)
-  }, [moduleSyncUser, loadCtList])
+    loadCost(moduleSyncUser.id)
+  }, [moduleSyncUser, loadCtList, loadCost])
 
   /**
    * Run ONE competitor: TRIGGER, then POLL.
@@ -1140,6 +1175,50 @@ export default function ImpersonatePage() {
                   )
                 })}
               </div>
+
+              {/* ── עלות הסריקה האחרונה — from scan_control.cost_breakdown ── */}
+              {!!costRows?.length && (
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-semibold">💰 עלות הסריקה האחרונה</p>
+                    <span className="text-[11px] text-muted-foreground">
+                      {costTotal.calls} קריאות · <b>${costTotal.usd.toFixed(4)}</b>
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {costRows.map(r => {
+                      const share = costTotal.usd > 0 ? (r.costUSD / costTotal.usd) * 100 : 0
+                      return (
+                        <div key={r.id}>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="flex-1 truncate">{r.id}</span>
+                            <span className="w-10 shrink-0 text-center tabular-nums text-muted-foreground">{r.calls}</span>
+                            <span className="w-16 shrink-0 text-left font-medium tabular-nums">${r.costUSD.toFixed(4)}</span>
+                            <span className="w-10 shrink-0 text-left tabular-nums text-muted-foreground">{share.toFixed(0)}%</span>
+                          </div>
+                          {/* The provider split is the diagnosis: a Grok
+                              web_search is ~$0.065 a call, a Gemini completion
+                              a fraction of a cent. */}
+                          {Object.keys(r.providers).length > 0 && (
+                            <div className="flex flex-wrap gap-x-2 pr-2 text-[10px] text-muted-foreground">
+                              {Object.entries(r.providers)
+                                .sort((a, b) => b[1].costUSD - a[1].costUSD)
+                                .map(([prov, pv]) => (
+                                  <span key={prov} className={prov.includes('web_search') ? 'font-medium text-amber-600' : ''}>
+                                    {prov} ×{pv.calls} ${pv.costUSD.toFixed(4)}
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    מודולים ללא פירוט ספק נסרקו לפני העדכון — יופיעו בסריקה הבאה.
+                  </p>
+                </div>
+              )}
 
               {/* ── מעקב מתחרים — one competitor per request, driven here ── */}
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">

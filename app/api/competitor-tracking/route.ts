@@ -201,6 +201,17 @@ async function handlePost(request: Request) {
       if (result.cost.dataforseo) {
         cost.add({ provider: 'dataforseo', model: 'google_reviews', costUSD: result.cost.dataforseo.costUSD })
       }
+      // Grok web_search link discovery — the priciest single call this module
+      // can make, and previously invisible in the scan breakdown entirely.
+      if (result.cost.linkDiscovery) {
+        cost.add({
+          provider: 'xai',
+          model: result.cost.linkDiscovery.model,
+          webSearch: true,
+          promptTokens: 0,
+          completionTokens: 0,
+        })
+      }
       // Only ever present when the competitor's site actually changed.
       if (result.cost.websiteDiff) {
         cost.add({

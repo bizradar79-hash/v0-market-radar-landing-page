@@ -30,7 +30,10 @@ interface ScanControl {
   max_seconds: number
   abort_reason?: string | null
   modules: Record<string, ScanModuleState>
-  cost_breakdown?: Record<string, { calls: number; costUSD: number; promptTokens?: number; completionTokens?: number }>
+  cost_breakdown?: Record<string, {
+    calls: number; costUSD: number; promptTokens?: number; completionTokens?: number
+    providers?: Record<string, { calls: number; costUSD: number }>
+  }>
 }
 
 // Ordered module ids + Hebrew labels (mirror sync/run MODULE_IDS).
@@ -248,6 +251,7 @@ export function ScanProgressModal({
               label: MODULE_LABELS.find(m => m.id === id)?.label ?? id,
               calls: v?.calls ?? 0,
               costUSD: v?.costUSD ?? 0,
+              providers: v?.providers ?? {},
             }))
             .sort((a, b) => b.costUSD - a.costUSD)
           const totalCalls = rows.reduce((s, r) => s + r.calls, 0)
@@ -262,10 +266,26 @@ export function ScanProgressModal({
               </div>
               <div className="space-y-0.5">
                 {rows.map(r => (
-                  <div key={r.id} className="flex items-center gap-2 text-xs px-1 py-0.5">
-                    <span className="flex-1 truncate">{r.label}</span>
-                    <span className="text-muted-foreground tabular-nums w-12 text-center shrink-0">{r.calls}</span>
-                    <span className="font-medium tabular-nums w-16 text-left shrink-0">${r.costUSD.toFixed(4)}</span>
+                  <div key={r.id} className="px-1 py-0.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 truncate">{r.label}</span>
+                      <span className="text-muted-foreground tabular-nums w-12 text-center shrink-0">{r.calls}</span>
+                      <span className="font-medium tabular-nums w-16 text-left shrink-0">${r.costUSD.toFixed(4)}</span>
+                    </div>
+                    {/* WHICH provider billed — a Grok web_search costs ~$0.065
+                        a call while a Gemini completion costs a fraction of a
+                        cent, so the module total alone can't explain a spike. */}
+                    {Object.keys(r.providers).length > 0 && (
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 pr-2 text-[10px] text-muted-foreground">
+                        {Object.entries(r.providers)
+                          .sort((a, b) => b[1].costUSD - a[1].costUSD)
+                          .map(([prov, pv]) => (
+                            <span key={prov} className={prov.includes('web_search') ? 'text-amber-600 font-medium' : ''}>
+                              {prov} ×{pv.calls} ${pv.costUSD.toFixed(4)}
+                            </span>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div className="flex items-center gap-2 text-xs px-1 pt-1.5 mt-1 border-t font-semibold">

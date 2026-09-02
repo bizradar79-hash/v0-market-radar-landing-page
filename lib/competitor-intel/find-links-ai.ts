@@ -38,6 +38,14 @@ export interface LinkDiag {
 }
 export interface AILinkResult {
   urls: Partial<Record<LinkKey, string>>
+  /**
+   * Whether the Grok web_search call actually fired. It's the single most
+   * expensive thing this module can do, and it used to be entirely absent from
+   * the scan's cost breakdown — so a scan could look cheap while paying for one
+   * of these per competitor.
+   */
+  llmCalled?: boolean
+  llmModel?: string
   /** Keys whose URL is populated but could not be confirmed (show "לא אומת"). */
   unverified?: LinkKey[]
   diagnostics: LinkDiag[]
@@ -232,7 +240,7 @@ function buildPrompt(name: string, knownWebsite?: string, city?: string): string
 {"website": "https://..." או null, "instagram": "https://..." או null, "facebook": "https://..." או null, "linkedin": "https://..." או null, "googleMaps": "https://..." או null}`
 }
 
-async function askGrok(name: string, knownWebsite?: string, city?: string): Promise<{ raw: Partial<Record<LinkKey, string>>; error?: string }> {
+async function askGrok(name: string, knownWebsite?: string, city?: string): Promise<{ raw: Partial<Record<LinkKey, string>>; error?: string; called?: boolean }> {
   if (!process.env.XAI_API_KEY) return { raw: {}, error: 'missing_xai_key' }
   try {
     const res = await fetch('https://api.x.ai/v1/responses', {
@@ -261,7 +269,7 @@ async function askGrok(name: string, knownWebsite?: string, city?: string): Prom
       const v = parsed?.[k]
       if (typeof v === 'string' && /^https?:\/\//i.test(v.trim())) raw[k] = v.trim()
     }
-    return { raw }
+    return { raw, called: true }
   } catch (e: any) {
     return { raw: {}, error: e?.name === 'TimeoutError' ? 'xai_timeout' : (e?.message || 'xai_failed').slice(0, 60) }
   }
@@ -278,7 +286,7 @@ export async function findCompetitorLinksAI(
   const clean = (name || '').trim()
   if (!clean) return { urls: {}, diagnostics: [], aiError: 'missing_name' }
 
-  const { raw, error } = await askGrok(clean, knownWebsite, city)
+  const { raw, error, called } = await askGrok(clean, knownWebsite, city)
   const urls: Partial<Record<LinkKey, string>> = {}
   const diagnostics: LinkDiag[] = []
 
@@ -304,5 +312,5 @@ export async function findCompetitorLinksAI(
 
   diagnostics.sort((a, b) => LINK_KEYS.indexOf(a.key) - LINK_KEYS.indexOf(b.key))
   console.log('[find-links-ai]', clean, JSON.stringify({ raw, diagnostics, aiError: error }))
-  return { urls, unverified, diagnostics, aiError: error }
+  return { urls, unverified, diagnostics, aiError: error, llmCalled: !!called, llmModel: XAI_MODEL }
 }

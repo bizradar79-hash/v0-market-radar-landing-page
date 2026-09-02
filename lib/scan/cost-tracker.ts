@@ -103,7 +103,19 @@ export interface CostEntry {
   ms: number
 }
 
-export interface ModuleCost { calls: number; costUSD: number; promptTokens: number; completionTokens: number }
+export interface ModuleCost {
+  calls: number
+  costUSD: number
+  promptTokens: number
+  completionTokens: number
+  /**
+   * Which providers this module actually billed, and what each cost. Without
+   * it a breakdown row says "$1.30" but not whether that was Grok web_search
+   * (expensive) or Gemini tokens (cheap) — which is the whole question when a
+   * scan comes in high.
+   */
+  providers?: Record<string, { calls: number; costUSD: number }>
+}
 export interface CostBreakdown { [module: string]: ModuleCost }
 
 // ── Usage extraction (defensive across provider shapes) ─────────────────────
@@ -205,17 +217,26 @@ export class ScanCostCollector {
     }
   }
 
-  /** Aggregate of this collector's in-memory entries. */
+  /** Aggregate of this collector's in-memory entries, split by provider. */
   summary(): ModuleCost {
-    return this.entries.reduce<ModuleCost>(
-      (acc, e) => ({
-        calls: acc.calls + 1,
-        costUSD: acc.costUSD + e.costUSD,
-        promptTokens: acc.promptTokens + e.promptTokens,
-        completionTokens: acc.completionTokens + e.completionTokens,
-      }),
+    const providers: Record<string, { calls: number; costUSD: number }> = {}
+    const base = this.entries.reduce<ModuleCost>(
+      (acc, e) => {
+        // A web_search call is priced very differently from a plain completion,
+        // so it's labeled separately — that distinction is the diagnosis.
+        const key = e.webSearch ? `${e.provider}:web_search` : e.provider
+        const p = providers[key] || { calls: 0, costUSD: 0 }
+        providers[key] = { calls: p.calls + 1, costUSD: round4(p.costUSD + e.costUSD) }
+        return {
+          calls: acc.calls + 1,
+          costUSD: acc.costUSD + e.costUSD,
+          promptTokens: acc.promptTokens + e.promptTokens,
+          completionTokens: acc.completionTokens + e.completionTokens,
+        }
+      },
       { calls: 0, costUSD: 0, promptTokens: 0, completionTokens: 0 },
     )
+    return { ...base, providers }
   }
 
   /**
@@ -234,11 +255,17 @@ export class ScanCostCollector {
       const cb: CostBreakdown = (control.cost_breakdown && typeof control.cost_breakdown === 'object')
         ? control.cost_breakdown : {}
       const prev = cb[this.module] || { calls: 0, costUSD: 0, promptTokens: 0, completionTokens: 0 }
+      const mergedProviders = { ...(prev.providers || {}) }
+      for (const [k, v] of Object.entries(sum.providers || {})) {
+        const p = mergedProviders[k] || { calls: 0, costUSD: 0 }
+        mergedProviders[k] = { calls: p.calls + v.calls, costUSD: round4(p.costUSD + v.costUSD) }
+      }
       cb[this.module] = {
         calls: prev.calls + sum.calls,
         costUSD: round4(prev.costUSD + sum.costUSD),
         promptTokens: prev.promptTokens + sum.promptTokens,
         completionTokens: prev.completionTokens + sum.completionTokens,
+        providers: mergedProviders,
       }
       control.cost_breakdown = cb
       await db.from('companies').update({ scan_control: control } as any).eq('id', this.companyId)

@@ -56,6 +56,12 @@ export interface TrackingCost {
   dataforseo: { calls: number; costUSD: number; precision: 'exact' } | null
   /** The website-diff model call — present ONLY when the site actually changed. */
   websiteDiff: { model: string; promptTokens: number; completionTokens: number; costUSD: number; precision: 'exact' | 'estimated' } | null
+  /**
+   * Grok web_search link discovery. Present ONLY on a run that actually
+   * re-discovered links — a cached competitor must show null here, which is how
+   * you can tell at a glance whether the cache is doing its job.
+   */
+  linkDiscovery: { model: string; calls: number; webSearch: true } | null
   totalUSD: number
 }
 
@@ -97,11 +103,11 @@ export function linksAreUsable(links?: ResolvedLinks | null): boolean {
 
 async function resolveLinks(
   name: string, knownWebsite: string, cached: ResolvedLinks | null, force: boolean,
-): Promise<ResolvedLinks> {
-  if (!force && linksAreUsable(cached)) return cached!
+): Promise<{ links: ResolvedLinks; llmCalls: number; model?: string }> {
+  if (!force && linksAreUsable(cached)) return { links: cached!, llmCalls: 0 }
   try {
-    const { urls } = await findCompetitorLinksAI(name, knownWebsite)
-    return {
+    const { urls, llmCalled, llmModel } = await findCompetitorLinksAI(name, knownWebsite)
+    const merged: ResolvedLinks = {
       ...(cached || {}),
       website: urls.website || cached?.website,
       mapsUrl: (urls as any).googleMaps || cached?.mapsUrl,
@@ -110,8 +116,9 @@ async function resolveLinks(
       linkedin: urls.linkedin || cached?.linkedin,
       resolvedAt: new Date().toISOString(),
     }
+    return { links: merged, llmCalls: llmCalled ? 1 : 0, model: llmModel }
   } catch {
-    return cached || {}
+    return { links: cached || {}, llmCalls: 0 }
   }
 }
 
@@ -145,7 +152,11 @@ export async function trackCompetitor(opts: {
   const log = (msg: string) => console.log(`[COMPETITOR-INTEL][${name}] ${msg}`)
   const tStart = Date.now()
   log(`RUN start force=${!!opts.force} cachedLinks=${JSON.stringify(opts.cachedLinks || {})}`)
-  const links = await resolveLinks(name, opts.cachedLinks?.website || '', opts.cachedLinks || null, !!opts.force)
+  const linkRes = await resolveLinks(name, opts.cachedLinks?.website || '', opts.cachedLinks || null, !!opts.force)
+  const links = linkRes.links
+  log(linkRes.llmCalls > 0
+    ? `LINKS re-discovered via Grok web_search (${linkRes.llmCalls} call) — this is the expensive path`
+    : 'LINKS reused from cache — no Grok call, $0')
   log(`LINKS resolved: ${JSON.stringify({ website: links.website, instagram: links.instagram, facebook: links.facebook, linkedin: links.linkedin, mapsUrl: links.mapsUrl, cid: links.cid })}`)
 
   // ── Google reviews, in parallel with the scrapes ─────────────────────────
@@ -312,6 +323,9 @@ export async function trackCompetitor(opts: {
       ? { calls: reviews.found && reviews.reviewsCount ? 2 : 1, costUSD: reviews.costUSD, precision: 'exact' }
       : null,
     // Null on every run where the site didn't change — which is the point.
+    linkDiscovery: linkRes.llmCalls > 0
+      ? { model: linkRes.model || 'grok-4-fast-non-reasoning', calls: linkRes.llmCalls, webSearch: true as const }
+      : null,
     websiteDiff: websiteDiff.llm
       ? {
           model: websiteDiff.llm.model,
@@ -323,7 +337,14 @@ export async function trackCompetitor(opts: {
       : null,
     totalUSD: 0,
   }
-  cost.totalUSD = cost.brightdata.costUSD + (cost.dataforseo?.costUSD || 0) + (cost.websiteDiff?.costUSD || 0)
+  // Grok web_search is priced per call by the tracker; mirror its number here so
+  // the per-competitor total isn't quietly understated.
+  const LINK_DISCOVERY_USD = Number(process.env.XAI_WEB_SEARCH_USD) || 0.065
+  cost.totalUSD =
+    cost.brightdata.costUSD +
+    (cost.dataforseo?.costUSD || 0) +
+    (cost.websiteDiff?.costUSD || 0) +
+    (cost.linkDiscovery ? cost.linkDiscovery.calls * LINK_DISCOVERY_USD : 0)
 
   const gotSomething =
     sources.some((s) => s.status === 'ok') || !!reviews?.found
