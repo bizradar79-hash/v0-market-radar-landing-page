@@ -1,3 +1,4 @@
+import type { ScanCostCollector } from '@/lib/scan/cost-tracker'
 // ── Two-stage pipeline: Gemini (content) → xAI (URLs) ────────────────────────
 // Stage 1: Gemini finds tender details (title, publisher, deadline, description, budget) — NO URLs
 // Stage 2: For each tender, xAI searches for the real page URL via web_search
@@ -80,7 +81,9 @@ export async function callModelTwoStage(prompt: string, _company?: any): Promise
 // resolve URLs identically instead of trusting a model-written `website` field.
 // Returns '' when nothing is found. Callers should still validateUrl() the
 // result before storing it.
-export async function findRealUrl(title: string, context: string): Promise<string> {
+export async function findRealUrl(
+  title: string, context: string, cost?: ScanCostCollector,
+): Promise<string> {
   const XAI_MODEL = 'grok-4-fast-non-reasoning'
   if (!title.trim()) return ''
   const urlPrompt = `מצא את הקישור הרשמי לדף של: "${title}"${context ? ` (${context})` : ''}.
@@ -101,6 +104,10 @@ export async function findRealUrl(title: string, context: string): Promise<strin
     })
     if (!xaiRes.ok) return ''
     const xaiData = await xaiRes.json()
+    // This is a PAID web_search. It used to be entirely absent from
+    // cost_breakdown while firing once per item in leads/conferences loops —
+    // the single largest untracked cost in a scan.
+    cost?.add({ provider: 'xai', model: XAI_MODEL, webSearch: true, data: xaiData })
     const xaiText = xaiData.output
       ?.filter((b: any) => b.type === 'message')
       .flatMap((b: any) => b.content)
@@ -122,7 +129,9 @@ export async function findRealUrl(title: string, context: string): Promise<strin
 }
 
 // ── Single-provider call ───────────────────────────────────────────────────
-export async function callModel(provider: string, modelName: string, prompt: string): Promise<string> {
+export async function callModel(
+  provider: string, modelName: string, prompt: string, cost?: ScanCostCollector,
+): Promise<string> {
 
   if (provider === 'xai') {
     const res = await fetch('https://api.x.ai/v1/responses', {
@@ -142,6 +151,8 @@ export async function callModel(provider: string, modelName: string, prompt: str
       throw new Error(`xAI error ${res.status}: ${errText}`)
     }
     const data = await res.json()
+    // callModel's xAI branch also uses web_search — track it.
+    cost?.add({ provider: 'xai', model: modelName, webSearch: true, data })
     const text = data.output
       ?.filter((b: any) => b.type === 'message')
       .flatMap((b: any) => b.content)

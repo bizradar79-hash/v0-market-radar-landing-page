@@ -21,6 +21,8 @@ const MAX_CHANNELS = Math.max(1, Number(process.env.LEADS_MAX_CHANNELS) || 3)
 const LEADS_PER_CHANNEL = Math.max(1, Number(process.env.LEADS_PER_CHANNEL) || 3)
 // Total kept after cap ≈ channels × per-channel; verification never exceeds this.
 const LEADS_TOTAL_CAP = Math.max(1, Number(process.env.LEADS_TOTAL_CAP) || 9)
+/** Hard cap on PAID xAI web_search URL lookups per run (was: one per lead). */
+const URL_LOOKUP_BUDGET = Math.max(0, Number(process.env.URL_LOOKUP_BUDGET) || 3)
 
 // One Grok web_search call → parsed JSON array. Shared by both paths.
 async function grokSearch(prompt: string, cost: ScanCostCollector): Promise<any[]> {
@@ -208,18 +210,27 @@ export async function POST(request: Request) {
     // ── URL VERIFICATION (reuse validateUrl + findRealUrl — same as conferences/
     // tenders). NEVER store a verbatim unverified site: validate the model's URL;
     // if it fails, try findRealUrl + validate; if still unverified → DROP the lead.
+    // Cost-gated: the model's own URL is validated FREE (a HEAD request) and
+    // only a missing/dead one falls through to a PAID xAI web_search — capped
+    // at URL_LOOKUP_BUDGET per run. This loop previously fired one web_search
+    // per lead (up to 9), which was the module's dominant cost.
+    let urlLookups = 0
     const verified = await Promise.all(
       candidates.map(async (l) => {
         const w = (l.website || '').trim()
         if (/^https?:\/\//i.test(w) && await validateUrl(w)) return { ...l, website: w }
+        if (urlLookups >= URL_LOOKUP_BUDGET) return null   // unverified → drop, no paid lookup
+        urlLookups++
         const candidate = await findRealUrl(
           l.name,
           `${l.channel ? l.channel + ' ' : ''}${areaLabel} ישראל`.trim(),
+          cost ?? undefined,
         )
         if (/^https?:\/\//i.test(candidate) && await validateUrl(candidate)) return { ...l, website: candidate }
         return null // unverified → drop (no fake links)
       })
     )
+    console.log(`[leads] url lookups: ${urlLookups}/${URL_LOOKUP_BUDGET} paid web_search calls (of ${candidates.length} candidates)`)
     const verifiedList = verified.filter((l): l is NonNullable<typeof l> => l !== null)
     // Respect admin-hidden leads: a hidden lead must never be re-added.
     const list = filterHidden(verifiedList, 'lead', hiddenLeadKeys, (l: any) => l.name || '')

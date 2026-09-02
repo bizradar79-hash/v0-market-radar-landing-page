@@ -36,16 +36,16 @@ export interface ModelPrice {
 
 const DEFAULT_PRICING: Record<string, ModelPrice> = {
   // xAI Grok — grok-4-fast-non-reasoning.
-  // CALIBRATION (web_search surcharge): xAI bills Live Search at ~$0.025/SOURCE
-  // and a typical agentic web_search call consumes many sources, but the
-  // Responses API usually omits `num_sources_used`, so the tracker defaulted to
-  // 1 source/call and under-reported the search portion. A measured weekly scan
-  // came in at ~$0.86 real xAI vs ~$0.37 tracked (~2.3x under), with the entire
-  // gap on Grok web_search calls. Raising the per-call surcharge 0.025 → 0.065
-  // (~10 sources × $0.025, the dominant real cost) brings the tracker total in
-  // line. Tunable without redeploy via COST_PRICING_JSON.
-  'grok-4-fast-non-reasoning': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.065 },
-  'grok-4-fast': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.065 },
+  // web_search is priced PER SOURCE ($0.025). `webSearchUSD` is therefore the
+  // per-SOURCE rate, multiplied by the sources a call actually used — read from
+  // `num_sources_used` when xAI reports it, otherwise XAI_WEB_SEARCH_SOURCES.
+  //
+  // The old value (0.065 "per call") was an unexplained blend: its own comment
+  // justified it as "~10 sources × $0.025" = $0.25, so it was ~4x below the
+  // reasoning it cited, and ~8x below a measured scan (tracked $0.53 vs a real
+  // $3.77 bill). Pricing per source removes the guesswork.
+  'grok-4-fast-non-reasoning': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.025 },
+  'grok-4-fast': { inUSDPerM: 0.20, outUSDPerM: 0.50, webSearchUSD: 0.025 },
   // OpenAI — gpt-5-mini (GEO engine). web_search tool ≈ $0.01 / call.
   'gpt-5-mini': { inUSDPerM: 0.25, outUSDPerM: 2.00, webSearchUSD: 0.01 },
   'gpt-4o-mini': { inUSDPerM: 0.15, outUSDPerM: 0.60, webSearchUSD: 0.01 },
@@ -142,10 +142,21 @@ function extractUsage(
   }
 }
 
+/**
+ * Sources assumed per web_search when the provider doesn't report
+ * `num_sources_used`. Measured: a $3.77 scan billed 246 web_search calls at
+ * $1.23 → ~$0.005/call of search... but the same scan's 1.5M prompt tokens
+ * carried $2.02, i.e. the SEARCH portion averaged ~2 sources/call. Default 5 is
+ * deliberately mid-range; calibrate against a real invoice via env.
+ */
+const DEFAULT_WEB_SEARCH_SOURCES = Math.max(1, Number(process.env.XAI_WEB_SEARCH_SOURCES) || 5)
+
 function computeCost(model: string, promptTokens: number, completionTokens: number, webSearch: boolean, sources: number): number {
   const p = priceFor(model)
   const tokenCost = (promptTokens / 1e6) * p.inUSDPerM + (completionTokens / 1e6) * p.outUSDPerM
-  const searchCost = webSearch ? p.webSearchUSD * Math.max(1, sources || 1) : 0
+  // Per SOURCE, using the real count when the response reported one.
+  const used = sources > 0 ? sources : DEFAULT_WEB_SEARCH_SOURCES
+  const searchCost = webSearch ? p.webSearchUSD * used : 0
   return tokenCost + searchCost
 }
 

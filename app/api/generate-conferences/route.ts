@@ -9,6 +9,7 @@ import type { BusinessProfile } from '@/types/business-profile'
 import { norm, wordsOf, wordHit, buildCoreModel, type KwInfo } from '@/lib/match/hebrew-core'
 import { filterInsertRows } from '@/lib/admin/hidden'
 import { isPastConference, parseConferenceDate, todayISO } from '@/lib/conferences/date'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 export const maxDuration = 60
 
@@ -16,6 +17,8 @@ const CACHE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // Cap kept conferences. Ranked high-to-low by relevance, so this keeps the best
 // matches rather than padding with loosely-related events. Env-tunable.
 const CONFERENCES_MAX = Number(process.env.CONFERENCES_MAX) || 8
+/** Hard cap on PAID xAI web_search URL lookups per run (was: one per item). */
+const URL_LOOKUP_BUDGET = Math.max(0, Number(process.env.URL_LOOKUP_BUDGET) || 3)
 
 // Conference relevance is encoded into the stored `description` (the conferences
 // table has no relevance_score column) the same way tenders encode `[src:…]`:
@@ -74,7 +77,7 @@ function scoreConference(c: any, kwInfo: KwInfo[]): { score: number; tier: 'dire
 
 // Score → gate (drop unrelated) → sort desc → cap → store. Shared by BOTH the
 // active-prompt AI path and the xAI fallback path so they gate identically.
-async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, steps: Record<string, any>) {
+async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, steps: Record<string, any>, cost?: ScanCostCollector) {
   const today = todayISO()
 
   // Future-dated only — via the SHARED comparable-date parser, so free-text dates
@@ -116,14 +119,31 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
   // web_search to find the real event page (findRealUrl), then validate it
   // resolves (validateUrl: HEAD→GET). Keep only a real, resolvable URL; otherwise
   // store '' (the UI falls back to a Google search by name).
+  // URL RESOLUTION — cost-gated.
+  // This used to fire a PAID xAI web_search for EVERY conference (up to 8 per
+  // scan), even when the model had already returned a perfectly good URL. Now:
+  //   1. trust + free-validate the model's own URL first (validateUrl = a HEAD)
+  //   2. only fall back to web_search when that URL is missing or dead
+  //   3. and never more than URL_LOOKUP_BUDGET times per run
+  // Items still unresolved keep '' — the UI already falls back to a name search.
+  let urlLookups = 0
   const resolved = await Promise.all(
     scored.map(async ({ c, score }) => {
       const name = String(c.name || c.title || '')
-      const candidate = await findRealUrl(name, `כנס/אירוע ${String(c.location || '')}`.trim())
+      const given = String(c.url || c.link || c.website || '').trim()
+      // FREE path: the model's URL, validated with a plain HEAD request.
+      if (/^https?:\/\//i.test(given) && await validateUrl(given)) {
+        return { c, score, url: given }
+      }
+      if (urlLookups >= URL_LOOKUP_BUDGET) return { c, score, url: '' }
+      urlLookups++
+      const candidate = await findRealUrl(name, `כנס/אירוע ${String(c.location || '')}`.trim(), cost ?? undefined)
       const url = (/^https?:\/\//i.test(candidate) && await validateUrl(candidate)) ? candidate : ''
       return { c, score, url }
     })
   )
+  console.log(`[conferences] url lookups: ${urlLookups}/${URL_LOOKUP_BUDGET} paid web_search calls (of ${scored.length} items)`)
+
   steps.urls = { resolved: resolved.filter(r => r.url).length, total: resolved.length }
 
   const rows = resolved.map(({ c, score, url }) => ({
@@ -153,12 +173,16 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
 
 
 export async function POST(request: Request) {
+  // This module fires xAI web_search (the module call + URL lookups) and was
+  // entirely absent from cost_breakdown until now.
+  let cost: ScanCostCollector | null = null
   const steps: Record<string, any> = {}
   try {
     steps.context = 'starting'
     const ctx = await getFullContext()
     if (!ctx) return NextResponse.json({ error: 'Unauthorized', steps }, { status: 401 })
     steps.context = { ok: true, company: ctx.company?.name }
+    cost = new ScanCostCollector(ctx.user.id, 'conferences')
 
     const force = new URL(request.url).searchParams.get('force') === 'true'
     if (!force) {
@@ -257,7 +281,11 @@ export async function POST(request: Request) {
 
         if (conferenceItems.length > 0) {
           // Relevance-gate + cap + store (shared with the fallback path).
-          return await finalizeConferences(conferenceItems, kwInfo, ctx, steps)
+          {
+            const out = await finalizeConferences(conferenceItems, kwInfo, ctx, steps, cost ?? undefined)
+            await cost?.flush()
+            return out
+          }
         }
         steps.aiPath = { ...steps.aiPath, fallback: 'ai returned 0 items' }
       } catch (aiErr: any) {
@@ -334,7 +362,11 @@ ${geoContext.includes('בינלאומי') ? 'כלול כנסים בינלאומ�
 
     steps.db = 'starting'
     // Relevance-gate + cap + store (shared with the active-prompt path).
-    return await finalizeConferences(list, kwInfo, ctx, steps)
+    {
+      const out = await finalizeConferences(list, kwInfo, ctx, steps, cost ?? undefined)
+      await cost?.flush()
+      return out
+    }
   } catch (e: any) {
     console.error('generate-conferences error:', e?.message)
     return NextResponse.json({ error: e?.message, stack: e?.stack?.split('\n').slice(0, 4), steps }, { status: 500 })

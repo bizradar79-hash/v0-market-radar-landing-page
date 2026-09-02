@@ -159,7 +159,11 @@ export async function POST() {
 
     // Enrich in parallel (max 5 at a time)
     const contextHint = [profile.coreActivity, ...(profile.industryTags || []).slice(0, 2)].filter(Boolean).join(', ')
-    const enrichBatch = (inserted || []).slice(0, 8)
+    // Each enrichCompetitor is a PAID xAI web_search. 8 per run was the second
+    // largest per-item loop in a scan; the rest keep their seeded values and are
+    // enriched on a later run.
+    const ENRICH_BUDGET = Math.max(0, Number(process.env.COMPETITOR_ENRICH_BUDGET) || 3)
+    const enrichBatch = (inserted || []).slice(0, ENRICH_BUDGET)
     await Promise.all(
       enrichBatch.map(async (comp: any) => {
         try {
