@@ -1,10 +1,8 @@
 "use client"
 
-import { useState, useEffect, type ReactNode } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { REPORT_CSS } from "@/components/report/ReportView"
-import { DEMO_REPORT } from "@/lib/report/demo-data"
 import { TENDERS_ENABLED } from "@/lib/flags"
 
 // WhatsApp demo-call CTA (prefilled Hebrew).
@@ -57,19 +55,6 @@ function Header() {
 
 // ── Live report showcase (rendered with the REAL report CSS — never drifts) ──
 // Injects the report stylesheet once, then renders `.rpt`-scoped fragments from
-// the same demo data that powers /r/demo. All 8 intelligence modules, compact.
-
-// Scoped wrapper: report CSS applies, but neutralize the full-page base rules
-// (min-height:100vh / page bg) so fragments sit inside the landing cards.
-function Rpt({ children }: { children: ReactNode }) {
-  return (
-    <div className="rpt" dir="rtl" style={{ minHeight: 0, background: "transparent", fontSize: "16px" }}>
-      {children}
-    </div>
-  )
-}
-
-// One rank cell, matching ReportView (unranked → calm muted label, not a bare dash).
 const HERO_ALERTS = [
   // Tender alert is feature-flagged with the module (red = real deadline, only
   // when tenders are ON). While off: a calm news card — no artificial urgency,
@@ -165,9 +150,6 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 // ── Main ──────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
-  // Fictional competitors from the demo report — the flagship section renders
-  // the REAL report components against them (no screenshots, no real business).
-  const [ctA, ctB] = DEMO_REPORT.competitorTracking || []
   return (
     <div dir="rtl" className="min-h-screen bg-white text-gray-900">
       <Header />
@@ -236,9 +218,8 @@ export default function LandingPage() {
 
       {/* ── FLAGSHIP: COMPETITOR TRACKING ────────────────────────────────── */}
       {/* Placed immediately after the trust strip: this is the headline feature,
-          not one of eight. The fragment below is the REAL report component with
-          the REAL report CSS, rendered from the demo company's (fictional)
-          competitor data — same as the rest of the showcase, no screenshots. */}
+          not one of eight. Copy only — the sample competitor cards were removed;
+          anyone who wants to see real output opens the demo report. */}
       <section id="competitors" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <div className="mb-3 flex justify-center">
           <span
@@ -258,9 +239,9 @@ export default function LandingPage() {
           ומה הלקוחות שלהם כותבים עליהם בגוגל.
         </p>
 
-        <div className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-start">
-          {/* What it actually does — honest, feature-by-feature. */}
-          <div className="space-y-4">
+        {/* What it actually does — honest, feature-by-feature. */}
+        <div className="mt-10">
+          <div className="grid gap-4 sm:grid-cols-2">
             {[
               { icon: "📱", t: "כל פוסט שהם מפרסמים", d: "אינסטגרם, פייסבוק ולינקדאין — עם התאריך, הטקסט, כמה לייקים וכמה תגובות קיבלו, וקישור ישיר לפוסט." },
               { icon: "⭐", t: "הביקורות שלהם בגוגל", d: "הדירוג ומספר הביקורות, כמה ביקורות חדשות נוספו החודש, והאם הן טובות או חלשות מהממוצע שלהם." },
@@ -275,62 +256,6 @@ export default function LandingPage() {
                 </div>
               </div>
             ))}
-            <p className="px-1 text-xs text-gray-400">
-              המתחרים בדוגמה בדויים. בדוח שלך יופיעו המתחרים שאתה מגדיר.
-            </p>
-          </div>
-
-          {/* LIVE fragment from the demo report. */}
-          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-            <Rpt>
-              <div className="card" style={{ marginBottom: 0 }}>
-                {[ctA, ctB].filter(Boolean).map((c, ci) => (
-                  <div className="trk" key={ci}>
-                    <div className="trk-head">
-                      <span className="trk-name">{c!.name}</span>
-                      <span className="trk-links">
-                        {c!.links.slice(0, 3).map((l, j) => <a key={j}>{l.label}</a>)}
-                      </span>
-                    </div>
-                    <div className="trk-nums">
-                      {c!.reviews && (
-                        <div className="trk-num stars">
-                          <div className="big">{c!.reviews.rating}★</div>
-                          <div className="cap">{c!.reviews.total?.toLocaleString("he-IL")} ביקורות בגוגל</div>
-                        </div>
-                      )}
-                      {c!.followers.slice(0, 2).map((f, j) => (
-                        <div className="trk-num" key={j}>
-                          <div className="big">{f.count.toLocaleString("he-IL")}</div>
-                          <div className="cap">עוקבים · {f.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {c!.reviews?.sentiment && (
-                      <div className={`trk-line ${c!.reviews.sentiment.dir === "up" ? "up" : "down"}`}>
-                        {c!.reviews.sentiment.dir === "up" ? "📈" : "📉"} {c!.reviews.sentiment.text}
-                      </div>
-                    )}
-                    {c!.posts.slice(0, 2).map((p, j) => (
-                      <div className={`trk-post${p.notable ? " notable" : ""}`} key={j}>
-                        <div className="meta">
-                          <span className={`plat ${p.platform}`}>{p.platformLabel}</span>
-                          {p.date}
-                        </div>
-                        <div className="txt">{p.caption}</div>
-                        {p.engagement && <div className="trk-eng">{p.engagement}</div>}
-                      </div>
-                    ))}
-                    {c!.insights[0] && (
-                      <>
-                        <div className="trk-sub">תובנות (45 יום)</div>
-                        <div className="trk-ins">· {c!.insights[0]}</div>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Rpt>
           </div>
         </div>
 
