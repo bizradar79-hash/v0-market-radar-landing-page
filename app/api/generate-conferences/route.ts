@@ -169,10 +169,13 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
 
   // Respect admin-hidden items: a hidden conference must never be re-added.
   const rowsToSave = await filterInsertRows(ctx.user.id, 'conference', rows, (r: any) => r.name)
-  await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
+  // Delete ONLY once we have replacements. Deleting first meant an empty result
+  // wiped the client's existing conferences — a refresh that found nothing left
+  // them with nothing.
   if (rowsToSave.length === 0) {
-    return NextResponse.json({ success: true, conferences: [], count: 0, steps })
+    return NextResponse.json({ success: true, conferences: [], count: 0, kept_existing: true, steps })
   }
+  await ctx.supabase.from('conferences').delete().eq('company_id', ctx.user.id)
   const { data: saved, error: insertError } = await ctx.supabase.from('conferences').insert(rowsToSave).select()
   if (insertError) {
     steps.db = { ok: false, error: insertError.message }

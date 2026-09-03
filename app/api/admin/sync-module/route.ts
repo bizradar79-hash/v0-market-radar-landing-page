@@ -61,12 +61,8 @@ const MODULE_ROUTES: Record<string, string[]> = {
   report:         ['/api/generate-weekly-report'],
 }
 
-// Tables to clear before regenerating (cache bust)
-const MODULE_TABLES: Record<string, string> = {
-  news:        'news',
-  conferences: 'conferences',
-  tenders:     'tenders',
-}
+// (MODULE_TABLES removed — the generators own replacing their own rows. See the
+// note in POST: pre-clearing here destroyed data whenever a fetch failed.)
 
 export async function POST(request: Request) {
   // Verify admin
@@ -106,12 +102,13 @@ export async function POST(request: Request) {
     'x-admin-secret': process.env.SUPABASE_SERVICE_ROLE_KEY!,
   }
 
-  // Clear cached table rows before regenerating
-  const tableToDelete = MODULE_TABLES[module]
-  if (tableToDelete) {
-    await adminDb.from(tableToDelete).delete().eq('company_id', company_id)
-    console.log(`[sync-module] cleared ${tableToDelete} for company ${company_id}`)
-  }
+  // NOTE: we deliberately do NOT clear the table before regenerating.
+  //
+  // It used to delete the rows up front, so a run whose fetch then failed left
+  // the client with ZERO items — a failed refresh actively destroyed data. Each
+  // generator already replaces its own rows transactionally (delete-then-insert
+  // only once it HAS items; empty results keep what's there), so clearing here
+  // added nothing but that failure mode.
 
   const results: { route: string; ok: boolean; status: number; body?: any }[] = []
 

@@ -128,6 +128,16 @@ export async function findRealUrl(
   }
 }
 
+/**
+ * The providers callModel can actually service. Exported so callers can VALIDATE
+ * a stored prompt_versions row before calling — an unknown provider throws
+ * instantly, which is easily mistaken for "ran fine, found nothing".
+ */
+export const SUPPORTED_PROVIDERS = ['xai', 'gemini', 'groq'] as const
+export function isSupportedProvider(p: unknown): boolean {
+  return typeof p === 'string' && (SUPPORTED_PROVIDERS as readonly string[]).includes(p.trim())
+}
+
 // ── Single-provider call ───────────────────────────────────────────────────
 export async function callModel(
   provider: string, modelName: string, prompt: string, cost?: ScanCostCollector,

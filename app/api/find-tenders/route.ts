@@ -254,12 +254,12 @@ CRITICAL: Output ONLY a raw JSON array. No markdown, no explanation.`
     // ── Save to DB ────────────────────────────────────────────────────────
     // Respect admin-hidden items: a hidden tender must never be re-added.
     const rowsToSave = await filterInsertRows(ctx.user.id, 'tender', allRows, (r: any) => r.title)
-    await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
-
+    // Same guard as news/conferences: never delete before we have replacements.
     if (rowsToSave.length === 0) {
       await cost.flush()
-      return NextResponse.json({ success: true, tenders: [], count: 0, message: 'לא נמצאו מכרזים רלוונטיים', steps })
+      return NextResponse.json({ success: true, tenders: [], count: 0, kept_existing: true, message: 'לא נמצאו מכרזים רלוונטיים', steps })
     }
+    await ctx.supabase.from('tenders').delete().eq('company_id', ctx.user.id)
 
     const { data: saved, error: insertError } = await ctx.supabase.from('tenders').insert(rowsToSave).select()
 

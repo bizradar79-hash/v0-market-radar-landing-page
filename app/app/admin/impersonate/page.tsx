@@ -526,7 +526,16 @@ export default function ImpersonatePage() {
         : `${data.company_name}`
       toast({
         title: ok ? `✅ ${label} עודכן` : `❌ שגיאה ב-${label}`,
-        description: ok ? detail : (data.results?.[0]?.body?.error ?? 'שגיאה לא ידועה'),
+        // Show the REAL reason: the first failing route's error, plus the
+        // module's own diagnostic steps (e.g. which provider/model threw).
+        description: ok ? detail : (() => {
+          const bad = (data.results || []).find((r: any) => !r.ok)
+          const b = bad?.body || {}
+          const why = b.error || `HTTP ${bad?.status ?? res.status}`
+          const ai = b.steps?.aiPath
+          const extra = ai ? ` [${ai.provider}/${ai.model}${ai.configError || ai.error ? ` — ${ai.configError || ai.error}` : ''}]` : ''
+          return `${why}${extra}`.slice(0, 400)
+        })(),
         variant: ok ? 'default' : 'destructive',
       })
       // Reset to idle after 4s
