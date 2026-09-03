@@ -5,7 +5,7 @@ import { search } from '@/lib/search'
 import { callModel } from '@/lib/call-model'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { filterInsertRows } from '@/lib/admin/hidden'
-import { effectiveKeywords } from '@/lib/keywords'
+import { effectiveKeywords, phraseQuery, searchSubject } from '@/lib/keywords'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 
@@ -205,8 +205,12 @@ export async function POST(request: Request) {
     // fallback only — used just when the client has no keywords at all (so no client
     // ever gets zero queries). This is what connects settings edits → news search.
     const kws = effectiveKeywords(ctx.company, businessProfile)
-    const kwHe = kws.slice(0, 3).join(' ')
-    const kwTop = kws[0] || ''
+    // PHRASES, not a word bag: `.join(' ')` turned ["דיקור סיני","רפואה סינית"]
+    // into loose tokens, so "סיני" + "חדשות ישראל" matched news about CHINA.
+    // Quoting keeps each field term intact, and the industry anchor pins the
+    // result set to the client's profession rather than an ambiguous word.
+    const kwHe = searchSubject(kws, ctx.company, businessProfile, 3)
+    const kwTop = kws[0] ? phraseQuery([kws[0]], 1) : ''
     const heQuery = kwHe
       ? `${kwHe} חדשות ישראל`
       : businessProfile
@@ -217,6 +221,7 @@ export async function POST(request: Request) {
       : businessProfile
         ? `${businessProfile.searchQueries?.[0] || industry} trends news`
         : `${industry} trends news`
+    console.log('[news] queries →', JSON.stringify({ he: heQuery, en: enQuery }))
 
     let list = await fetchNewsFromTavily(heQuery, enQuery)
     steps.tavily = { count: list.length }

@@ -10,6 +10,7 @@ import { norm, wordsOf, wordHit, buildCoreModel, type KwInfo } from '@/lib/match
 import { filterInsertRows } from '@/lib/admin/hidden'
 import { isPastConference, parseConferenceDate, todayISO } from '@/lib/conferences/date'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
+import { searchSubject } from '@/lib/keywords'
 
 export const maxDuration = 60
 
@@ -57,9 +58,19 @@ function scoreConference(c: any, kwInfo: KwInfo[]): { score: number; tier: 'dire
   const nameWords = wordsOf(name); const nameNorm = norm(name)
   const bodyWords = wordsOf(body); const bodyNorm = norm(body)
 
-  const namePhrase = kwInfo.some(k => k.multi && nameNorm.includes(k.norm))
-  const nameCore = namePhrase || kwInfo.some(k => wordHit(nameWords, k.coreTokens))
-  const bodyCore = kwInfo.some(k => (k.multi && bodyNorm.includes(k.norm)) || wordHit(bodyWords, k.coreTokens))
+  // A MULTI-WORD keyword only qualifies via the PHRASE, never via one of its
+  // words. "דיקור סיני" split into tokens let any text containing "סיני" pass —
+  // which is how a conference about CHINA scored as a domain hit for a Chinese-
+  // medicine clinic. Single-word keywords keep the token match (nothing to lose
+  // there, and it preserves recall for every other client).
+  const singleTokenHit = (words: string[]) =>
+    kwInfo.some(k => !k.multi && wordHit(words, k.coreTokens))
+  const phraseHit = (text: string) =>
+    kwInfo.some(k => k.multi && text.includes(k.norm))
+
+  const namePhrase = phraseHit(nameNorm)
+  const nameCore = namePhrase || singleTokenHit(nameWords)
+  const bodyCore = phraseHit(bodyNorm) || singleTokenHit(bodyWords)
 
   // Direct domain hit in the TITLE → high.
   if (nameCore) {
@@ -231,6 +242,11 @@ export async function POST(request: Request) {
       const keywords: string[] = ctx.company?.keywords || []
       const coreActivity = bp?.coreActivity || ctx.company?.description || ctx.company?.industry || ''
       const products = bp?.products?.map((p: any) => p.name).join(', ') || keywords.slice(0, 3).join(', ') || ''
+      // The subject the model should search for: field phrases + industry
+      // anchor, so an ambiguous word in the name/keywords can't redirect the
+      // search to an unrelated topic.
+      const subject = searchSubject(keywords, ctx.company, bp, 3)
+      console.log('[conferences] search subject →', subject)
       const companyName = ctx.company?.name || ''
       const industry = ctx.company?.industry || coreActivity
       const targetAudience = (bp?.targetAudiences || ctx.company?.target_customers || []).join(', ')
@@ -242,6 +258,7 @@ export async function POST(request: Request) {
 פעילות עיקרית: ${coreActivity}
 מוצרים: ${products}
 מילות מפתח: ${keywords.join(', ')}
+נושא החיפוש (בטא בדיוק זה — אל תרחיב למשמעות אחרת של מילה): ${subject}
 קהל יעד: ${targetAudience}
 מתחרים: ${competitorNames}
 ---
