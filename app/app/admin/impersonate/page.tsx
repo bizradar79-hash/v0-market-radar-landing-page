@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import {
   Loader2, ShieldCheck, ExternalLink, Building2, RefreshCw,
   CheckCircle2, XCircle, FileText, Minus, Trash2, Cpu, History, RotateCcw,
-  CalendarClock, Square, Plus, X, Save, Link2, Copy, Check, EyeOff,
+  CalendarClock, Square, Plus, X, Save, Link2, Copy, Check, EyeOff, Mail,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
@@ -354,6 +354,43 @@ export default function ImpersonatePage() {
       toast({ title: 'שגיאה בעצירה', description: e?.message, variant: 'destructive' })
     } finally {
       setStopping(prev => ({ ...prev, [userId]: false }))
+    }
+  }
+
+  // ── Manual "send report email" ───────────────────────────────────────────
+  // One client per click. The server resolves the recipient from the client's
+  // account and returns non-200 on ANY failure, so the button can only turn
+  // green when Resend actually accepted the message.
+  const [emailState, setEmailState] = useState<Record<string, 'sending' | 'sent' | 'error'>>({})
+
+  async function sendReportEmail(u: { id: string; email?: string | null; company?: { name?: string | null } | null }) {
+    const label = u.company?.name || u.email || 'הלקוח'
+    // An outward, irreversible action — confirm, and show WHERE it's going so
+    // a wrong address is caught before the send, not after.
+    if (!window.confirm(`לשלוח את הדוח השבועי במייל ל-${label}?\n\nנמען: ${u.email || '(יאותר בשרת)'}`)) return
+
+    setEmailState(p => ({ ...p, [u.id]: 'sending' }))
+    try {
+      const res = await fetch('/api/admin/send-report-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: u.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.sent) {
+        setEmailState(p => ({ ...p, [u.id]: 'error' }))
+        toast({
+          title: '❌ המייל לא נשלח',
+          description: data.error || `HTTP ${res.status}`,
+          variant: 'destructive',
+        })
+        return
+      }
+      setEmailState(p => ({ ...p, [u.id]: 'sent' }))
+      toast({ title: '✅ הדוח נשלח במייל', description: `${label} · ${data.to}` })
+    } catch (e: any) {
+      setEmailState(p => ({ ...p, [u.id]: 'error' }))
+      toast({ title: '❌ המייל לא נשלח', description: e?.message || 'שגיאת רשת', variant: 'destructive' })
     }
   }
 
@@ -1101,6 +1138,25 @@ export default function ImpersonatePage() {
                               >
                                 <Link2 className="h-3.5 w-3.5" />
                               </a>
+                            </Button>
+                            {/* Email the client their report link (manual). */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => sendReportEmail(u)}
+                              disabled={emailState[u.id] === 'sending'}
+                              title={u.email ? `שלח דוח במייל ל-${u.email}` : 'שלח דוח במייל'}
+                              className={
+                                emailState[u.id] === 'sent' ? 'border-green-300 text-green-700'
+                                : emailState[u.id] === 'error' ? 'border-red-300 text-red-700' : ''
+                              }
+                            >
+                              {emailState[u.id] === 'sending'
+                                ? <Loader2 className="h-3.5 w-3.5 ml-1 animate-spin" />
+                                : emailState[u.id] === 'sent'
+                                  ? <Check className="h-3.5 w-3.5 ml-1" />
+                                  : <Mail className="h-3.5 w-3.5 ml-1" />}
+                              {emailState[u.id] === 'sent' ? 'נשלח' : emailState[u.id] === 'error' ? 'נכשל' : 'שלח דוח במייל'}
                             </Button>
                           </>
                         )}
