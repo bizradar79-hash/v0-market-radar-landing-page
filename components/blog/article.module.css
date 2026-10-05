@@ -1,0 +1,131 @@
+/* Readable RTL article typography for blog bodies (sanitized HTML from the
+   editor). Scoped by the module class, so it can't leak into the rest of the
+   site. Logical properties (padding-inline-start, border-inline-start) keep
+   lists and quotes on the correct side in RTL. */
+
+.body {
+  font-size: 1.125rem;
+  line-height: 1.85;
+  color: #1e293b;
+  overflow-wrap: anywhere;
+}
+
+.body > * + * {
+  margin-top: 1.15em;
+}
+
+.body h2 {
+  margin-top: 2.1em;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.body h3 {
+  margin-top: 1.8em;
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #0f172a;
+}
+
+.body h4 {
+  margin-top: 1.5em;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.body a {
+  color: #0f766e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.body a:hover {
+  color: #0d9488;
+}
+
+.body strong,
+.body b {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.body ul,
+.body ol {
+  padding-inline-start: 1.5em;
+}
+
+.body ul {
+  list-style: disc;
+}
+
+.body ol {
+  list-style: decimal;
+}
+
+.body li + li {
+  margin-top: 0.4em;
+}
+
+.body li::marker {
+  color: #0d9488;
+}
+
+.body blockquote {
+  border-inline-start: 4px solid #0d9488;
+  padding: 0.25em 1.1em;
+  color: #475569;
+  background: #f0fdfa;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+  border-radius: 0.85rem;
+}
+
+.body hr {
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  margin-block: 2.5em;
+}
+
+.body code {
+  font-size: 0.9em;
+  background: #f1f5f9;
+  padding: 0.15em 0.4em;
+  border-radius: 0.3em;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.body pre {
+  direction: ltr;
+  text-align: left;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 1em 1.2em;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+}
+
+.body pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+@media (max-width: 640px) {
+  .body {
+    font-size: 1.05rem;
+  }
+  .body h2 {
+    font-size: 1.4rem;
+  }
+}

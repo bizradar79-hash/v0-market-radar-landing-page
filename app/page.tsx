@@ -34,6 +34,7 @@ function Header() {
           <a href="#how" className="hover:text-gray-900 transition-colors">איך זה עובד</a>
           <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
           <a href="#faq" className="hover:text-gray-900 transition-colors">שאלות</a>
+          <Link href="/blog" className="hover:text-gray-900 transition-colors">בלוג</Link>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -443,6 +444,7 @@ export default function LandingPage() {
               <a href="#whats-inside" className="hover:text-gray-900 transition-colors">מה יש בדוח</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">תמחור</a>
               <a href="/r/demo" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">דוח לדוגמה</a>
+              <Link href="/blog" className="hover:text-gray-900 transition-colors">בלוג</Link>
               <a href="mailto:support@nsradar.co.il" className="hover:text-gray-900 transition-colors">צור קשר</a>
               <Link href="/terms" className="hover:text-gray-900 transition-colors">תנאי שימוש</Link>
               <Link href="/privacy" className="hover:text-gray-900 transition-colors">מדיניות פרטיות</Link>

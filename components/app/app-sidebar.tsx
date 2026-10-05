@@ -322,6 +322,19 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                   <CreditCard className="h-5 w-5" />
                   <span>תשלומים</span>
                 </Link>
+                <Link
+                  href="/app/admin/blog"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname?.startsWith("/app/admin/blog")
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <Newspaper className="h-5 w-5" />
+                  <span>בלוג</span>
+                </Link>
               </div>
             </div>
           ) : (
