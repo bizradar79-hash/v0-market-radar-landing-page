@@ -105,7 +105,11 @@ export async function POST(request: Request) {
     stage = 'load_company'
     const { data: company, error: coErr } = await db
       .from('companies')
-      .select('id, name, business_profile, report_token, is_demo')
+      // select('*') on purpose: naming `is_demo` explicitly made the whole
+      // lookup fail with 42703 on databases where that optional column was
+      // never added (seed_demo_company.sql not applied). '*' returns whatever
+      // columns exist, and the demo guard below simply doesn't fire there.
+      .select('*')
       .eq('id', companyId)
       .maybeSingle()
     // A query ERROR is reported as such — it used to be folded into "company
@@ -114,7 +118,7 @@ export async function POST(request: Request) {
     if (!company) return fail(404, 'החברה לא נמצאה')
 
     stage = 'check_company'
-    if ((company as any).is_demo) {
+    if ((company as any).is_demo === true) {
       // The demo company's account is synthetic — an email would just bounce.
       return fail(422, 'זו חברת הדמו — לא שולחים לה מייל')
     }

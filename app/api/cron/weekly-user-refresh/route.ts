@@ -68,13 +68,28 @@ async function handleRequest(req: Request) {
   const now = new Date().toISOString()
 
   // Find companies due for refresh: next_sync_at in the past (or null), not currently running
-  const { data: due, error } = await adminDb
-    .from('companies')
-    .select('id, name, next_sync_at, last_sync_at, sync_status')
-    .or(`next_sync_at.is.null,next_sync_at.lte.${now}`)
-    .neq('sync_status', 'running')
-    .neq('is_demo', true) // demo company data stays frozen — never auto-scanned
-    .order('next_sync_at', { ascending: true, nullsFirst: true })
+  const dueQuery = (excludeDemo: boolean) => {
+    let q = adminDb
+      .from('companies')
+      .select('id, name, next_sync_at, last_sync_at, sync_status')
+      .or(`next_sync_at.is.null,next_sync_at.lte.${now}`)
+      .neq('sync_status', 'running')
+    // Demo company data stays frozen — never auto-scanned.
+    if (excludeDemo) q = q.neq('is_demo', true)
+    return q.order('next_sync_at', { ascending: true, nullsFirst: true })
+  }
+
+  let { data: due, error } = await dueQuery(true)
+
+  // `is_demo` is OPTIONAL — it is only added by seed_demo_company.sql. Where
+  // that seed was never applied, filtering on it fails the WHOLE query with
+  // 42703 (undefined column), and this cron returned 500 and refreshed NO ONE.
+  // Without the column there is no demo company to exclude, so retrying
+  // without the filter is exactly correct.
+  if (error && (error as any).code === '42703') {
+    console.warn('[cron/weekly-refresh] companies.is_demo missing — retrying without the demo filter. Apply supabase/add_is_demo_column.sql to silence this.')
+    ;({ data: due, error } = await dueQuery(false))
+  }
 
   if (error) {
     console.error('[cron/weekly-refresh] Query error:', error)
