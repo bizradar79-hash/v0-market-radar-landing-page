@@ -21,6 +21,8 @@ import {
   CalendarClock, Square, Plus, X, Save, Link2, Copy, Check, EyeOff, Mail,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { ToastAction } from "@/components/ui/toast"
+import { describeFailure } from "@/lib/http/error-report"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
 
 interface SyncLogEntry {
@@ -362,6 +364,9 @@ export default function ImpersonatePage() {
   // account and returns non-200 on ANY failure, so the button can only turn
   // green when Resend actually accepted the message.
   const [emailState, setEmailState] = useState<Record<string, 'sending' | 'sent' | 'error'>>({})
+  // The last failure per client, kept so the details survive the toast
+  // closing — shown on hover over the failed button, and copyable.
+  const [emailError, setEmailError] = useState<Record<string, string>>({})
 
   async function sendReportEmail(u: { id: string; email?: string | null; company?: { name?: string | null } | null }) {
     const label = u.company?.name || u.email || 'הלקוח'
@@ -370,27 +375,55 @@ export default function ImpersonatePage() {
     if (!window.confirm(`לשלוח את הדוח השבועי במייל ל-${label}?\n\nנמען: ${u.email || '(יאותר בשרת)'}`)) return
 
     setEmailState(p => ({ ...p, [u.id]: 'sending' }))
+    setEmailError(p => { const n = { ...p }; delete n[u.id]; return n })
+
+    const reportFailure = (summary: string, full: string) => {
+      setEmailState(p => ({ ...p, [u.id]: 'error' }))
+      setEmailError(p => ({ ...p, [u.id]: full }))
+      console.error(`[send-report-email] ${label}:`, full)
+      toast({
+        title: '❌ המייל לא נשלח',
+        description: summary,
+        variant: 'destructive',
+        // Long enough to read; the details are also kept on the button.
+        duration: 30000,
+        action: (
+          <ToastAction
+            altText="העתק פרטי שגיאה"
+            onClick={() => { navigator.clipboard?.writeText(full).catch(() => {}) }}
+          >
+            העתק פרטים
+          </ToastAction>
+        ),
+      })
+    }
+
     try {
       const res = await fetch('/api/admin/send-report-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_id: u.id }),
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.sent) {
-        setEmailState(p => ({ ...p, [u.id]: 'error' }))
-        toast({
-          title: '❌ המייל לא נשלח',
-          description: data.error || `HTTP ${res.status}`,
-          variant: 'destructive',
-        })
+      if (!res.ok) {
+        const raw = await res.text().catch(() => '')
+        const { summary, full } = describeFailure(res.status, res.statusText, raw)
+        reportFailure(summary, full)
+        return
+      }
+      const data = await res.json().catch(() => null)
+      if (!data?.sent) {
+        // A 200 that doesn't confirm a send is still not a success.
+        reportFailure('השרת החזיר 200 בלי אישור שליחה', JSON.stringify(data, null, 2))
         return
       }
       setEmailState(p => ({ ...p, [u.id]: 'sent' }))
       toast({ title: '✅ הדוח נשלח במייל', description: `${label} · ${data.to}` })
     } catch (e: any) {
-      setEmailState(p => ({ ...p, [u.id]: 'error' }))
-      toast({ title: '❌ המייל לא נשלח', description: e?.message || 'שגיאת רשת', variant: 'destructive' })
+      // fetch itself failed — offline, blocked, CORS, or the request aborted.
+      reportFailure(
+        `הבקשה לא הגיעה לשרת: ${e?.message || 'שגיאת רשת'}`,
+        `Network error: ${e?.name || 'Error'}: ${e?.message || 'unknown'}`,
+      )
     }
   }
 
@@ -1145,7 +1178,11 @@ export default function ImpersonatePage() {
                               variant="outline"
                               onClick={() => sendReportEmail(u)}
                               disabled={emailState[u.id] === 'sending'}
-                              title={u.email ? `שלח דוח במייל ל-${u.email}` : 'שלח דוח במייל'}
+                              title={
+                                emailState[u.id] === 'error' && emailError[u.id]
+                                  ? `השליחה נכשלה — לחץ לניסיון חוזר\n\n${emailError[u.id]}`
+                                  : u.email ? `שלח דוח במייל ל-${u.email}` : 'שלח דוח במייל'
+                              }
                               className={
                                 emailState[u.id] === 'sent' ? 'border-green-300 text-green-700'
                                 : emailState[u.id] === 'error' ? 'border-red-300 text-red-700' : ''
