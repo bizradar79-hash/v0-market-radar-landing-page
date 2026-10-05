@@ -3,6 +3,7 @@ import { Heebo } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { CookieBanner } from '@/components/cookie-banner'
 import { AccessibilityWidget } from '@/components/accessibility-widget'
+import { Toaster } from '@/components/ui/toaster'
 import WhatsAppButton from '@/components/WhatsAppButton'
 import './globals.css'
 
@@ -58,6 +59,9 @@ export default function RootLayout({
         {children}
         <CookieBanner />
         <AccessibilityWidget />
+        {/* Without this, every toast() in the app rendered nowhere — 15 files of
+            success/error notifications were silently discarded. */}
+        <Toaster />
         <WhatsAppButton />
         <Analytics />
       </body>

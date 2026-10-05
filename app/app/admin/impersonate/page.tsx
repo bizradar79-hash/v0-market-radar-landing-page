@@ -21,7 +21,6 @@ import {
   CalendarClock, Square, Plus, X, Save, Link2, Copy, Check, EyeOff, Mail,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { ToastAction } from "@/components/ui/toast"
 import { describeFailure } from "@/lib/http/error-report"
 import { ScanProgressModal } from "@/components/scan-progress-modal"
 
@@ -367,6 +366,13 @@ export default function ImpersonatePage() {
   // The last failure per client, kept so the details survive the toast
   // closing — shown on hover over the failed button, and copyable.
   const [emailError, setEmailError] = useState<Record<string, string>>({})
+  // The failure popup. Opens automatically when a send fails, and again when
+  // the admin clicks a failed ("נכשל") button — so the details are never only
+  // reachable by hovering.
+  const [emailErrorDialog, setEmailErrorDialog] = useState<{
+    userId: string; label: string; summary: string; full: string
+  } | null>(null)
+  const [errorCopied, setErrorCopied] = useState(false)
 
   async function sendReportEmail(u: { id: string; email?: string | null; company?: { name?: string | null } | null }) {
     const label = u.company?.name || u.email || 'הלקוח'
@@ -379,23 +385,11 @@ export default function ImpersonatePage() {
 
     const reportFailure = (summary: string, full: string) => {
       setEmailState(p => ({ ...p, [u.id]: 'error' }))
-      setEmailError(p => ({ ...p, [u.id]: full }))
+      setEmailError(p => ({ ...p, [u.id]: `${summary}\n\n${full}` }))
       console.error(`[send-report-email] ${label}:`, full)
-      toast({
-        title: '❌ המייל לא נשלח',
-        description: summary,
-        variant: 'destructive',
-        // Long enough to read; the details are also kept on the button.
-        duration: 30000,
-        action: (
-          <ToastAction
-            altText="העתק פרטי שגיאה"
-            onClick={() => { navigator.clipboard?.writeText(full).catch(() => {}) }}
-          >
-            העתק פרטים
-          </ToastAction>
-        ),
-      })
+      setErrorCopied(false)
+      // The popup is the failure UI — no competing toast.
+      setEmailErrorDialog({ userId: u.id, label, summary, full })
     }
 
     try {
@@ -1176,11 +1170,24 @@ export default function ImpersonatePage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => sendReportEmail(u)}
+                              onClick={() => {
+                                if (emailState[u.id] === 'error' && emailError[u.id]) {
+                                  const [summary, ...rest] = emailError[u.id].split('\n\n')
+                                  setErrorCopied(false)
+                                  setEmailErrorDialog({
+                                    userId: u.id,
+                                    label: u.company?.name || u.email || 'הלקוח',
+                                    summary,
+                                    full: rest.join('\n\n'),
+                                  })
+                                  return
+                                }
+                                sendReportEmail(u)
+                              }}
                               disabled={emailState[u.id] === 'sending'}
                               title={
                                 emailState[u.id] === 'error' && emailError[u.id]
-                                  ? `השליחה נכשלה — לחץ לניסיון חוזר\n\n${emailError[u.id]}`
+                                  ? 'השליחה נכשלה — לחץ לפרטי השגיאה'
                                   : u.email ? `שלח דוח במייל ל-${u.email}` : 'שלח דוח במייל'
                               }
                               className={
@@ -1241,6 +1248,71 @@ export default function ImpersonatePage() {
         open={!!progressUser}
         onClose={() => setProgressUser(null)}
       />
+
+      {/* ── Send-report-email failure details ── */}
+      <Dialog open={!!emailErrorDialog} onOpenChange={open => { if (!open) setEmailErrorDialog(null) }}>
+        <DialogContent className="max-w-2xl" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <XCircle className="h-5 w-5" />
+              שליחת המייל נכשלה — {emailErrorDialog?.label}
+            </DialogTitle>
+          </DialogHeader>
+
+          {emailErrorDialog && (
+            <div className="space-y-3">
+              {/* The one-line reason, readable at a glance. */}
+              <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
+                {emailErrorDialog.summary}
+              </p>
+
+              {/* Full details: selectable, scrollable, LTR (it's JSON / logs). */}
+              <div>
+                <p className="mb-1 text-xs font-semibold text-muted-foreground">פרטים מלאים</p>
+                <pre
+                  dir="ltr"
+                  className="max-h-80 select-all overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-3 text-left font-mono text-xs leading-relaxed"
+                >
+                  {emailErrorDialog.full || '(אין פרטים נוספים)'}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button
+              onClick={async () => {
+                if (!emailErrorDialog) return
+                const text = `${emailErrorDialog.summary}\n\n${emailErrorDialog.full}`
+                try {
+                  await navigator.clipboard.writeText(text)
+                  setErrorCopied(true)
+                } catch {
+                  // Clipboard can be blocked (permissions, non-HTTPS). The
+                  // <pre> is select-all, so a click + Cmd/Ctrl+C still works.
+                  setErrorCopied(false)
+                  toast({ title: 'ההעתקה נחסמה', description: 'סמן את הטקסט בתיבה והעתק ידנית (Cmd/Ctrl+C)' })
+                }
+              }}
+            >
+              {errorCopied ? <Check className="h-4 w-4 ml-1" /> : <Copy className="h-4 w-4 ml-1" />}
+              {errorCopied ? 'הועתק' : 'העתק פרטי שגיאה'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const target = users.find(x => x.id === emailErrorDialog?.userId)
+                setEmailErrorDialog(null)
+                if (target) sendReportEmail(target)
+              }}
+            >
+              <RefreshCw className="h-4 w-4 ml-1" />
+              נסה שוב
+            </Button>
+            <Button variant="ghost" onClick={() => setEmailErrorDialog(null)}>סגור</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Per-module sync dialog ── */}
       <Dialog open={!!moduleSyncUser} onOpenChange={open => { if (!open) setModuleSyncUser(null) }}>
