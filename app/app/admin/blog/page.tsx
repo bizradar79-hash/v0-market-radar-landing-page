@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import {
-  Loader2, Plus, Pencil, Trash2, ExternalLink, ChevronUp, ChevronDown, GripVertical, Save, RotateCcw, Newspaper,
+  Loader2, Plus, Pencil, Trash2, ExternalLink, ChevronUp, ChevronDown, GripVertical, Save, RotateCcw, Newspaper, Rocket, EyeOff,
 } from "lucide-react"
 import { formatHebrewDate, isPubliclyVisible } from "@/lib/blog/posts"
 
@@ -45,6 +45,7 @@ export default function AdminBlogPage() {
   const [savingOrder, setSavingOrder] = useState(false)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState<string | null>(null)
 
   // UI gate (the API enforces admin on every request regardless).
   useEffect(() => {
@@ -123,6 +124,26 @@ export default function AdminBlogPage() {
       toast({ title: '❌ הפעולה נכשלה', description: e?.message, variant: 'destructive' })
     } finally {
       setSavingOrder(false)
+    }
+  }
+
+  async function setPublished(p: PostRow, published: boolean) {
+    if (!published && !window.confirm(`להסיר את "${p.title}" מהאתר? המאמר יחזור לטיוטה.`)) return
+    setPublishing(p.id)
+    try {
+      const res = await fetch(`/api/admin/blog/${p.id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ published }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setPosts(prev => prev.map(x => x.id === p.id ? { ...x, published: data.post.published, published_at: data.post.published_at } : x))
+      toast({ title: published ? '🚀 המאמר עלה לאתר' : '⏸️ המאמר הוסר מהאתר', description: published ? `/blog/${p.slug}` : 'נשמר כטיוטה' })
+    } catch (e: any) {
+      toast({ title: '❌ הפעולה נכשלה', description: e?.message, variant: 'destructive' })
+    } finally {
+      setPublishing(null)
     }
   }
 
@@ -241,6 +262,15 @@ export default function AdminBlogPage() {
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">
+                    {isPubliclyVisible(p) ? (
+                      <Button size="sm" variant="outline" onClick={() => setPublished(p, false)} disabled={publishing === p.id}>
+                        {publishing === p.id ? <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" /> : <EyeOff className="ml-1 h-3.5 w-3.5" />}הסר מהאתר
+                      </Button>
+                    ) : (
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setPublished(p, true)} disabled={publishing === p.id}>
+                        {publishing === p.id ? <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" /> : <Rocket className="ml-1 h-3.5 w-3.5" />}פרסם לאתר
+                      </Button>
+                    )}
                     {isPubliclyVisible(p) && (
                       <Button asChild size="sm" variant="ghost" title="צפה במאמר באתר">
                         <a href={`/blog/${encodeURIComponent(p.slug)}`} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-4 w-4" /></a>

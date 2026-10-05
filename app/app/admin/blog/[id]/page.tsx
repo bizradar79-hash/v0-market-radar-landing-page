@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, ArrowRight, Save, Trash2, ExternalLink, ImagePlus, X } from "lucide-react"
+import { Loader2, ArrowRight, Save, Trash2, ExternalLink, ImagePlus, X, Rocket, EyeOff } from "lucide-react"
 import { RichEditor } from "@/components/blog/rich-editor"
 import { isPubliclyVisible } from "@/lib/blog/posts"
 
@@ -102,10 +102,10 @@ export default function AdminBlogEditorPage() {
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft(d => ({ ...d, [k]: v }))
 
-  async function save() {
+  async function save(opts: { quiet?: boolean } = {}): Promise<string | null> {
     if (!draft.title.trim()) {
       toast({ title: 'חסרה כותרת', description: 'לכל מאמר חייבת להיות כותרת', variant: 'destructive' })
-      return
+      return null
     }
     setSaving(true)
     try {
@@ -128,13 +128,40 @@ export default function AdminBlogEditorPage() {
         meta_description: p.meta_description || '',
       }))
       setSavedSlug(p.published && isPubliclyVisible(p) ? p.slug : null)
-      toast({
+      if (!opts.quiet) toast({
         title: '✅ המאמר נשמר',
         description: p.published ? (isPubliclyVisible(p) ? 'המאמר מפורסם בבלוג' : 'המאמר מתוזמן לפרסום') : 'נשמר כטיוטה',
       })
       if (!draft.id) router.replace(`/app/admin/blog/${p.id}`)
+      return p.id as string
     } catch (e: any) {
       toast({ title: '❌ השמירה נכשלה', description: e?.message, variant: 'destructive' })
+      return null
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /** Save the current edits, then push the post live (or take it down). */
+  async function setLive(published: boolean) {
+    if (!published && !window.confirm('להסיר את המאמר מהאתר? הוא יחזור לטיוטה.')) return
+    const id = await save({ quiet: true })
+    if (!id) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/admin/blog/${id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ published }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      const p = data.post
+      setDraft(d => ({ ...d, published: p.published, published_at: p.published_at }))
+      setSavedSlug(p.published && isPubliclyVisible(p) ? p.slug : null)
+      toast({ title: published ? '🚀 המאמר עלה לאתר' : '⏸️ המאמר הוסר מהאתר', description: published ? `/blog/${p.slug}` : 'נשמר כטיוטה' })
+    } catch (e: any) {
+      toast({ title: '❌ הפעולה נכשלה', description: e?.message, variant: 'destructive' })
     } finally {
       setSaving(false)
     }
@@ -208,9 +235,18 @@ export default function AdminBlogEditorPage() {
               {deleting ? <Loader2 className="ml-1 h-4 w-4 animate-spin" /> : <Trash2 className="ml-1 h-4 w-4" />}מחק
             </Button>
           )}
-          <Button onClick={save} disabled={saving}>
+          <Button variant="outline" onClick={() => save()} disabled={saving}>
             {saving ? <Loader2 className="ml-1 h-4 w-4 animate-spin" /> : <Save className="ml-1 h-4 w-4" />}שמור
           </Button>
+          {savedSlug ? (
+            <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" onClick={() => setLive(false)} disabled={saving}>
+              <EyeOff className="ml-1 h-4 w-4" />הסר מהאתר
+            </Button>
+          ) : (
+            <Button className="bg-green-600 hover:bg-green-700" onClick={() => setLive(true)} disabled={saving}>
+              <Rocket className="ml-1 h-4 w-4" />פרסם לאתר
+            </Button>
+          )}
         </div>
       </div>
 
@@ -286,7 +322,7 @@ export default function AdminBlogEditorPage() {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
+        <Button onClick={() => save()} disabled={saving}>
           {saving ? <Loader2 className="ml-1 h-4 w-4 animate-spin" /> : <Save className="ml-1 h-4 w-4" />}שמור
         </Button>
       </div>
