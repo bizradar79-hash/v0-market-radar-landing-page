@@ -46,7 +46,6 @@ const MODULE_LABELS: Array<{ id: string; label: string }> = [
     ? [{ id: 'competitors', label: 'גילוי מתחרים' },
        { id: 'competitor_ratings', label: 'דירוגי מתחרים' }]
     : []),
-  { id: 'competitor_tracking', label: 'מעקב מתחרים' },
   { id: 'review_analysis',    label: 'ניתוח ביקורות' },
   { id: 'seo_ranking',        label: 'דירוג SEO' },
   { id: 'geo_ranking',        label: 'דירוג GEO' },

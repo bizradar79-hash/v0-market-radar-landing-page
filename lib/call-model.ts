@@ -142,6 +142,15 @@ export function isSupportedProvider(p: unknown): boolean {
 export async function callModel(
   provider: string, modelName: string, prompt: string, cost?: ScanCostCollector,
 ): Promise<string> {
+  // Our Groq account has no access to its llama models any more ("model does
+  // not exist or you do not have access"). A stored prompt_versions row still
+  // pointing at Groq/llama is rerouted to Gemini instead of failing the module.
+  // supabase/fix_groq_prompt_models.sql fixes the rows themselves.
+  if (provider === 'groq' || /llama|mixtral/i.test(modelName)) {
+    console.warn(`[callModel] ${provider}/${modelName} is unavailable — rerouting to gemini/gemini-2.5-flash`)
+    provider = 'gemini'
+    modelName = 'gemini-2.5-flash'
+  }
 
   if (provider === 'xai') {
     const res = await fetch('https://api.x.ai/v1/responses', {
@@ -209,23 +218,6 @@ export async function callModel(
     } catch {}
 
     return text
-  }
-
-  if (provider === 'groq') {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
-      body: JSON.stringify({
-        model: modelName,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 4000
-      })
-    })
-    const rawText = await res.text()
-    console.log('Groq status:', res.status, rawText.slice(0, 200))
-    if (!res.ok) throw new Error(`Groq error ${res.status}: ${rawText.slice(0, 200)}`)
-    const data = JSON.parse(rawText)
-    return data.choices?.[0]?.message?.content || ''
   }
 
   throw new Error(`Unknown provider: ${provider}`)

@@ -145,7 +145,8 @@ export async function POST(request: Request) {
   const MODULE_IDS = [
     'overview', 'swot',
     ...(OLD_COMPETITOR_MODULE_ENABLED ? ['competitors', 'competitor_ratings'] : []),
-    'competitor_tracking',
+    // 'competitor_tracking' is NOT a scan module — it takes minutes per
+    // competitor and ate the whole time budget. Manual only (admin buttons).
     'review_analysis',
     'seo_ranking', 'geo_ranking', 'industry_trends', 'keyword_trends',
     ...(COMPETITOR_TRENDS_ENABLED ? ['competitor_trends'] : []),
@@ -312,32 +313,10 @@ export async function POST(request: Request) {
       })
     }
 
-    // 1b². COMPETITOR TRACKING — the new module. Social activity + Google
-    // reviews for the client's OWN named competitors, deterministic insights,
-    // no LLM. Cost is controlled inside the route: max 5 competitors, cached
-    // link discovery, and a per-competitor staleness gate (skip anything
-    // scanned within COMPETITOR_TRACKING_MIN_DAYS) unless forced.
-    //
-    // BEST EFFORT: runStep already isolates failures, and the route itself
-    // never throws — a competitor with no public footprint yields a stored row
-    // with a note, not a broken scan.
-    await runStep('competitor_tracking', async () => {
-      // NOT background here: sync/run is already server-side (after() + chaining)
-      // and needs the real summary for its step message.
-      const r = await callModule(origin, '/api/competitor-tracking', companyId!, false)
-      if (!r.ok) return { status: 'error', message: r.body?.error ?? `HTTP ${r.status}` }
-      const b = r.body || {}
-      if ((b.total ?? 0) === 0) {
-        return { status: 'skipped', message: 'no direct competitors configured' }
-      }
-      if ((b.tracked ?? 0) === 0 && (b.skipped ?? 0) > 0) {
-        return { status: 'skipped', message: `all ${b.skipped} fresh — nothing to re-scan` }
-      }
-      return {
-        status: 'ok',
-        message: `${b.tracked}/${b.total} tracked${b.skipped ? `, ${b.skipped} fresh` : ''} ($${b.costUSD ?? 0})`,
-      }
-    })
+    // 1b². COMPETITOR TRACKING — deliberately NOT run in the scan. It's slow
+    // (minutes per competitor) and stalled initial/weekly scans past the time
+    // budget. It runs only from the admin's manual per-competitor trigger
+    // (/api/competitor-tracking via /api/admin/sync-module).
 
     // 1c. Company Google review analysis — initial only, and WITHOUT force so the
     // route's 7-day cache applies (FIX 2: at most once per cache window, no runaway).

@@ -16,14 +16,6 @@ export const AVAILABLE_MODELS = {
       { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (מהיר וזול)' },
     ],
   },
-  groq: {
-    label: 'Groq',
-    models: [
-      { id: 'llama-3.3-70b-versatile', label: 'LLaMA 3.3 70B (ברירת מחדל)' },
-      { id: 'llama-3.1-8b-instant', label: 'LLaMA 3.1 8B (מהיר)' },
-      { id: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
-    ],
-  },
 } as const
 
 export type ModelProvider = keyof typeof AVAILABLE_MODELS

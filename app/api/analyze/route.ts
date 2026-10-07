@@ -50,23 +50,8 @@ export async function GET() {
     checks.auth = { ok: false, error: e?.message }
   }
 
-  // 4. Groq reachability (cheap call)
-  try {
-    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.startsWith('gsk_placeholder')) {
-      checks.groq = { ok: false, error: 'API key is placeholder or missing' }
-    } else {
-      const Groq = (await import('groq-sdk')).default
-      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-      const res = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: 'reply with the single word: ok' }],
-        max_tokens: 5,
-      })
-      checks.groq = { ok: true, reply: res.choices[0].message.content }
-    }
-  } catch (e: any) {
-    checks.groq = { ok: false, error: e?.message, status: e?.status }
-  }
+  // 4. Groq — no longer used (account lost access to its llama models).
+  checks.groq = { ok: true, note: 'not used — AI runs on Gemini → xAI' }
 
   // 5. Tavily reachability (cheap call)
   try {

@@ -3,64 +3,15 @@ export const maxDuration = 60
 
 import { getFullContext } from '@/lib/context'
 import { NextResponse } from 'next/server'
-import Groq from 'groq-sdk'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { analyzeWithAI } from '@/lib/ai'
 import { TRENDS_SYSTEM_PROMPT } from '@/lib/trends-system-prompt'
 import { validateTrendsOutput } from '@/lib/trends-validator'
 
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000
-const GROQ_MODEL = 'llama-3.3-70b-versatile'
-
-function extractJSON(text: string): any {
-  let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-  clean = clean.replace(/([\w\u0590-\u05FF])"([\w\u0590-\u05FF])/g, '$1\\"$2')
-  try { return JSON.parse(clean) } catch {}
-  const s = clean.indexOf('{')
-  const e = clean.lastIndexOf('}')
-  if (s === -1 || e <= s) return null
-  try { return JSON.parse(clean.slice(s, e + 1)) } catch { return null }
-}
-
-async function callGroq(systemPrompt: string, userMessage: string): Promise<any> {
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
-  const result = await groq.chat.completions.create({
-    model: GROQ_MODEL,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage },
-    ],
-    temperature: 0.2,
-    max_tokens: 4000,
-  })
-  const text = result.choices[0].message.content ?? ''
-  const parsed = extractJSON(text)
-  if (!parsed) throw new Error(`Groq returned invalid JSON: ${text.slice(0, 200)}`)
-  return parsed
-}
-
-async function callGemini(systemPrompt: string, userMessage: string): Promise<any> {
-  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) throw new Error('GEMINI_KEY_NOT_SET')
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY)
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    systemInstruction: systemPrompt,
-  })
-  const result = await model.generateContent(userMessage)
-  const text = result.response.text()
-  const parsed = extractJSON(text)
-  if (!parsed) throw new Error(`Gemini returned invalid JSON: ${text.slice(0, 200)}`)
-  return parsed
-}
-
+// Groq (llama-3.3-70b-versatile) is no longer accessible — use the shared
+// Gemini → xAI chain. The trends system prompt is prepended to the message.
 async function callAI(systemPrompt: string, userMessage: string): Promise<any> {
-  try {
-    return await callGroq(systemPrompt, userMessage)
-  } catch (groqErr: any) {
-    const status = groqErr?.status
-    const isRateLimit = status === 429 || status === 413 || String(groqErr?.message ?? '').includes('[429')
-    if (!isRateLimit) throw groqErr
-    return await callGemini(systemPrompt, userMessage)
-  }
+  return analyzeWithAI(`${systemPrompt}\n\n${userMessage}`)
 }
 
 export async function POST(request: Request) {
