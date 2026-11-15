@@ -39,13 +39,33 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // A logged-in account with NO companies row never finished onboarding (the
+  // row is created at its last step). Letting it into /app made every save
+  // silently update 0 rows. Send it to /onboarding — except admins, whose own
+  // account has no business row. Only row EXISTENCE is checked, not
+  // onboarding_completed: an active customer exists with that flag false.
+  if (user && pathname.startsWith('/app/') && !pathname.startsWith('/app/admin/')) {
+    const { data: company } = await supabase
+      .from('companies').select('id').eq('id', user.id).maybeSingle()
+    if (!company) {
+      const { data: role } = await supabase
+        .from('user_roles').select('is_admin').eq('user_id', user.id).maybeSingle()
+      if (!role?.is_admin) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/onboarding'
+        url.search = ''
+        return NextResponse.redirect(url)
+      }
+    }
+  }
+
   // Protect /app/admin/* — require is_admin = true in user_roles
   if (user && pathname.startsWith('/app/admin/')) {
     const { data: role } = await supabase
       .from('user_roles')
       .select('is_admin')
       .eq('user_id', user.id)
-      .single()
+      .maybeSingle()
     if (!role?.is_admin) {
       const url = request.nextUrl.clone()
       url.pathname = '/app/dashboard'
