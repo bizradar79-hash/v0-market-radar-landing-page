@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServerClient } from '@supabase/ssr'
 import type { BusinessProfile } from '@/types/business-profile'
 
 export const dynamic = 'force-dynamic'
@@ -15,12 +16,24 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Empty update' }, { status: 400 })
     }
 
+    // Writes use the service role pinned to `.eq('id', user.id)`: with the
+    // user's own client the UPDATE matched 0 rows under RLS and this route still
+    // answered success, so nothing on the settings page ever actually saved.
+    // The user is verified above from the session; they can only touch their row.
+    const admin = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { cookies: { getAll: () => [], setAll: () => {} } },
+    )
+
     // Load existing profile and deep-merge
-    const { data: company } = await supabase
+    const { data: company, error: readError } = await admin
       .from('companies')
       .select('business_profile')
       .eq('id', user.id)
-      .single()
+      .maybeSingle()
+    if (readError) return NextResponse.json({ error: readError.message }, { status: 500 })
+    if (!company) return NextResponse.json({ error: 'לא נמצא פרופיל עסק לחשבון הזה' }, { status: 404 })
 
     const existing = (company?.business_profile ?? {}) as Partial<BusinessProfile>
     const updated: Partial<BusinessProfile> = { ...existing, ...partial }
@@ -30,12 +43,16 @@ export async function PATCH(request: Request) {
       updatePayload.distribution_channels = partial.distributionChannels
     }
 
-    const { error } = await supabase
+    const { data: written, error } = await admin
       .from('companies')
       .update(updatePayload)
       .eq('id', user.id)
+      .select('id')
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!written || written.length === 0) {
+      return NextResponse.json({ error: 'השמירה לא עודכנה במסד הנתונים' }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, profile: updated })
   } catch (e: any) {

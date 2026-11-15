@@ -267,29 +267,22 @@ export default function SettingsPage() {
    * Returns false on any failure (toast shown / redirected to login).
    */
   const updateOwnCompany = async (fields: Record<string, unknown>, what: string): Promise<boolean> => {
-    const supabase = createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) { await failExpired(); return false }
-
-    const { data: updated, error } = await supabase
-      .from('companies')
-      .update(fields as any)
-      .eq('id', user.id)
-      .select('id')
-
-    if (error) {
-      // The JWT was rejected at the database → the session is dead.
-      if (error.code === 'PGRST301' || /jwt|expired/i.test(error.message)) { await failExpired(); return false }
-      toast({ title: 'שמירה נכשלה', description: `לא ניתן לשמור את ${what}: ${error.message}`, variant: 'destructive' })
-      return false
-    }
-    // RLS matches 0 rows instead of erroring — an update that changed nothing
-    // is still a failure, not a success.
-    if (!updated || updated.length === 0) {
-      toast({ title: 'שמירה נכשלה', description: SAVE_FAILED, variant: 'destructive' })
-      return false
-    }
-    return true
+    // Server route: verifies the session and writes ONLY this user's row (the
+    // browser-side update silently matched 0 rows under RLS).
+    const res = await fetch('/api/settings/company', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    })
+    if (res.ok) return true
+    const data = await res.json().catch(() => ({} as any))
+    if (res.status === 401) { await failExpired(); return false }
+    toast({
+      title: 'שמירה נכשלה',
+      description: `לא ניתן לשמור את ${what}: ${data?.error || `שגיאה ${res.status}`}`,
+      variant: 'destructive',
+    })
+    return false
   }
 
   const saveCompanyData = async () => {
@@ -385,9 +378,14 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ geoQueries: updated }),
       })
-      if (!res.ok) setGeoQueries(previous) // revert on failure
+      if (!res.ok) { // revert on failure — and say so
+        setGeoQueries(previous)
+        const data = await res.json().catch(() => ({} as any))
+        toast({ title: 'שמירה נכשלה', description: data?.error || `שגיאה ${res.status}`, variant: 'destructive' })
+      }
     } catch {
       setGeoQueries(previous)
+      toast({ title: 'שמירה נכשלה', description: SAVE_FAILED, variant: 'destructive' })
     } finally {
       setGeoSaving(false)
     }
@@ -409,10 +407,16 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ distributionChannels: updated }),
       })
-      if (!res.ok) { setDistChannels(previous); return false }
+      if (!res.ok) {
+        setDistChannels(previous)
+        const data = await res.json().catch(() => ({} as any))
+        toast({ title: 'שמירה נכשלה', description: data?.error || `שגיאה ${res.status}`, variant: 'destructive' })
+        return false
+      }
       return true
     } catch {
       setDistChannels(previous)
+      toast({ title: 'שמירה נכשלה', description: SAVE_FAILED, variant: 'destructive' })
       return false
     } finally {
       setDistSaving(false)
@@ -461,8 +465,8 @@ export default function SettingsPage() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.success === false) throw new Error(data?.error || 'save failed')
       toast({ title: 'נשמר בהצלחה', description: 'השינוי ייכנס לתוקף בסריקה הבאה' })
-    } catch {
-      toast({ title: 'שגיאה בשמירה', variant: 'destructive' })
+    } catch (e: any) {
+      toast({ title: 'שגיאה בשמירה', description: e?.message && e.message !== 'save failed' ? e.message : SAVE_FAILED, variant: 'destructive' })
     } finally {
       setBpSaving(null)
     }
