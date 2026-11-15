@@ -150,7 +150,7 @@ export default function CompetitorsPage() {
   async function fetchSyncDates() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const { data } = await supabase.from('companies').select('last_sync_at, next_sync_at').eq('id', user.id).single()
+    const { data } = await supabase.from('companies').select('last_sync_at, next_sync_at').eq('id', user.id).maybeSingle()
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })
   }
 
@@ -377,7 +377,7 @@ export default function CompetitorsPage() {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: company } = await supabase
-            .from('companies').select('competitors_blacklist').eq('id', user.id).single()
+            .from('companies').select('competitors_blacklist').eq('id', user.id).maybeSingle()
           const current: string[] = company?.competitors_blacklist || []
           if (!current.includes(competitor.name)) {
             await supabase.from('companies')

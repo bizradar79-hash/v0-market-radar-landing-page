@@ -136,7 +136,7 @@ export default function CompetitorTrackingPage() {
           .select('id, competitor_name, resolved_links, sources, insights, reviews, website, scanned_at')
           .eq('company_id', user.id)
           .order('competitor_name'),
-        supabase.from('companies').select('business_profile').eq('id', user.id).single(),
+        supabase.from('companies').select('business_profile').eq('id', user.id).maybeSingle(),
       ])
       setRows((tracked as any) || [])
       const bp: any = company?.business_profile || {}

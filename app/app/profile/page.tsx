@@ -105,7 +105,7 @@ export default function ProfilePage() {
       .from('companies')
       .select('name, city, phone, website, industry, description, swot, business_profile, review_analysis, distribution_channels')
       .eq('id', user.id)
-      .single()
+      .maybeSingle()
 
     if (data) {
       setCompanyName(data.name || '')

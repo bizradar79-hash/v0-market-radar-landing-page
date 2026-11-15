@@ -113,7 +113,7 @@ export default function AppDashboardPage() {
       supabase.from("news").select("title, source, published_at, url").eq("company_id", userId).order("published_at", { ascending: false }).limit(3),
       supabase.from("companies").select(
         "name, industry, city, website, last_analyzed, business_overview, geographic_scope, seo_ranking, geo_ranking, last_sync_at, next_sync_at, weekly_actions, industry_trends, competitor_trends, distribution_channels, niche_opportunities, business_profile, keyword_trends"
-      ).eq("id", userId).single(),
+      ).eq("id", userId).maybeSingle(),
       // Distribution channels table (may not exist — errors silently return null data)
       supabase.from("distribution_channels").select("name, channel_type, description, potential_score").eq("company_id", userId).eq("status", "potential").order("potential_score", { ascending: false }).limit(3),
       // Competitors with trends_analysis column

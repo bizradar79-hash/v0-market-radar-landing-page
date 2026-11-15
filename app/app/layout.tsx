@@ -5,6 +5,7 @@ import AppSidebar from "@/components/app/app-sidebar"
 import AppHeader from "@/components/app/app-header"
 import ImpersonationBanner from "@/components/admin/ImpersonationBanner"
 import SyncBanner from "@/components/app/SyncBanner"
+import SessionGuard from "@/components/app/SessionGuard"
 import PaywallGate from "@/components/billing/PaywallGate"
 
 export default function AppLayout({
@@ -29,6 +30,7 @@ export default function AppLayout({
     <PaywallGate>
     <div className={`flex min-h-screen bg-background${impersonating ? ' pt-10' : ''}`}>
       <ImpersonationBanner />
+      <SessionGuard />
 
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (

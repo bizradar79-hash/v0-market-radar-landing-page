@@ -258,7 +258,7 @@ export default function TrendsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data } = await supabase
-      .from('companies').select('keywords, keyword_trends, last_sync_at, next_sync_at').eq('id', user.id).single()
+      .from('companies').select('keywords, keyword_trends, last_sync_at, next_sync_at').eq('id', user.id).maybeSingle()
 
     // HARD limit: only first 8 keywords
     const first8: string[] = ((data?.keywords as string[]) || []).slice(0, 8)
@@ -358,7 +358,7 @@ export default function TrendsPage() {
         // DISPLAY-ONLY on mount: read the cached field, never generate on view.
         // (Generation happens during scans / admin sync.) Empty → empty state.
         const { data } = await supabase
-          .from('companies').select('industry_trends').eq('id', user.id).single()
+          .from('companies').select('industry_trends').eq('id', user.id).maybeSingle()
         const cached = (data as any)?.industry_trends as IndustryTrendsData | null
         if (cached?.fetchedAt && Array.isArray(cached?.trends)) setIndustryTrends(cached)
         return
@@ -380,7 +380,7 @@ export default function TrendsPage() {
       if (!force) {
         // DISPLAY-ONLY on mount: read the cached field, never generate on view.
         const { data } = await supabase
-          .from('companies').select('competitor_trends').eq('id', user.id).single()
+          .from('companies').select('competitor_trends').eq('id', user.id).maybeSingle()
         const cached = (data as any)?.competitor_trends as CompetitorTrendsData | null
         if (cached?.fetchedAt && Array.isArray(cached?.competitor_data)) setCompetitorTrends(cached)
         return

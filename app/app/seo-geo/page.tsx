@@ -131,7 +131,7 @@ export default function SeoGeoPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data } = await supabase
-      .from('companies').select('name, website, seo_ranking, geo_ranking, last_sync_at, next_sync_at').eq('id', user.id).single()
+      .from('companies').select('name, website, seo_ranking, geo_ranking, last_sync_at, next_sync_at').eq('id', user.id).maybeSingle()
     if (data?.seo_ranking?.fetchedAt) setSeoRanking(data.seo_ranking as SEORanking)
     if (data?.geo_ranking?.fetchedAt) setGeoRanking(data.geo_ranking as GEORanking)
     if (data) setSyncDates({ last_sync_at: (data as any).last_sync_at ?? null, next_sync_at: (data as any).next_sync_at ?? null })

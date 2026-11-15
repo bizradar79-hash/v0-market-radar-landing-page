@@ -90,7 +90,7 @@ export default function AdminCouponsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.replace('/login'); return }
     const { data: role } = await supabase
-      .from('user_roles').select('is_admin').eq('user_id', user.id).single()
+      .from('user_roles').select('is_admin').eq('user_id', user.id).maybeSingle()
     if (!role?.is_admin) { router.replace('/app/dashboard'); return }
     await loadCoupons()
   }

@@ -184,7 +184,7 @@ export default function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
 
         if (!impersonating) {
           const { data: role } = await supabase
-            .from('user_roles').select('is_admin').eq('user_id', authUser.id).single()
+            .from('user_roles').select('is_admin').eq('user_id', authUser.id).maybeSingle()
           if (role?.is_admin) setIsAdmin(true)
         }
       }

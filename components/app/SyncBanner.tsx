@@ -24,7 +24,7 @@ export default function SyncBanner() {
         .from('companies')
         .select('sync_status, last_sync_at, next_sync_at')
         .eq('id', user.id)
-        .single()
+        .maybeSingle()
       if (!data) return
       setStatus(data.sync_status || null)
       setLastSync(data.last_sync_at || null)

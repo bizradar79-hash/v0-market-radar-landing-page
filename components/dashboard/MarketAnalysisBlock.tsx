@@ -78,7 +78,7 @@ export default function MarketAnalysisBlock() {
         .from('market_analyses')
         .select('result')
         .eq('id', id)
-        .single()
+        .maybeSingle()
       if (data?.result) setAnalysis(data.result as MarketAnalysis)
     } catch {
       // silent

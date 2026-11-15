@@ -254,7 +254,7 @@ export default function ImpersonatePage() {
     if (!user) { router.replace('/login'); return }
 
     const { data: role } = await supabase
-      .from('user_roles').select('is_admin').eq('user_id', user.id).single()
+      .from('user_roles').select('is_admin').eq('user_id', user.id).maybeSingle()
     if (!role?.is_admin) { router.replace('/app/dashboard'); return }
 
     const res = await fetch('/api/admin/generate-magic-link?list=1')

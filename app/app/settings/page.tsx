@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { SESSION_EXPIRED_MESSAGE, redirectToLoginExpired } from "@/lib/auth/session-expired"
 import { MAX_DIRECT_COMPETITORS } from "@/lib/flags"
 import { X, Plus, Save, Building2, User, Loader2, MessageCircle, Users, Tag, Target, Trophy, Sparkles, ChevronUp, ChevronDown, Pencil, Check } from "lucide-react"
 
@@ -188,7 +189,7 @@ export default function SettingsPage() {
           .from('companies')
           .select('*')
           .eq('id', user.id)
-          .single()
+          .maybeSingle()
 
         if (company) {
           const scope = Array.isArray(company.geographic_scope)
@@ -251,62 +252,100 @@ export default function SettingsPage() {
     fetchData()
   }, [])
 
+  const SAVE_FAILED = 'שמירה נכשלה — ייתכן שהחיבור פג, התחבר מחדש ונסה שוב'
+
+  /** No valid session (expired, or revoked by a password reset) → login. */
+  const failExpired = async () => {
+    toast({ title: 'שמירה נכשלה', description: SESSION_EXPIRED_MESSAGE, variant: 'destructive' })
+    await redirectToLoginExpired()
+  }
+
+  /**
+   * Update this user's companies row and report the outcome — never silently.
+   * Returns false on any failure (toast shown / redirected to login).
+   */
+  const updateOwnCompany = async (fields: Record<string, unknown>, what: string): Promise<boolean> => {
+    const supabase = createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) { await failExpired(); return false }
+
+    const { data: updated, error } = await supabase
+      .from('companies')
+      .update(fields as any)
+      .eq('id', user.id)
+      .select('id')
+
+    if (error) {
+      // The JWT was rejected at the database → the session is dead.
+      if (error.code === 'PGRST301' || /jwt|expired/i.test(error.message)) { await failExpired(); return false }
+      toast({ title: 'שמירה נכשלה', description: `לא ניתן לשמור את ${what}: ${error.message}`, variant: 'destructive' })
+      return false
+    }
+    // RLS matches 0 rows instead of erroring — an update that changed nothing
+    // is still a failure, not a success.
+    if (!updated || updated.length === 0) {
+      toast({ title: 'שמירה נכשלה', description: SAVE_FAILED, variant: 'destructive' })
+      return false
+    }
+    return true
+  }
+
   const saveCompanyData = async () => {
     setIsSaving(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (user) {
-      await supabase
-        .from('companies')
-        .update({
-          name: companyData.name,
-          website: companyData.website,
-          description: companyData.description,
-          geographic_scope: [companyData.geographicScope],
-          // Real location for LOCAL businesses (feeds report + lead geo-targeting
-          // via deriveArea). Cleared when not local so it can't become stale.
-          city: companyData.geographicScope === 'local' ? (companyData.city.trim() || null) : null,
-        } as any)
-        .eq('id', user.id)
+    try {
+      const ok = await updateOwnCompany({
+        name: companyData.name,
+        website: companyData.website,
+        description: companyData.description,
+        geographic_scope: [companyData.geographicScope],
+        // Real location for LOCAL businesses (feeds report + lead geo-targeting
+        // via deriveArea). Cleared when not local so it can't become stale.
+        city: companyData.geographicScope === 'local' ? (companyData.city.trim() || null) : null,
+      }, 'פרטי העסק')
+      if (ok) toast({ title: 'נשמר בהצלחה', description: 'פרטי העסק עודכנו' })
+    } catch (e: any) {
+      toast({ title: 'שמירה נכשלה', description: `${SAVE_FAILED}${e?.message ? ` (${e.message})` : ''}`, variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
     }
-    setIsSaving(false)
   }
 
   const saveAccountData = async () => {
     setIsSavingAccount(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (user) {
+    try {
+      const supabase = createClient()
       // Persist editable fields: name/phone/role → user_metadata, phone → companies.
-      await supabase.auth.updateUser({
+      const { error: metaError } = await supabase.auth.updateUser({
         data: {
           full_name: userData.fullName,
           phone: userData.phone,
           role: userData.role,
         },
       })
-      await supabase
-        .from('companies')
-        .update({ phone: userData.phone })
-        .eq('id', user.id)
+      if (metaError) {
+        if (metaError.status === 401 || /session|jwt|expired/i.test(metaError.message)) { await failExpired(); return }
+        toast({ title: 'שמירה נכשלה', description: `לא ניתן לשמור את פרטי החשבון: ${metaError.message}`, variant: 'destructive' })
+        return
+      }
+      const ok = await updateOwnCompany({ phone: userData.phone }, 'הטלפון')
+      if (ok) toast({ title: 'נשמר בהצלחה', description: 'פרטי החשבון עודכנו' })
+    } catch (e: any) {
+      toast({ title: 'שמירה נכשלה', description: `${SAVE_FAILED}${e?.message ? ` (${e.message})` : ''}`, variant: 'destructive' })
+    } finally {
+      setIsSavingAccount(false)
     }
-    setIsSavingAccount(false)
   }
 
   const saveKeywords = async () => {
     setIsSaving(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (user) {
-      await supabase
-        .from('companies')
-        .update({ keywords })
-        .eq('id', user.id)
+    try {
+      const ok = await updateOwnCompany({ keywords }, 'מילות המפתח')
+      if (ok) toast({ title: 'נשמר בהצלחה', description: 'מילות המפתח עודכנו' })
+    } catch (e: any) {
+      toast({ title: 'שמירה נכשלה', description: `${SAVE_FAILED}${e?.message ? ` (${e.message})` : ''}`, variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
     }
-    setIsSaving(false)
   }
 
   const addKeyword = () => {
@@ -332,6 +371,7 @@ export default function SettingsPage() {
 
   // Client deletes a single GEO question. Persists the trimmed list immediately
   // via update-business-profile (deep-merge). The next GEO scan refills to 3.
+
   const deleteGeoQuery = async (index: number) => {
     const previous = geoQueries
     const updated = geoQueries.filter((_, i) => i !== index)

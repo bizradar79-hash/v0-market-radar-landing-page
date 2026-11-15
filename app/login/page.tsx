@@ -14,7 +14,8 @@ import { Label } from '@/components/ui/label'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { SESSION_EXPIRED_MESSAGE, safeNextPath } from '@/lib/auth/session-expired'
 import { Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
@@ -24,6 +25,15 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const router = useRouter()
+  const [notice, setNotice] = useState<string | null>(null)
+  const [nextPath, setNextPath] = useState<string | null>(null)
+
+  // ?reason=expired → the session died (expired / revoked by a password reset).
+  useEffect(() => {
+    const qs = new URLSearchParams(window.location.search)
+    if (qs.get('reason') === 'expired') setNotice(SESSION_EXPIRED_MESSAGE)
+    setNextPath(safeNextPath(qs.get('next')))
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,7 +54,7 @@ export default function LoginPage() {
           .from('companies')
           .select('onboarding_completed')
           .eq('id', authData.user.id)
-          .single()
+          .maybeSingle()
 
         if (!company || !company.onboarding_completed) {
           router.push('/onboarding')
@@ -52,7 +62,7 @@ export default function LoginPage() {
         }
       }
 
-      router.push('/app/dashboard')
+      router.push(nextPath || '/app/dashboard')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'אימייל או סיסמה שגויים')
     } finally {
@@ -100,6 +110,11 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {notice && (
+              <div role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {notice}
+              </div>
+            )}
             {/* Google login */}
             <Button
               type="button"
