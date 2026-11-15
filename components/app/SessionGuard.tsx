@@ -4,10 +4,11 @@ import { useEffect } from 'react'
 import { redirectToLoginExpired } from '@/lib/auth/session-expired'
 
 /**
- * Watches the app's own API calls: any same-origin /api/* response of 401 means
- * the session is gone (expired, or revoked by a password reset) → send the user
- * to login with a clear message instead of leaving a silently broken page.
- * Also reacts to Supabase signalling SIGNED_OUT in this tab.
+ * Watches the app's own API calls. A same-origin /api/* 401 is only a HINT:
+ * redirectToLoginExpired() then asks Supabase Auth whether the session is
+ * really gone, and redirects to login only if it is. A 401 from one endpoint
+ * (e.g. /api/saved-items for an account with no companies row — the admin)
+ * with a valid session does nothing.
  */
 export default function SessionGuard() {
   useEffect(() => {

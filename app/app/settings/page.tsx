@@ -255,9 +255,11 @@ export default function SettingsPage() {
   const SAVE_FAILED = 'שמירה נכשלה — ייתכן שהחיבור פג, התחבר מחדש ונסה שוב'
 
   /** No valid session (expired, or revoked by a password reset) → login. */
+  // Redirects only if Supabase confirms the session is really gone; otherwise
+  // it's a plain failed save and we say so without logging anyone out.
   const failExpired = async () => {
-    toast({ title: 'שמירה נכשלה', description: SESSION_EXPIRED_MESSAGE, variant: 'destructive' })
-    await redirectToLoginExpired()
+    const redirected = await redirectToLoginExpired()
+    toast({ title: 'שמירה נכשלה', description: redirected ? SESSION_EXPIRED_MESSAGE : SAVE_FAILED, variant: 'destructive' })
   }
 
   /**
