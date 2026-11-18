@@ -32,9 +32,15 @@ test('selectArticles: recent only, de-duplicated, newest first, capped', () => {
     a('חדשה', 'https://x/2', '2026-11-17T00:00:00Z'),
     a('חדשה', 'https://x/3', '2026-11-16T00:00:00Z'),      // duplicate title
     a('אמצע', 'https://x/4?utm=1', '2026-11-10T00:00:00Z'),
-    a('כפולה', 'https://x/4', '2026-11-11T00:00:00Z'),      // duplicate URL (query stripped)
+    a('כפולה', 'https://x/4?utm=1#top', '2026-11-11T00:00:00Z'), // duplicate URL (only the #fragment differs)
     a('ללא תאריך', 'https://x/5', null),
   ], { maxAgeDays: 30, limit: 10, now })
   assert.deepEqual(out.map(o => o.title), ['חדשה', 'אמצע', 'ללא תאריך'])
   assert.equal(selectArticles(out, { maxAgeDays: 30, limit: 1, now }).length, 1)
+  // Google News links differ only in the query string — they are distinct articles.
+  const g = selectArticles([
+    a('א', 'https://google.com/goto?url=AAA', '2026-11-17T00:00:00Z'),
+    a('ב', 'https://google.com/goto?url=BBB', '2026-11-16T00:00:00Z'),
+  ], { maxAgeDays: 30, limit: 10, now })
+  assert.equal(g.length, 2)
 })
