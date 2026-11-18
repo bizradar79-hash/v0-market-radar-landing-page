@@ -46,6 +46,91 @@ export function parseDfsTime(raw: unknown): string | null {
   return isNaN(t) ? null : new Date(t).toISOString()
 }
 
+// Google News (Hebrew) gives no machine timestamp — only `time_published` text
+// like "29 בדצמ׳ 2025", "12 בנוב׳", "לפני 3 ימים", "לפני שעתיים", "אתמול".
+const HE_MONTHS: Array<[RegExp, number]> = [
+  [/^ינו/, 0], [/^פבר/, 1], [/^מרץ|^מרס/, 2], [/^אפר/, 3], [/^מאי/, 4], [/^יונ/, 5],
+  [/^יול/, 6], [/^אוג/, 7], [/^ספט/, 8], [/^אוק/, 9], [/^נוב/, 10], [/^דצמ/, 11],
+]
+
+/** Parse Google's Hebrew `time_published` into ISO (null if unrecognised). */
+export function parseHebrewTime(raw: unknown, now = Date.now()): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const s = raw.trim().replace(/[׳']/g, '')
+  const H = 3600000, D = 86400000
+  if (/^אתמול/.test(s)) return new Date(now - D).toISOString()
+  if (/^(היום|עכשיו|לפני רגע)/.test(s)) return new Date(now).toISOString()
+  const rel = s.match(/^לפני\s+(\d+)?\s*(דקה|דקות|שעה|שעות|שעתיים|יום|ימים|יומיים|שבוע|שבועות|שבועיים|חודש|חודשים)/)
+  if (rel) {
+    const n = rel[1] ? Number(rel[1]) : 1
+    const unit = rel[2]
+    const ms = /דק/.test(unit) ? n * 60000
+      : unit === 'שעתיים' ? 2 * H : /שע/.test(unit) ? n * H
+      : unit === 'יומיים' ? 2 * D : /^י/.test(unit) ? n * D
+      : unit === 'שבועיים' ? 14 * D : /שבוע/.test(unit) ? n * 7 * D
+      : n * 30 * D
+    return new Date(now - ms).toISOString()
+  }
+  const abs = s.match(/^(\d{1,2})\s+ב?(\S+)(?:\s+(\d{4}))?/)
+  if (abs) {
+    const month = HE_MONTHS.find(([re]) => re.test(abs[2]))?.[1]
+    if (month == null) return null
+    const nowD = new Date(now)
+    let year = abs[3] ? Number(abs[3]) : nowD.getUTCFullYear()
+    let t = Date.UTC(year, month, Number(abs[1]), 12)
+    if (!abs[3] && t > now + D) t = Date.UTC(year - 1, month, Number(abs[1]), 12) // "12 בנוב׳" in Jan = last year
+    return isNaN(t) ? null : new Date(t).toISOString()
+  }
+  return null
+}
+
+const SOURCE_NAMES: Record<string, string> = {
+  'ynet.co.il': 'ynet', 'haaretz.co.il': 'הארץ', 'themarker.com': 'TheMarker', 'globes.co.il': 'גלובס',
+  'calcalist.co.il': 'כלכליסט', 'mako.co.il': 'mako', 'walla.co.il': 'וואלה', 'maariv.co.il': 'מעריב',
+  'n12.co.il': 'N12', 'kan.org.il': 'כאן', 'israelhayom.co.il': 'ישראל היום', 'bizportal.co.il': 'ביזפורטל',
+  'ice.co.il': 'ice', 'srugim.co.il': 'סרוגים', 'inn.co.il': 'ערוץ 7', 'kikar.co.il': 'כיכר השבת',
+  'bhol.co.il': 'בחדרי חרדים', 'davar1.co.il': 'דבר', 'zman.co.il': 'זמן ישראל', 'geektime.co.il': 'גיקטיים',
+  'funder.co.il': 'פאנדר', 'news1.co.il': 'News1', 'timesofisrael.com': 'The Times of Israel', 'jpost.com': 'Jerusalem Post',
+}
+
+/** Readable publisher name for a domain (ynet.co.il → "ynet"); falls back to the domain. */
+export function sourceName(domain: string): string {
+  const d = domain.replace(/^www\./, '').toLowerCase()
+  const hit = Object.keys(SOURCE_NAMES).find(k => d === k || d.endsWith('.' + k))
+  return hit ? SOURCE_NAMES[hit] : d
+}
+
+const isGoogleHost = (url: string) => /(^|\.)google\.[a-z.]+$/i.test(domainOf(url))
+
+/**
+ * Google News links are google.com/goto?url=<id> redirects. Follow them (no
+ * page fetch — only the redirect hops) to get the real article URL + publisher.
+ * Never throws; on failure the Google link is kept (it still opens the article).
+ */
+export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 5000): Promise<NewsArticle[]> {
+  return Promise.all(articles.map(async (a) => {
+    if (!isGoogleHost(a.url)) return a
+    let cur = a.url
+    try {
+      for (let hop = 0; hop < 4; hop++) {
+        const r = await fetch(cur, {
+          redirect: 'manual',
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' },
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+        const loc = r.headers.get('location')
+        if (!loc) break
+        cur = new URL(loc, cur).href
+        if (!isGoogleHost(cur)) {
+          const domain = domainOf(cur)
+          return { ...a, url: cur, domain, source: sourceName(domain) }
+        }
+      }
+    } catch { /* keep the Google link */ }
+    return a
+  }))
+}
+
 /** Map raw `news_search` items to articles; drops anything without a real http(s) link. */
 export function mapNewsItems(rawItems: any[]): NewsArticle[] {
   const out: NewsArticle[] = []
@@ -61,9 +146,9 @@ export function mapNewsItems(rawItems: any[]): NewsArticle[] {
       out.push({
         title,
         url,
-        source: (typeof a.source === 'string' && a.source.trim()) || domain,
+        source: (typeof a.source === 'string' && a.source.trim()) || sourceName(domain),
         domain,
-        publishedAt: parseDfsTime(a.timestamp),
+        publishedAt: parseDfsTime(a.timestamp) ?? parseHebrewTime(a.time_published),
         snippet: typeof a.snippet === 'string' ? a.snippet.trim() : '',
       })
     }

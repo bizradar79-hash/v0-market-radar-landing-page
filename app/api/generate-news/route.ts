@@ -9,7 +9,7 @@ import { effectiveKeywords, fieldAnchor, phraseQuery, searchSubject } from '@/li
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
 import { NEWS_ENGINE } from '@/lib/flags'
-import { fetchGoogleNews, selectArticles, type NewsArticle } from '@/lib/news/dataforseo-news'
+import { fetchGoogleNews, resolveArticleLinks, selectArticles, type NewsArticle } from '@/lib/news/dataforseo-news'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 export const maxDuration = 60
@@ -108,10 +108,16 @@ async function runDataForSeoPath(ctx: any, steps: Record<string, any>, cost: Sca
   }
   steps.dataforseo = { runs }
 
-  let picked = selectArticles(pool, { maxAgeDays: NEWS_MAX_AGE_DAYS, limit: NEWS_LIMIT })
+  // Take a few extra: after resolving Google's redirect links, two results can
+  // turn out to be the same article and collapse on de-duplication.
+  let picked = selectArticles(pool, { maxAgeDays: NEWS_MAX_AGE_DAYS, limit: NEWS_LIMIT + 6 })
   // Very niche fields: widen the window rather than show nothing.
-  if (picked.length < 3) picked = selectArticles(pool, { maxAgeDays: 120, limit: NEWS_LIMIT })
+  if (picked.length < 3) picked = selectArticles(pool, { maxAgeDays: 120, limit: NEWS_LIMIT + 6 })
   if (picked.length === 0) return null
+  // google.com/goto?url=… → the real article URL + publisher name.
+  const resolved = await resolveArticleLinks(picked)
+  steps.linkResolution = { resolved: resolved.filter(a => !/google\./.test(a.domain)).length, of: resolved.length }
+  picked = selectArticles(resolved, { maxAgeDays: 120, limit: NEWS_LIMIT })
 
   const kept = await filterInsertRows(ctx.user.id, 'news', picked, (n: NewsArticle) => n.title)
   if (kept.length === 0) {

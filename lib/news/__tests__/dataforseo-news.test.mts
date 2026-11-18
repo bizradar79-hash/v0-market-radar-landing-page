@@ -21,7 +21,7 @@ test('mapNewsItems keeps only articles with a real link and a title', () => {
   assert.deepEqual(items.map(i => i.title), ['כתבה', 'סיפור'])
   assert.equal(items[0].source, 'ynet')
   assert.equal(items[0].publishedAt, '2026-11-17T08:30:00.000Z')
-  assert.equal(items[1].source, 'globes.co.il') // falls back to domain
+  assert.equal(items[1].source, 'גלובס') // no source field → readable publisher name from the domain
 })
 
 test('selectArticles: recent only, de-duplicated, newest first, capped', () => {
@@ -43,4 +43,25 @@ test('selectArticles: recent only, de-duplicated, newest first, capped', () => {
     a('ב', 'https://google.com/goto?url=BBB', '2026-11-16T00:00:00Z'),
   ], { maxAgeDays: 30, limit: 10, now })
   assert.equal(g.length, 2)
+})
+
+import { parseHebrewTime, sourceName } from '../dataforseo-news.ts'
+
+test('parseHebrewTime handles Google News Hebrew dates', () => {
+  const now = Date.parse('2026-11-18T12:00:00Z')
+  assert.equal(parseHebrewTime('29 בדצמ׳ 2025', now), '2025-12-29T12:00:00.000Z')
+  assert.equal(parseHebrewTime('5 בדצמ׳ 2025', now), '2025-12-05T12:00:00.000Z')
+  assert.equal(parseHebrewTime('12 בנוב׳', now), '2026-11-12T12:00:00.000Z')
+  assert.equal(parseHebrewTime('20 בדצמ׳', now), '2025-12-20T12:00:00.000Z') // future → last year
+  assert.equal(parseHebrewTime('לפני 3 ימים', now), '2026-11-15T12:00:00.000Z')
+  assert.equal(parseHebrewTime('לפני שעתיים', now), '2026-11-18T10:00:00.000Z')
+  assert.equal(parseHebrewTime('אתמול', now), '2026-11-17T12:00:00.000Z')
+  assert.equal(parseHebrewTime('לפני שבוע', now), '2026-11-11T12:00:00.000Z')
+  assert.equal(parseHebrewTime('משהו אחר', now), null)
+})
+
+test('sourceName maps known publishers, falls back to the domain', () => {
+  assert.equal(sourceName('www.ynet.co.il'), 'ynet')
+  assert.equal(sourceName('globes.co.il'), 'גלובס')
+  assert.equal(sourceName('example.co.il'), 'example.co.il')
 })
