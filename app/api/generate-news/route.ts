@@ -108,16 +108,23 @@ async function runDataForSeoPath(ctx: any, steps: Record<string, any>, cost: Sca
   }
   steps.dataforseo = { runs }
 
+  // Freshest window that still yields enough articles. Niche fields (e.g.
+  // medicinal mushrooms) rarely have a month of news; older coverage is still
+  // useful — every item carries its real publish date.
+  const WINDOWS = [NEWS_MAX_AGE_DAYS, 90, 180, 365]
+  const MIN_ARTICLES = 6
+  let windowDays = WINDOWS[WINDOWS.length - 1]
+  for (const w of WINDOWS) {
+    if (selectArticles(pool, { maxAgeDays: w, limit: NEWS_LIMIT }).length >= MIN_ARTICLES) { windowDays = w; break }
+  }
   // Take a few extra: after resolving Google's redirect links, two results can
   // turn out to be the same article and collapse on de-duplication.
-  let picked = selectArticles(pool, { maxAgeDays: NEWS_MAX_AGE_DAYS, limit: NEWS_LIMIT + 6 })
-  // Very niche fields: widen the window rather than show nothing.
-  if (picked.length < 3) picked = selectArticles(pool, { maxAgeDays: 120, limit: NEWS_LIMIT + 6 })
+  let picked = selectArticles(pool, { maxAgeDays: windowDays, limit: NEWS_LIMIT + 6 })
   if (picked.length === 0) return null
   // google.com/goto?url=… → the real article URL + publisher name.
   const resolved = await resolveArticleLinks(picked)
-  steps.linkResolution = { resolved: resolved.filter(a => !/google\./.test(a.domain)).length, of: resolved.length }
-  picked = selectArticles(resolved, { maxAgeDays: 120, limit: NEWS_LIMIT })
+  steps.linkResolution = { resolved: resolved.filter(a => !/google\./.test(a.domain)).length, of: resolved.length, windowDays }
+  picked = selectArticles(resolved, { maxAgeDays: windowDays, limit: NEWS_LIMIT })
 
   const kept = await filterInsertRows(ctx.user.id, 'news', picked, (n: NewsArticle) => n.title)
   if (kept.length === 0) {
