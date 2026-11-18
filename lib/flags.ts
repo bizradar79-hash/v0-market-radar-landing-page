@@ -53,3 +53,10 @@ export const COMPETITOR_TRENDS_ENABLED =
 //   NEWS_ENGINE=grok
 export const NEWS_ENGINE: 'dataforseo' | 'grok' =
   process.env.NEWS_ENGINE === 'grok' ? 'grok' : 'dataforseo'
+
+// Conferences engine. 'dataforseo' = Google Organic via DataForSEO + one
+// no-search Gemini extraction (~$0.01/run). 'grok' = the old xAI web_search
+// path (~$0.13+/run plus paid URL lookups). An admin can force one run with
+// ?engine=dataforseo|grok on /api/generate-conferences.
+export const CONFERENCES_ENGINE: 'dataforseo' | 'grok' =
+  process.env.CONFERENCES_ENGINE === 'dataforseo' ? 'dataforseo' : 'grok'

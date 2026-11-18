@@ -100,46 +100,53 @@ export function sourceName(domain: string): string {
   return hit ? SOURCE_NAMES[hit] : d
 }
 
-const isGoogleHost = (url: string) => /(^|\.)google\.[a-z.]+$/i.test(domainOf(url))
+export const isGoogleHost = (url: string) => /(^|\.)google\.[a-z.]+$/i.test(domainOf(url))
 
 /**
  * Google News links are google.com/goto?url=<id> redirects. Follow them (no
  * page fetch — only the redirect hops) to get the real article URL + publisher.
  * Never throws; on failure the Google link is kept (it still opens the article).
  */
-export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8000): Promise<NewsArticle[]> {
-  const follow = async (start: string): Promise<string | null> => {
-    let cur = start
-    for (let hop = 0; hop < 4; hop++) {
-      const r = await fetch(cur, {
-        redirect: 'manual',
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' },
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-      const loc = r.headers.get('location')
-      if (!loc) {
-        // Sometimes Google answers with an interstitial page instead of a 302;
-        // the article link is then in the page (meta refresh / first link).
-        if (r.status !== 200) return null
-        const html = (await r.text()).slice(0, 200_000)
-        const m = html.match(/(?:url=|href=["'])(https?:\/\/[^"'\s>]+)/gi) || []
-        for (const raw of m) {
-          const u = raw.replace(/^(?:url=|href=["'])/i, '').replace(/&amp;/g, '&')
-          if (!isGoogleHost(u) && !/gstatic|googleapis|w3\.org|schema\.org/i.test(u)) return u
-        }
-        return null
+/**
+ * Follow a Google redirect link (google.com/goto?url=…) to the real target URL.
+ * Only the redirect hops are fetched (plus the interstitial page when Google
+ * serves one). Returns null when it can't be resolved.
+ */
+export async function resolveGoogleRedirect(start: string, timeoutMs = 8000): Promise<string | null> {
+  let cur = start
+  for (let hop = 0; hop < 4; hop++) {
+    const r = await fetch(cur, {
+      redirect: 'manual',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' },
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    const loc = r.headers.get('location')
+    if (!loc) {
+      // Sometimes Google answers with an interstitial page instead of a 302;
+      // the article link is then in the page (meta refresh / first link).
+      if (r.status !== 200) return null
+      const html = (await r.text()).slice(0, 200_000)
+      const m = html.match(/(?:url=|href=["'])(https?:\/\/[^"'\s>]+)/gi) || []
+      for (const raw of m) {
+        const u = raw.replace(/^(?:url=|href=["'])/i, '').replace(/&amp;/g, '&')
+        if (!isGoogleHost(u) && !/gstatic|googleapis|w3\.org|schema\.org/i.test(u)) return u
       }
-      cur = new URL(loc, cur).href
-      if (!isGoogleHost(cur)) return cur
+      return null
     }
-    return null
+    cur = new URL(loc, cur).href
+    if (!isGoogleHost(cur)) return cur
   }
+  return null
+}
+
+
+export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8000): Promise<NewsArticle[]> {
   return mapLimit(articles, 3, async (a) => {
     if (!isGoogleHost(a.url)) return a
     // One retry: Google's redirect hop is occasionally slow from serverless IPs.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const real = await follow(a.url)
+        const real = await resolveGoogleRedirect(a.url, timeoutMs)
         if (real) {
           const domain = domainOf(real)
           return { ...a, url: real, domain, source: sourceName(domain) }
@@ -151,7 +158,7 @@ export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8
 }
 
 /** Run `fn` over items with at most `limit` in flight; preserves order. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]) } }

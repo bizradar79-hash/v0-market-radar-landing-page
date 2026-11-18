@@ -10,7 +10,9 @@ import { norm, wordsOf, wordHit, buildCoreModel, type KwInfo } from '@/lib/match
 import { filterInsertRows } from '@/lib/admin/hidden'
 import { isPastConference, parseConferenceDate, todayISO } from '@/lib/conferences/date'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
-import { searchSubject } from '@/lib/keywords'
+import { effectiveKeywords, fieldAnchor, searchSubject } from '@/lib/keywords'
+import { CONFERENCES_ENGINE } from '@/lib/flags'
+import { buildConferenceQueries, extractEvents, fetchOrganic, resolveEventLinks, type Candidate } from '@/lib/conferences/dataforseo-engine'
 
 export const maxDuration = 60
 
@@ -88,7 +90,13 @@ function scoreConference(c: any, kwInfo: KwInfo[]): { score: number; tier: 'dire
 
 // Score → gate (drop unrelated) → sort desc → cap → store. Shared by BOTH the
 // active-prompt AI path and the xAI fallback path so they gate identically.
-async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, steps: Record<string, any>, cost?: ScanCostCollector) {
+async function finalizeConferences(
+  rawItems: any[], kwInfo: KwInfo[], ctx: any, steps: Record<string, any>, cost?: ScanCostCollector,
+  // DataForSEO engine: URLs come from Google itself (resolved redirects), so
+  // they're trusted as-is — no HEAD check (many event sites reject HEAD) and no
+  // paid xAI URL lookups.
+  opts: { trustUrls?: boolean } = {},
+) {
   const today = todayISO()
 
   // Future-dated only — via the SHARED comparable-date parser, so free-text dates
@@ -143,9 +151,10 @@ async function finalizeConferences(rawItems: any[], kwInfo: KwInfo[], ctx: any, 
       const name = String(c.name || c.title || '')
       const given = String(c.url || c.link || c.website || '').trim()
       // FREE path: the model's URL, validated with a plain HEAD request.
-      if (/^https?:\/\//i.test(given) && await validateUrl(given)) {
+      if (/^https?:\/\//i.test(given) && (opts.trustUrls || await validateUrl(given))) {
         return { c, score, url: given }
       }
+      if (opts.trustUrls) return { c, score, url: '' }
       if (urlLookups >= URL_LOOKUP_BUDGET) return { c, score, url: '' }
       urlLookups++
       const candidate = await findRealUrl(name, `כנס/אירוע ${String(c.location || '')}`.trim(), cost ?? undefined)
@@ -221,6 +230,44 @@ export async function POST(request: Request) {
     ).slice(0, 12).filter(Boolean)
     const { coreSet, kwInfo } = buildCoreModel(coreKeywords)
     console.log('[conferences] core terms:', [...coreSet].join(', ') || '(none)')
+
+    // ── DataForSEO engine ─────────────────────────────────────────────────
+    const engineParam = new URL(request.url).searchParams.get('engine')
+    const engine = engineParam === 'dataforseo' || engineParam === 'grok' ? engineParam : CONFERENCES_ENGINE
+    steps.engine = engine
+    if (engine === 'dataforseo') {
+      const kws = effectiveKeywords(ctx.company, bpTop)
+      const anchor = fieldAnchor(ctx.company, bpTop) || ctx.company?.industry || ''
+      const queries = buildConferenceQueries(kws, anchor)
+      const runs: any[] = []
+      const seen = new Set<string>()
+      const cands: Candidate[] = []
+      for (const q of queries) {
+        const t0 = Date.now()
+        const r = await fetchOrganic(q, 20)
+        cost.add({ provider: 'dataforseo', model: 'google_organic', costUSD: r.costUSD, ms: Date.now() - t0 })
+        runs.push({ query: q, ok: r.ok, count: r.candidates.length, costUSD: r.costUSD, error: r.error })
+        for (const c of r.candidates) {
+          const key = c.title.trim().toLowerCase()
+          if (seen.has(key) || seen.has(c.url)) continue
+          seen.add(key); seen.add(c.url)
+          cands.push(c)
+        }
+      }
+      steps.dataforseo = { runs, candidates: cands.length }
+      if (cands.length === 0) {
+        await cost.flush()
+        return NextResponse.json({ success: true, conferences: [], count: 0, kept_existing: true, steps })
+      }
+      const subject = searchSubject(kws, ctx.company, bpTop, 3) || anchor
+      const extracted = await extractEvents(cands.slice(0, 45), todayISO(), subject, cost)
+      steps.extracted = { events: extracted.length, kinds: extracted.reduce((m: any, e) => { m[e.kind] = (m[e.kind] || 0) + 1; return m }, {}) }
+      // Real links before scoring/dedupe (Google gives goto redirects).
+      const withLinks = await resolveEventLinks(extracted)
+      const out = await finalizeConferences(withLinks, kwInfo, ctx, steps, cost, { trustUrls: true })
+      await cost.flush()
+      return out
+    }
 
     // Appended to whatever active/fallback prompt we use: fewer-but-relevant +
     // ask the model to self-assess so we can keep a few broad business events.
