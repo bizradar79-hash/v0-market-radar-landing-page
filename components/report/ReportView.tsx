@@ -3,6 +3,7 @@
 // (/r/a/[snapshot_token]). Pure render from assembled ReportData — no data
 // fetching, no AI. Design copied verbatim from report-design-reference.html.
 import type { ReportData } from '@/lib/report/assemble'
+import type { ReactNode } from 'react'
 
 export const REPORT_CSS = `
   :root{--ink:#14212d;--ink-soft:#485866;--ink-faint:#84939f;--bg:#f4f7f6;--card:#ffffff;--line:#e0e7e4;--teal:#0d9488;--teal-bright:#10b981;--teal-deep:#0a6b62;--teal-wash:#e0f2ef;--teal-glow:#ccfbf1;--navy:#0f2033;--navy-2:#16304a;--amber:#d97706;--amber-wash:#fef3c7;--red:#dc2626;--red-wash:#fee2e2;--green:#16a34a;--green-wash:#dcfce7;--gold:#f59e0b;}
@@ -143,14 +144,19 @@ export const REPORT_CSS = `
   .rpt .ai-eng .eng-name{font-size:12px;font-weight:700;color:var(--ink-soft)}
   .rpt .ai-eng .eng-rank{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:26px;line-height:1.1;margin-top:4px;color:var(--ink)}
   .rpt .ai-lists{padding:4px 22px 14px;border-bottom:1px solid var(--line)}
-  .rpt .ai-list{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-  .rpt .ai-list summary{cursor:pointer;padding:9px 12px;font-size:13px;font-weight:700;color:var(--ink-soft)}
-  .rpt .ai-list ol{list-style:none;margin:0;padding:0 8px 8px}
-  .rpt .ai-list li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:13px;color:var(--ink)}
-  .rpt .ai-list li .pos{font-weight:700;min-width:28px;color:var(--ink-soft)}
-  .rpt .ai-list li .nm{flex:1}
-  .rpt .ai-list li.own{background:var(--teal-wash);border:1px solid var(--teal)}
-  .rpt .ai-list li .you{background:var(--teal);color:#fff;font-size:11px;font-weight:700;border-radius:6px;padding:1px 7px}
+  .rpt .xp{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+  .rpt .xp>summary{cursor:pointer;padding:9px 12px;font-size:13px;font-weight:700;color:var(--teal-deep)}
+  .rpt .xp-body{padding:0 10px 10px}
+  .rpt .xp-pad{padding:4px 22px 14px}
+  .rpt .rk-list{list-style:none;margin:0;padding:0}
+  .rpt .rk-list li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:13px;color:var(--ink)}
+  .rpt .rk-list li .pos{font-weight:700;min-width:28px;color:var(--ink-soft)}
+  .rpt .rk-list li .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+  .rpt .rk-list li .nm a{color:inherit;text-decoration:none}
+  .rpt .rk-list li.own{background:var(--teal-wash);border:1px solid var(--teal)}
+  .rpt .rk-list li .you{background:var(--teal);color:#fff;font-size:11px;font-weight:700;border-radius:6px;padding:1px 7px}
+  .rpt .xp-item{padding:8px 4px;border-bottom:1px solid var(--line);font-size:13px}
+  .rpt .xp-item:last-child{border-bottom:0}
   .rpt .ai-eng.on{background:linear-gradient(160deg,var(--teal-wash),#fff 70%);border-color:var(--teal)}
   .rpt .ai-eng.on .eng-rank{color:var(--teal-deep)}
   .rpt .ai-eng.off .eng-rank{color:var(--ink-faint);font-family:'Heebo',sans-serif;font-weight:600;font-size:12.5px;margin-top:9px}
@@ -176,6 +182,37 @@ export const REPORT_CSS = `
   .rpt .foot-brand{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:8px;color:var(--ink-soft);font-weight:700;font-size:13px}
   @media (max-width:560px){.rpt .thesis p.big{font-size:23px}.rpt h1{font-size:23px}.rpt .metric .num{font-size:31px}.rpt .row-side{text-align:right;width:100%}.rpt .action{padding:16px}.rpt .action-num{display:none}}
 `
+
+/** The ONE in-report expand used by every section: native <details>, so it works
+ *  with no JS in the live report AND static snapshot archives. Renders nothing
+ *  when there's no extra detail. */
+function Expand({ label, children, show = true }: { label: string; children: ReactNode; show?: boolean }) {
+  if (!show) return null
+  return (
+    <details className="xp">
+      <summary>{label}</summary>
+      <div className="xp-body">{children}</div>
+    </details>
+  )
+}
+
+type RankedRow = { position: number | string | null; name: string; url: string; own: boolean }
+/** Ranked list (GEO engine answers + Google SEO results), client row highlighted — same "אתה" treatment as the app. */
+function RankedList({ rows }: { rows: RankedRow[] }) {
+  return (
+    <ol className="rk-list">
+      {rows.map((row, i) => (
+        <li key={i} className={row.own ? 'own' : ''}>
+          <span className="pos">#{row.position}</span>
+          <span className="nm">{row.url && /^https?:\/\//.test(row.url)
+            ? <a href={row.url} target="_blank" rel="noopener noreferrer">{row.name}</a>
+            : row.name}</span>
+          {row.own && <span className="you">אתה</span>}
+        </li>
+      ))}
+    </ol>
+  )
+}
 
 const STAR_SVG = (
   <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
@@ -403,6 +440,34 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                       {c.insights.map((t, j) => <div className="trk-ins" key={j}>· {t}</div>)}
                     </>
                   )}
+
+                  {/* Everything else the module page shows, in-report on expand */}
+                  {c.more && (
+                    <>
+                      <Expand show={c.more.posts.length > 0} label={`עוד ${c.more.posts.length} פרסומים`}>
+                        {c.more.posts.map((p, j) => (
+                          <div className="xp-item" key={j}>
+                            <span className={`plat ${p.platform}`}>{p.platformLabel}</span> {p.date}
+                            <div>{p.url ? <a className="news-link" href={p.url} target="_blank" rel="noopener noreferrer">{p.caption || 'לפוסט ↗'}</a> : p.caption}</div>
+                            {p.engagement && <div className="trk-eng">{p.engagement}</div>}
+                          </div>
+                        ))}
+                      </Expand>
+                      <Expand show={c.more.negatives.length > 0} label={`ביקורות שליליות אחרונות (${c.more.negatives.length})`}>
+                        {c.more.negatives.map((n, j) => (
+                          <div className="xp-item" key={j}>
+                            <span className="row-sub">{[n.date, n.rating != null ? `${n.rating}★` : ''].filter(Boolean).join(' · ')}</span>
+                            <div>{n.text}</div>
+                          </div>
+                        ))}
+                      </Expand>
+                      <Expand show={c.more.websiteChanges.length > 0} label={`עוד ${c.more.websiteChanges.length} שינויים באתר`}>
+                        {c.more.websiteChanges.map((w, j) => (
+                          <div className="xp-item" key={j}>{w.icon} {w.text}{w.soWhat && <div className="row-sub">↳ {w.soWhat}</div>}</div>
+                        ))}
+                      </Expand>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -498,6 +563,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                         </div>
                       </div>
                     )}
+                    {r.seoPrimary && <div className="xp-pad"><Expand show={!!r.seoPrimary.results?.length} label={`${r.seoPrimary.results?.length ?? 0} התוצאות הראשונות בגוגל ל־${r.seoPrimary.query}`}><RankedList rows={r.seoPrimary.results || []} /></Expand></div>}
                     {/* Demand sparkline for the primary keyword */}
                     {r.demand && r.demand.series.length >= 3 && (
                       <div className="demand">
@@ -506,15 +572,29 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                       </div>
                     )}
                     {/* Up to 2 more expressions (total ≤ 3) */}
-                    {(r.seoExtras || []).map((s, i) => (
-                      <div className="rank-row" key={i}>
+                    {[...(r.seoExtras || [])].map((s, i) => (
+                      <div key={i}>
+                      <div className="rank-row">
                         {rankCell(s)}
                         <div className="rank-main">
                           <div className="rank-title">{s.query}</div>
                           <div className="rank-sub">{s.sub}</div>
                         </div>
                       </div>
+                      <div className="xp-pad"><Expand show={!!s.results?.length} label={`${s.results?.length ?? 0} התוצאות הראשונות בגוגל ל־${s.query}`}><RankedList rows={s.results || []} /></Expand></div>
+                      </div>
                     ))}
+                    {/* All other tracked keywords — in-report, not a link into the app */}
+                    <div className="xp-pad">
+                      <Expand show={!!r.seoMore?.length} label={`עוד ${r.seoMore?.length ?? 0} ביטויים שנבדקו בגוגל`}>
+                        {(r.seoMore || []).map((s, i) => (
+                          <div className="xp-item" key={i}>
+                            <b>{s.query}</b> — {s.unranked ? 'לא מדורג עדיין' : `מקום #${s.rank}`} <span className="row-sub">· {s.sub}</span>
+                            <Expand show={!!s.results?.length} label={`${s.results?.length ?? 0} התוצאות הראשונות`}><RankedList rows={s.results || []} /></Expand>
+                          </div>
+                        ))}
+                      </Expand>
+                    </div>
                   </>
                 )
 
@@ -539,18 +619,9 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                         {q.engines.some((e) => (e.results?.length ?? 0) > 0) && (
                           <div className="ai-lists">
                             {q.engines.filter((e) => (e.results?.length ?? 0) > 0).map((e, i) => (
-                              <details className="ai-list" key={i}>
-                                <summary>מה {e.name} המליץ — {e.results!.length} תוצאות</summary>
-                                <ol>
-                                  {e.results!.map((row, ri) => (
-                                    <li key={ri} className={row.own ? 'own' : ''}>
-                                      <span className="pos">#{row.position}</span>
-                                      <span className="nm">{row.name}</span>
-                                      {row.own && <span className="you">אתה</span>}
-                                    </li>
-                                  ))}
-                                </ol>
-                              </details>
+                              <Expand key={i} label={`מה ${e.name} המליץ — ${e.results!.length} תוצאות`}>
+                                <RankedList rows={e.results!} />
+                              </Expand>
                             ))}
                           </div>
                         )}
@@ -577,7 +648,6 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                 </div>
               ))}
 
-              <a className="more-link" href="/app/seo-geo">לדוח הדירוג המלא במערכת ←</a>
             </div>
           </div>
         </section>
@@ -672,7 +742,20 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   </div>
                 </div>
               ))}
-              <a className="more-link" href="/app/news">לכל החדשות במערכת ←</a>
+              <div className="xp-pad">
+                <Expand show={!!r.newsMore?.length} label={`עוד ${r.newsMore?.length ?? 0} ידיעות`}>
+                  {(r.newsMore || []).map((n, i) => (
+                    <div className="xp-item" key={i}>
+                      <div className="row-title">
+                        {n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="news-link">{n.title}</a> : n.title}
+                        {n.pill && <span className="pill amber">{n.pill}</span>}
+                      </div>
+                      {n.sub && <div className="row-sub">{n.sub}</div>}
+                      {(n.source || n.date) && <div className="row-sub news-meta">{[n.source, n.date].filter(Boolean).join(' · ')}</div>}
+                    </div>
+                  ))}
+                </Expand>
+              </div>
             </div>
           </div>
         </section>

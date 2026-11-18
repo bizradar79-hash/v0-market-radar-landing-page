@@ -10,7 +10,7 @@ import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
 import { readGeoQuestions } from '@/lib/geo/read'
-import { buildClientIdentity } from '@/lib/geo/identity'
+import { buildClientIdentity, isOwnGeoResult } from '@/lib/geo/identity'
 import { filterUpcomingConferences, conferenceDateLabel, parseConferenceDate } from '@/lib/conferences/date'
 import { TENDERS_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 import {
@@ -87,6 +87,12 @@ export interface ReportData {
     insights: string[]
     /** Meaningful website changes since the previous scan (empty → hidden). */
     websiteChanges?: Array<{ icon: string; text: string; soWhat?: string }>
+    /** Detail the module page shows beyond the summary — revealed in-report on expand. */
+    more?: {
+      posts: Array<{ date: string; platform: string; platformLabel: string; caption: string; engagement?: string; url?: string; notable?: boolean }>
+      negatives: Array<{ date: string; rating: number | null; text: string }>
+      websiteChanges: Array<{ icon: string; text: string; soWhat?: string }>
+    }
     scannedAt?: string
   }>
   // Evergreen filler when no changes this scan: top stored competitor-trends,
@@ -99,12 +105,14 @@ export interface ReportData {
   // Legacy flat list — kept so older snapshots still render. New reports populate
   // the focused fields below and leave this empty.
   seo: Array<{ rank: string; title: string; sub: string; badge?: { kind: 'up' | 'down' | 'flat'; text: string }; warn?: boolean }>
-  seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean } | null
+  seoMore?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }>
+  newsMore?: Array<{ title: string; sub: string; pill?: string; url?: string; source?: string; date?: string }>
+  seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> } | null
   seoAi?: { question: string; engines: Array<{ name: string; rank: string; appeared: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }> } | null
   // Up to 3 GEO questions, each with the client's position per engine — mirrors
   // the SEO section's 3 expressions. seoAi (above) stays = the first, for old snapshots.
   seoAiQuestions?: Array<{ question: string; engines: Array<{ name: string; rank: string; appeared: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }> }>
-  seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean }>
+  seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }>
   seoAiFirst?: boolean   // lead with the AI block when the client has no Google rank but shows in AI
   demand?: { keyword: string; series: number[]; label: string } | null
   trends: Array<{ title: string; sub: string; badge: { kind: 'up' | 'down' | 'flat'; text: string }; hot?: boolean }>
@@ -539,6 +547,14 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         .filter((p) => !notable.some((n) => n.url && n.url === p.url))
         .map((p) => toReportPost(p))
       const posts = [...notable, ...recent]
+      // Full list the module page shows (recentPostsFrom default cap) — the
+      // ones not already in the summary go behind the in-report expand.
+      const morePosts = recentPostsFrom(sources)
+        .filter((p) => !posts.some((x) => (x.url && x.url === p.url) || (x.caption === p.caption && x.date === p.dateLabel)))
+        .map((p) => toReportPost(p))
+      const negatives = (Array.isArray(rv.insights?.negatives) ? rv.insights.negatives : [])
+        .filter((n: any) => n && String(n.text || '').trim())
+        .map((n: any) => ({ date: String(n.date || ''), rating: n.rating ?? null, text: String(n.text).trim() }))
 
       // 45-day deterministic insights, already computed at scan time.
       const insights = [
@@ -550,14 +566,14 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       const CHANGE_ICON: Record<string, string> = {
         product: '🆕', price: '💰', promotion: '🎯', positioning: '📣', location: '📍', other: '•',
       }
-      const websiteChanges = (Array.isArray(row?.website?.changes) ? row.website.changes : [])
+      const allWebChanges = (Array.isArray(row?.website?.changes) ? row.website.changes : [])
         .filter((c: any) => c && String(c.text || '').trim())
-        .slice(0, 3)
         .map((c: any) => ({
           icon: CHANGE_ICON[String(c.kind)] || '•',
           text: String(c.text).trim(),
           soWhat: String(c.soWhat || '').trim() || undefined,
         }))
+      const websiteChanges = allWebChanges.slice(0, 3)
 
       return {
         name: String(row?.competitor_name || '').trim(),
@@ -570,6 +586,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         posts,
         insights,
         websiteChanges,
+        more: { posts: morePosts, negatives, websiteChanges: allWebChanges.slice(3) },
         scannedAt: row?.scanned_at || undefined,
       }
     })
@@ -668,6 +685,18 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       if (a.appeared !== b.appeared) return a.appeared ? -1 : 1
       return (b.searchVolume ?? 0) - (a.searchVolume ?? 0)
     })
+  // Full ranked Google list per keyword (as the app's SEO page shows), client
+  // row flagged with the same identity matcher used for GEO.
+  const seoIdentity = buildClientIdentity(company?.name || '', company?.website || '', company?.business_profile)
+  const seoResults = (v: any) => (Array.isArray(v?.results) ? v.results : [])
+    .filter((x: any) => x && (x.name || x.title || x.url))
+    .slice(0, 10)
+    .map((x: any, i: number) => ({
+      position: x.position ?? i + 1,
+      name: String(x.name || x.title || x.url),
+      url: typeof x.url === 'string' ? x.url : '',
+      own: !!x.isOwn || isOwnGeoResult(x, seoIdentity),
+    }))
   const toSeoRow = (v: any) => {
     const pos = v.appeared && num(v.position) != null ? (v.position as number) : null
     const vol = num(v.searchVolume)
@@ -677,19 +706,25 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       unranked: pos == null,   // not found in Google (beyond top 100)
       sub: `גוגל${vol ? ` · ${vol.toLocaleString('he-IL')} חיפושים בחודש` : ''}`,
       warn: pos != null && pos > 5,
+      results: seoResults(v),
     }
   }
   // Primary = highest-volume keyword where the client actually ranks (appeared).
   const primaryVariant = rankedSeo.find((v) => v.appeared && num(v.position) != null) || rankedSeo[0] || null
   const seoPrimaryRow = primaryVariant ? toSeoRow(primaryVariant) : null
   const seoPrimary: ReportData['seoPrimary'] = seoPrimaryRow
-    ? { query: `"${seoPrimaryRow.query}"`, rank: seoPrimaryRow.rank, sub: seoPrimaryRow.sub, warn: seoPrimaryRow.warn, unranked: seoPrimaryRow.unranked }
+    ? { query: `"${seoPrimaryRow.query}"`, rank: seoPrimaryRow.rank, sub: seoPrimaryRow.sub, warn: seoPrimaryRow.warn, unranked: seoPrimaryRow.unranked, results: seoPrimaryRow.results }
     : null
   // Up to 2 more expressions (total ≤ 3), excluding the primary.
   const seoExtras: ReportData['seoExtras'] = rankedSeo
     .filter((v) => v !== primaryVariant)
     .slice(0, 2)
-    .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked } })
+    .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked, results: r.results } })
+  // Every other tracked keyword (the app lists all) — revealed in-report on expand.
+  const seoMore: ReportData['seoMore'] = rankedSeo
+    .filter((v) => v !== primaryVariant)
+    .slice(2)
+    .map((v) => { const r = toSeoRow(v); return { query: `"${r.query}"`, rank: r.rank, sub: r.sub, warn: r.warn, unranked: r.unranked, results: r.results } })
 
   // ── GEO: up to 3 AI questions, each with the client's position per engine ────
   // Uses the SHARED reader (lib/geo/read) that mirrors the app GEO page's exact
@@ -789,7 +824,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   }))
 
   // ── News (up to 2) ──────────────────────────────────────────────────────────
-  const newsOut: ReportData['news'] = (news || []).slice(0, 2).map((n: any) => ({
+  const toNews = (n: any) => ({
     title: n.title || '',
     sub: n.summary || '',
     pill: n.category || undefined,
@@ -797,7 +832,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     url: typeof n.url === 'string' && /^https?:\/\//i.test(n.url) ? n.url : undefined,
     source: n.source || undefined,
     date: n.published_at ? heDay(n.published_at) : undefined,
-  }))
+  })
+  const newsOut: ReportData['news'] = (news || []).slice(0, 2).map(toNews)
+  // The rest of the stored articles (the app's news page lists them all).
+  const newsMore: ReportData['newsMore'] = (news || []).slice(2, 30).map(toNews)
 
   const scanDate = heDate(company?.last_sync_at)
   const periodEnd = company?.last_sync_at ? new Date(company.last_sync_at) : null
@@ -835,6 +873,8 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     seoPrimary,
     seoAi,
     seoAiQuestions,
+    seoMore,
+    newsMore,
     seoExtras,
     seoAiFirst,
     demand,
