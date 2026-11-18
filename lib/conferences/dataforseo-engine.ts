@@ -52,7 +52,7 @@ export function candidatesFromItems(items: any[]): Candidate[] {
   return out
 }
 
-export async function fetchOrganic(keyword: string, depth = 20): Promise<{ ok: boolean; candidates: Candidate[]; costUSD: number; error?: string }> {
+async function fetchOrganicOnce(keyword: string, depth: number): Promise<{ ok: boolean; candidates: Candidate[]; costUSD: number; error?: string }> {
   const auth = authHeader()
   if (!auth) return { ok: false, candidates: [], costUSD: 0, error: 'missing_credentials' }
   try {
@@ -71,6 +71,14 @@ export async function fetchOrganic(keyword: string, depth = 20): Promise<{ ok: b
   } catch (e: any) {
     return { ok: false, candidates: [], costUSD: 0, error: e?.message || 'fetch_failed' }
   }
+}
+
+/** Google Organic live with one retry (DataForSEO occasionally returns 40101 "Internal SE Server Error"). */
+export async function fetchOrganic(keyword: string, depth = 20) {
+  const first = await fetchOrganicOnce(keyword, depth)
+  if (first.ok) return first
+  const second = await fetchOrganicOnce(keyword, depth)
+  return { ...second, costUSD: first.costUSD + second.costUSD }
 }
 
 /** Keyword-driven queries: the client's top field phrase + the industry anchor, this year (+ next from Sept). */
@@ -102,15 +110,16 @@ ${lines}
 - date: תאריך האירוע עצמו (לא תאריך הפרסום). אם מופיע טווח — תאריך ההתחלה.`
 }
 
-/** One Gemini call, no tools (no web search). Returns parsed rows or []. */
-export async function extractEvents(cands: Candidate[], todayISO: string, subject: string, cost?: ScanCostCollector): Promise<ExtractedEvent[]> {
-  if (!cands.length || !process.env.GEMINI_API_KEY) return []
+const XAI_MODEL = 'grok-4-fast-non-reasoning'
+
+async function geminiJSON(prompt: string, cost?: ScanCostCollector): Promise<string> {
+  if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not set')
   const t0 = Date.now()
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: extractionPrompt(cands, todayISO, subject) }] }],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
     }),
     signal: AbortSignal.timeout(45_000),
@@ -118,10 +127,53 @@ export async function extractEvents(cands: Candidate[], todayISO: string, subjec
   if (!res.ok) throw new Error(`Gemini error ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const data = await res.json()
   cost?.add({ provider: 'gemini', model: GEMINI_MODEL, data, ms: Date.now() - t0 })
-  const text = (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('')
-  let rows: any[] = []
-  try { const j = JSON.parse(text); rows = Array.isArray(j) ? j : (j.items || j.results || []) } catch { return [] }
-  return mapExtracted(rows, cands)
+  return (data?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('')
+}
+
+/** xAI plain completion — NO tools, so no web_search charge. */
+async function xaiJSON(prompt: string, cost?: ScanCostCollector): Promise<string> {
+  if (!process.env.XAI_API_KEY) throw new Error('XAI_API_KEY not set')
+  const t0 = Date.now()
+  const res = await fetch('https://api.x.ai/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.XAI_API_KEY}` },
+    body: JSON.stringify({ model: XAI_MODEL, input: [{ role: 'user', content: prompt + '\n\nOutput ONLY the JSON array.' }] }),
+    signal: AbortSignal.timeout(45_000),
+  })
+  if (!res.ok) throw new Error(`xAI error ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const data = await res.json()
+  cost?.add({ provider: 'xai', model: XAI_MODEL, webSearch: false, data, ms: Date.now() - t0 })
+  return (data.output || []).filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
+    .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
+}
+
+function parseRows(text: string): any[] {
+  const clean = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
+  try { const j = JSON.parse(clean); return Array.isArray(j) ? j : (j.items || j.results || []) } catch {}
+  const a = clean.indexOf('['), b = clean.lastIndexOf(']')
+  if (a !== -1 && b > a) { try { return JSON.parse(clean.slice(a, b + 1)) } catch {} }
+  return []
+}
+
+/**
+ * One extraction call with NO web search: Gemini first, xAI (no tools) if
+ * Gemini fails (e.g. depleted credits). Returns the extracted events + which
+ * provider answered.
+ */
+export async function extractEvents(cands: Candidate[], todayISO: string, subject: string, cost?: ScanCostCollector): Promise<{ events: ExtractedEvent[]; provider: string; errors: string[] }> {
+  if (!cands.length) return { events: [], provider: 'none', errors: [] }
+  const prompt = extractionPrompt(cands, todayISO, subject)
+  const errors: string[] = []
+  for (const [name, call] of [['gemini', geminiJSON], ['xai', xaiJSON]] as const) {
+    try {
+      const rows = parseRows(await call(prompt, cost))
+      if (rows.length) return { events: mapExtracted(rows, cands), provider: name, errors }
+      errors.push(`${name}: empty/unparseable`)
+    } catch (e: any) {
+      errors.push(`${name}: ${String(e?.message || e).slice(0, 160)}`)
+    }
+  }
+  return { events: [], provider: 'none', errors }
 }
 
 /** Join model rows back to their candidate (the URL always comes from Google, never the model). */

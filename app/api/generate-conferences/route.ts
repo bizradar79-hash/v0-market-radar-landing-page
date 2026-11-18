@@ -260,8 +260,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, conferences: [], count: 0, kept_existing: true, steps })
       }
       const subject = searchSubject(kws, ctx.company, bpTop, 3) || anchor
-      const extracted = await extractEvents(cands.slice(0, 45), todayISO(), subject, cost)
-      steps.extracted = { events: extracted.length, kinds: extracted.reduce((m: any, e) => { m[e.kind] = (m[e.kind] || 0) + 1; return m }, {}) }
+      const { events: extracted, provider, errors } = await extractEvents(cands.slice(0, 45), todayISO(), subject, cost)
+      steps.extracted = { provider, errors, events: extracted.length, kinds: extracted.reduce((m: any, e) => { m[e.kind] = (m[e.kind] || 0) + 1; return m }, {}) }
+      if (provider === 'none') {
+        await cost.flush()
+        return NextResponse.json({ error: `conference extraction failed: ${errors.join(' | ')}`, steps }, { status: 500 })
+      }
       // Real links before scoring/dedupe (Google gives goto redirects).
       const withLinks = await resolveEventLinks(extracted)
       const out = await finalizeConferences(withLinks, kwInfo, ctx, steps, cost, { trustUrls: true })
