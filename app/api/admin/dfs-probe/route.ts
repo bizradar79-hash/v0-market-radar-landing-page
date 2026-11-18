@@ -13,6 +13,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const body = await req.json().catch(() => ({}))
+  const auth0 = 'Basic ' + Buffer.from(`${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`).toString('base64')
+  // Generic mode: { path: 'ai_optimization/claude/llm_responses/models', method?, payload? }
+  if (typeof body.path === 'string' && /^[a-z0-9_/]+$/.test(body.path)) {
+    const r = await fetch(`https://api.dataforseo.com/v3/${body.path}`, {
+      method: body.method === 'GET' ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: auth0 },
+      body: body.method === 'GET' ? undefined : JSON.stringify(body.payload ?? []),
+    })
+    return NextResponse.json(await r.json().catch(() => ({ http: r.status })))
+  }
   const endpoint = body.endpoint === 'news' ? 'news' : 'organic'
   const keyword = String(body.keyword || '').slice(0, 200)
   if (!keyword) return NextResponse.json({ error: 'keyword required' }, { status: 400 })
