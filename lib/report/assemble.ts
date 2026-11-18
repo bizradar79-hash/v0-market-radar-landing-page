@@ -202,7 +202,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const geoRanking = (company?.geo_ranking ?? null) as any
   let geoPos: number | null = num(geoRanking?.userPosition)
   if (geoPos == null && geoRanking?.engines) {
-    const positions = ['chatgpt', 'gemini', 'grok']
+    const positions = ['chatgpt', 'gemini', 'claude', 'grok']
       .map((k) => geoRanking.engines[k])
       .filter((e: any) => e?.appeared && num(e?.position) != null)
       .map((e: any) => e.position as number)
@@ -658,7 +658,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
 
   // ── SEO / GEO section (FOCUSED) ─────────────────────────────────────────────
   // STEP 6: ONE primary Google keyword (highest volume where the client ranks),
-  // ONE central AI question shown across ChatGPT/Gemini/Grok side by side, then
+  // ONE central AI question shown across ChatGPT/Gemini/Claude side by side, then
   // up to 3 expressions total. No baseless % badges (we have no prior SEO
   // position stored → omit rank badges entirely).
   const rankedSeo = seoVariants

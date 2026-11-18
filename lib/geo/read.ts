@@ -17,7 +17,7 @@
 import { type ClientIdentity, reconcileOwnPosition } from '@/lib/geo/identity'
 
 export interface GeoEngineCell {
-  id: 'chatgpt' | 'gemini' | 'grok'
+  id: 'chatgpt' | 'gemini' | 'claude' | 'grok'
   name: string
   position: number | string | null
   appeared: boolean
@@ -28,11 +28,13 @@ export interface GeoQuestion {
   hasEngineData: boolean // the stored data actually had ≥1 engine object for this question
 }
 
-const ENGINE_TABS: Array<{ id: GeoEngineCell['id']; name: string }> = [
-  { id: 'chatgpt', name: 'ChatGPT' },
-  { id: 'gemini', name: 'Gemini' },
-  { id: 'grok', name: 'Grok' },
-]
+// GEO engines: ChatGPT / Gemini / Claude (via DataForSEO LLM Responses).
+// Grok was dropped; rows stored BEFORE the switch (grok, no claude) still show
+// their Grok column until the next scan, so old data never renders blank.
+function engineTabs(eng: any): Array<{ id: GeoEngineCell['id']; name: string }> {
+  const third = !eng?.claude && eng?.grok ? { id: 'grok' as const, name: 'Grok' } : { id: 'claude' as const, name: 'Claude' }
+  return [{ id: 'chatgpt', name: 'ChatGPT' }, { id: 'gemini', name: 'Gemini' }, third]
+}
 
 // Read one engine cell. RECONCILES the stored appeared/position flag against the
 // engine's own results list: own-detection can miss at WRITE time (a badge said
@@ -84,10 +86,10 @@ export function readGeoQuestions(geoRanking: any, max = 3, identity?: ClientIden
 
   return entries.map(({ question, engines }) => {
     const eng = engines && typeof engines === 'object' ? engines : {}
-    const hasEngineData = !!(eng.chatgpt || eng.gemini || eng.grok)
+    const hasEngineData = !!(eng.chatgpt || eng.gemini || eng.claude || eng.grok)
     return {
       question: String(question),
-      engines: ENGINE_TABS.map((t) => cell(t.id, t.name, eng[t.id], identity)),
+      engines: engineTabs(eng).map((t) => cell(t.id, t.name, eng[t.id], identity)),
       hasEngineData,
     }
   })

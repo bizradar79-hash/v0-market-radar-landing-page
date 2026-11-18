@@ -81,7 +81,8 @@ interface GEORanking {
   queryResults?: Record<string, {
     chatgpt: EngineResults
     gemini: EngineResults
-    grok: EngineResults
+    claude?: EngineResults
+    grok?: EngineResults // legacy rows from before the DataForSEO switch
   }>
   results: RankingResult[]
   queryVariants?: QueryVariant[]
@@ -89,6 +90,7 @@ interface GEORanking {
     general?: EngineResults
     chatgpt?: EngineResults
     gemini?: EngineResults
+    claude?: EngineResults
     grok?: EngineResults
   }
   userMentioned: boolean
@@ -114,7 +116,7 @@ export default function SeoGeoPage() {
   const [expandedSeoRow, setExpandedSeoRow] = useState<number | null>(null)
 
   const [seoFilter, setSeoFilter] = useState<SeoFilter>('all')
-  const [selectedGeoEngine, setSelectedGeoEngine] = useState<'chatgpt' | 'gemini' | 'grok'>('chatgpt')
+  const [selectedGeoEngine, setSelectedGeoEngine] = useState<'chatgpt' | 'gemini' | 'claude' | 'grok'>('chatgpt')
   const [selectedGeoQuery, setSelectedGeoQuery] = useState<string>('')
 
   // registrable-domain → ACCURATE Hebrew business name. Built from the client's
@@ -674,11 +676,17 @@ export default function SeoGeoPage() {
                 <>
                   {/* Engine tabs */}
                   <div className="flex gap-0 border-b border-border overflow-x-auto">
-                    {([
-                      { id: 'chatgpt', label: 'ChatGPT' },
-                      { id: 'gemini', label: 'Gemini' },
-                      { id: 'grok', label: 'Grok' },
-                    ] as const).map(tab => (
+                    {(() => {
+                      // Claude replaced Grok. Old stored data (grok, no claude)
+                      // keeps its Grok tab until the next scan.
+                      const anyEng: any = geoRanking.engines || Object.values(geoRanking.queryResults || {})[0] || {}
+                      const legacyGrok = !anyEng.claude && !!anyEng.grok
+                      return [
+                        { id: 'chatgpt', label: 'ChatGPT' },
+                        { id: 'gemini', label: 'Gemini' },
+                        legacyGrok ? { id: 'grok', label: 'Grok' } : { id: 'claude', label: 'Claude' },
+                      ] as Array<{ id: 'chatgpt' | 'gemini' | 'claude' | 'grok'; label: string }>
+                    })().map(tab => (
                       <button
                         key={tab.id}
                         onClick={() => setSelectedGeoEngine(tab.id)}
@@ -698,6 +706,7 @@ export default function SeoGeoPage() {
                     const ENGINE_INFO: Record<string, string> = {
                       chatgpt: "מה ChatGPT ממליץ — מבוסס על OpenAI",
                       gemini: "מה Gemini ממליץ — מבוסס על Google Gemini",
+                      claude: "מה Claude ממליץ — מבוסס על Anthropic Claude",
                       grok: "מה Grok ממליץ — מבוסס על חיפוש Grok",
                     }
                     return ENGINE_INFO[selectedGeoEngine] ? (

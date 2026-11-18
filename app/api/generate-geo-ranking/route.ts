@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { getFullContext } from '@/lib/context'
 import { deriveArea } from '@/lib/geo/area'
 import { logKeptExisting } from '@/lib/scan/guard'
-import { fetchOpenAIGeoRaw, parseBusinessList } from '@/lib/geo/openai-engine'
+import { askEngine, parseRankedAnswer, type GeoEngineId } from '@/lib/geo/dataforseo-llm'
 import { buildClientIdentity, isOwnGeoResult, type ClientIdentity } from '@/lib/geo/identity'
 import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 import { NextResponse } from 'next/server'
@@ -57,15 +57,12 @@ function totalEngineResults(geo: any): number {
       sum +
       (Array.isArray(eng?.chatgpt?.results) ? eng.chatgpt.results.length : 0) +
       (Array.isArray(eng?.gemini?.results) ? eng.gemini.results.length : 0) +
+      (Array.isArray(eng?.claude?.results) ? eng.claude.results.length : 0) +
+      // legacy rows stored before the move to DataForSEO
       (Array.isArray(eng?.grok?.results) ? eng.grok.results.length : 0), 0)
   }
   return Array.isArray(geo?.results) ? geo.results.length : 0
 }
-
-// Real engines only: 'openai' = ChatGPT (Responses API + web_search),
-// 'gemini' = Google API, 'grok' = xAI. ('general' kept for legacy callers.)
-const ENGINES = ['general', 'openai', 'gemini', 'grok'] as const
-type Engine = typeof ENGINES[number]
 
 // ── Query generation ───────────────────────────────────────────────────────
 
@@ -100,50 +97,6 @@ async function buildSearchQuery(coreActivity: string, industry: string): Promise
   } catch (err) { console.error('[GEO buildQuery] error:', err); return null }
 }
 
-// ── Engine prompts ─────────────────────────────────────────────────────────
-
-function buildEnginePrompt(
-  engine: Engine,
-  query: string,
-  companyName: string,
-  website: string,
-  competitorNames: string[],
-): string {
-  const competitorLine = competitorNames.length > 0
-    ? `\nKnown competitors: ${competitorNames.join(', ')}`
-    : ''
-  const jsonTemplate = `{"query": "${query}", "results": [{"position": 1, "name": "", "url": "", "isOwn": false, "isKnownCompetitor": false}], "userMentioned": false, "userPosition": null}`
-
-  // Only 'general' and 'grok' actually reach this function — 'openai' and
-  // 'gemini' are handled by dedicated runners before buildEnginePrompt is called.
-  const bases: Record<Engine, string> = {
-    general: `Use web_search to find the top 10 organic Google results for "${query}" in Israel.
-List businesses/websites as they appear in Google search results.`,
-
-    openai: `Use your live web search to directly search for "${query}" in Israel.
-List the top 10 most relevant businesses or websites.`,
-
-    gemini: `Search for what Google Gemini recommends when asked: "${query}" in Israel.
-List the top 10 businesses mentioned in Gemini responses you find online.`,
-
-    grok: `Use your live web search to directly search for "${query}" in Israel.
-List the top 10 most relevant businesses or websites from your current search results.
-Return fresh, current results. Do not copy from other AI engines.`,
-  }
-
-  return `${bases[engine]}
-${competitorLine}
-
-Check if ${companyName} (website: ${website}) appears in the list. (userMentioned: true/false, userPosition: number or null)
-
-Return a ranked list of up to 10 businesses.
-
-Return ONLY JSON:
-${jsonTemplate}
-
-CRITICAL: Output ONLY a raw JSON object. No markdown. Start with { and end with }`
-}
-
 // ── Shared result processor ────────────────────────────────────────────────
 
 function processResults(
@@ -174,151 +127,6 @@ function processResults(
   const position = appeared ? (ownResult!.position ?? null) : null
   const topResults = results.filter(r => !r.isOwn).slice(0, 3).map(r => r.name).filter(Boolean)
   return { position, topResults, appeared, results }
-}
-
-// ── Gemini engine (direct API) ─────────────────────────────────────────────
-
-async function runGeminiEngine(
-  query: string,
-  companyName: string,
-  website: string,
-  competitorNames: string[],
-  identity: ClientIdentity,
-  industry?: string,
-  cost?: ScanCostCollector,
-): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  const geminiKey = process.env.GEMINI_API_KEY
-  if (!geminiKey) return { position: null, topResults: [], appeared: false, results: [] }
-
-  const industryDesc = industry || query
-  // GROUNDING FIX: enable Google Search grounding so Gemini returns CURRENT,
-  // web-grounded businesses (like ChatGPT/Grok) instead of training-only guesses.
-  const prompt = `אני מחפש המלצות על ${industryDesc} בישראל. חפש באינטרנט ורשום את 10 העסקים או האתרים הטובים ביותר לפי סדר עדיפות. החזר רק מערך JSON גולמי (ללא markdown): [{"position": 1, "name": "שם העסק", "url": "https://..."}]. אם אינך יכול להחזיר JSON, רשום רשימה ממוספרת (1., 2., 3.) של שמות העסקים והכתובת שלהם.`
-
-  const callGemini = async (body: any, t: number) => {
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-    )
-    return res
-  }
-
-  try {
-    const t0 = Date.now()
-    const res = await callGemini({
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-    }, t0)
-    if (!res.ok) {
-      console.error('[GEO gemini] HTTP error:', res.status, (await res.text().catch(() => '')).slice(0, 300))
-      cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', ms: Date.now() - t0 })
-      return { position: null, topResults: [], appeared: false, results: [] }
-    }
-    const data = await res.json()
-    cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data, ms: Date.now() - t0 })
-    if (data.error) {
-      console.error('[GEO gemini] API error:', JSON.stringify(data.error).slice(0, 300))
-      return { position: null, topResults: [], appeared: false, results: [] }
-    }
-    let text: string = (data.candidates?.[0]?.content?.parts || [])
-      .map((p: any) => p?.text || '').join('') || ''
-    console.log('[GEO gemini] raw response (first 800):', text.slice(0, 800))
-
-    let rawResults = parseBusinessList(text)
-
-    // Retry once (still grounded) if the first answer parsed to nothing.
-    if (rawResults.length === 0) {
-      console.warn('[GEO gemini] parse produced 0 results, retrying. Raw:', text.slice(0, 400))
-      const retryPrompt = `חפש באינטרנט ורשום 10 חברות ישראליות שמוכרות ${query}. החזר מערך JSON: [{"position": 1, "name": "", "url": ""}] או רשימה ממוספרת.`
-      const tRetry = Date.now()
-      const retryRes = await callGemini({
-        contents: [{ parts: [{ text: retryPrompt }] }],
-        tools: [{ google_search: {} }],
-      }, tRetry)
-      if (retryRes.ok) {
-        const retryData = await retryRes.json()
-        cost?.add({ provider: 'gemini', model: 'gemini-2.5-flash', data: retryData, ms: Date.now() - tRetry })
-        const retryText: string = (retryData.candidates?.[0]?.content?.parts || [])
-          .map((p: any) => p?.text || '').join('') || ''
-        console.log('[GEO gemini] retry raw (first 500):', retryText.slice(0, 500))
-        rawResults = parseBusinessList(retryText)
-      }
-    }
-
-    if (rawResults.length === 0) console.warn('[GEO gemini] still 0 results after retry')
-    else console.log(`[GEO gemini] parsed ${rawResults.length} businesses`)
-    return processResults(rawResults, identity, competitorNames)
-  } catch (err) {
-    console.error('[GEO gemini] exception:', err)
-    return { position: null, topResults: [], appeared: false, results: [] }
-  }
-}
-
-// ── Grok engine runner ─────────────────────────────────────────────────────
-
-async function runGeoQuestion(
-  query: string,
-  companyName: string,
-  website: string,
-  competitorNames: string[],
-  identity: ClientIdentity,
-  engine: Engine = 'general',
-  industry?: string,
-  cost?: ScanCostCollector,
-): Promise<{ position: number | null; topResults: string[]; appeared: boolean; results: any[] }> {
-  if (engine === 'gemini') return runGeminiEngine(query, companyName, website, competitorNames, identity, industry, cost)
-
-  // OpenAI / ChatGPT engine — real Responses API + web_search.
-  if (engine === 'openai') {
-    const rawResults = await fetchOpenAIGeoRaw(query, companyName, website, competitorNames, cost)
-    return processResults(rawResults, identity, competitorNames)
-  }
-
-  const prompt = buildEnginePrompt(engine, query, companyName, website, competitorNames)
-
-  const t0 = Date.now()
-  let response: Response
-  try {
-    response = await fetchWithTimeout('https://api.x.ai/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'grok-4-fast-non-reasoning',
-        tools: [{ type: 'web_search' }],
-        input: [{ role: 'user', content: prompt }],
-      }),
-    })
-  } catch (err: any) {
-    cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, ms: Date.now() - t0 })
-    const why = err?.name === 'AbortError' ? `timeout_${GEO_ENGINE_TIMEOUT_MS}ms` : err?.message
-    console.error(`[GEO ${engine}] Grok fetch failed: ${why}`)
-    return { position: null, topResults: [], appeared: false, results: [] }
-  }
-
-  const data = await response.json().catch(() => ({}))
-  cost?.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', webSearch: true, data, ms: Date.now() - t0 })
-  if (!response.ok || !data.output) {
-    console.error(`[GEO ${engine}] Grok error: status=${response.status}`, JSON.stringify(data).slice(0, 300))
-    return { position: null, topResults: [], appeared: false, results: [] }
-  }
-
-  const text = data.output
-    .filter((item: any) => item.type === 'message')
-    .flatMap((item: any) => item.content)
-    .filter((c: any) => c.type === 'output_text')
-    .map((c: any) => c.text)
-    .join('')
-
-  console.log(`[GEO ${engine}] raw response (first 800):`, (text || '').slice(0, 800))
-
-  // Tolerant parse (JSON object/array OR prose list), same as OpenAI/Gemini.
-  const rawResults = parseBusinessList(text)
-  if (rawResults.length === 0) {
-    console.warn(`[GEO ${engine}] parse produced 0 results. Raw:`, (text || '').slice(0, 800))
-  } else {
-    console.log(`[GEO ${engine}] parsed ${rawResults.length} businesses`)
-  }
-  return processResults(rawResults, identity, competitorNames)
 }
 
 // ── POST ───────────────────────────────────────────────────────────────────
@@ -499,69 +307,67 @@ export async function POST(request: Request) {
     const savedCompetitors: any[] = ctx.competitors || []
     const competitorNames = savedCompetitors.map((c: any) => c.name).filter(Boolean).slice(0, 10)
 
-    // ── Run all queries × 3 REAL engines in parallel ────────────────────────
-    // chatgpt field = real OpenAI (Responses API + web_search); gemini =
-    // Google API; grok = xAI. No more fake 'chatgpt' routing to xAI.
+    // ── Run all queries × 3 engines via DataForSEO LLM Responses ────────────
+    // ChatGPT / Gemini / Claude through ONE schema (lib/geo/dataforseo-llm),
+    // web search on, Hebrew. Grok and the direct OpenAI/Gemini engine calls are
+    // gone from GEO. Each answer's numbered recommendation list is parsed and
+    // the client is detected with the shared identity matcher (processResults →
+    // isOwnGeoResult), so stored cells keep the SAME shape the report/page read.
+    const ENGINE_IDS: GeoEngineId[] = ['chatgpt', 'gemini', 'claude']
     const EMPTY_ENGINE = { position: null, topResults: [] as string[], appeared: false, results: [] as any[] }
-    // allSettled so one engine that times out / throws degrades to an empty cell
-    // WITHOUT failing the other two. (Runners already catch internally; this is a
-    // belt-and-braces guard.) All 3 engines × all queries run concurrently.
-    const settle = (p: Promise<any>) =>
-      p.then((v) => v).catch((err) => { console.error('[GEO] engine settled error:', err?.message || err); return EMPTY_ENGINE })
+    const runEngine = async (engine: GeoEngineId, q: string) => {
+      const t0 = Date.now()
+      const ans = await askEngine(engine, q)
+      cost.add({ provider: 'dataforseo', model: `llm_responses:${engine}:${ans.model}`, costUSD: ans.costUSD, ms: Date.now() - t0 })
+      if (!ans.ok) {
+        console.error(`[GEO ${engine}] DataForSEO error:`, ans.error)
+        return { ...EMPTY_ENGINE, error: ans.error }
+      }
+      const parsed = parseRankedAnswer(ans.text)
+      console.log(`[GEO ${engine}] ${ans.model}: parsed ${parsed.length} recommendations`)
+      return { ...processResults(parsed, clientIdentity, competitorNames), model: ans.model }
+    }
     const queryVariantResults = await Promise.all(
       queryList.map(async (q) => {
-        const [chatgptRes, geminiRes, grokRes] = await Promise.all([
-          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'openai', geminiIndustry, cost)),
-          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'gemini', geminiIndustry, cost)),
-          settle(runGeoQuestion(q, companyLabel, website, competitorNames, clientIdentity, 'grok', undefined, cost)),
-        ])
-        return { query: q, chatgpt: chatgptRes, gemini: geminiRes, grok: grokRes }
+        const cells = await Promise.all(ENGINE_IDS.map((e) => runEngine(e, q).catch(() => EMPTY_ENGINE)))
+        return { query: q, chatgpt: cells[0], gemini: cells[1], claude: cells[2] }
       })
     )
 
-    // Build queryResults map: query → { chatgpt, gemini, grok }
+    // Build queryResults map: query → { chatgpt, gemini, claude }
     const queryResults: Record<string, any> = {}
     for (const qr of queryVariantResults) {
-      queryResults[qr.query] = { chatgpt: qr.chatgpt, gemini: qr.gemini, grok: qr.grok }
+      queryResults[qr.query] = { chatgpt: qr.chatgpt, gemini: qr.gemini, claude: qr.claude }
     }
 
     // Primary engines (first query) for backward compat
     const primary = queryVariantResults[0]
-    const engines = {
-      chatgpt: primary.chatgpt,
-      gemini: primary.gemini,
-      grok: primary.grok,
-    }
+    const engines = { chatgpt: primary.chatgpt, gemini: primary.gemini, claude: primary.claude }
 
     console.log('[GEO] queries:', queryList.length, JSON.stringify(
       queryVariantResults.map(qr => ({
         query: qr.query.slice(0, 30),
         chatgpt: qr.chatgpt.results.length,
         gemini: qr.gemini.results.length,
-        grok: qr.grok.results.length,
+        claude: qr.claude.results.length,
       }))
     ))
 
-    // Recommendations via Grok (no web_search)
-    const recsPrompt = `Write 3 specific recommendations for how ${companyName} (${industry}) can improve its presence in AI engines like ChatGPT, Grok, Gemini and Perplexity when people search for "${primaryQuery}". Return JSON only: {"recommendations": ["", "", ""]}. No markdown.`
+    // Recommendations — one short call through the same DataForSEO schema
+    // (ChatGPT, no web search ≈ a fraction of a cent). No Grok.
     let recommendations: string[] = []
     try {
-      const tr = Date.now()
-      const recsRes = await fetchWithTimeout('https://api.x.ai/v1/responses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.XAI_API_KEY}` },
-        body: JSON.stringify({ model: 'grok-4-fast-non-reasoning', input: [{ role: 'user', content: recsPrompt }] }),
+      const t0 = Date.now()
+      const rec = await askEngine('chatgpt', `כתוב 3 המלצות ספציפיות כיצד ${companyName} (${industry || coreActivityDesc}) יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Gemini ו-Claude כשמחפשים "${primaryQuery}".`, {
+        webSearch: false, maxTokens: 600,
+        systemMessage: 'ענה בעברית. החזר JSON בלבד בפורמט {"recommendations": ["", "", ""]} — בלי markdown.',
       })
-      const recsData = await recsRes.json().catch(() => ({}))
-      cost.add({ provider: 'xai', model: 'grok-4-fast-non-reasoning', data: recsData, ms: Date.now() - tr })
-      const recsText = (recsData.output || [])
-        .filter((i: any) => i.type === 'message').flatMap((i: any) => i.content)
-        .filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('')
-      const recsClean = recsText.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
-      const rs = recsClean.indexOf('{'); const re = recsClean.lastIndexOf('}')
+      cost.add({ provider: 'dataforseo', model: `llm_responses:chatgpt:${rec.model}`, costUSD: rec.costUSD, ms: Date.now() - t0 })
+      const clean = rec.text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
+      const rs = clean.indexOf('{'); const re = clean.lastIndexOf('}')
       if (rs !== -1 && re > rs) {
-        const recsParsed = JSON.parse(recsClean.slice(rs, re + 1))
-        recommendations = Array.isArray(recsParsed.recommendations) ? recsParsed.recommendations.slice(0, 3) : []
+        const parsed = JSON.parse(clean.slice(rs, re + 1))
+        recommendations = Array.isArray(parsed.recommendations) ? parsed.recommendations.filter((r: any) => typeof r === 'string').slice(0, 3) : []
       }
     } catch { /* fallback to empty */ }
 
@@ -598,7 +404,8 @@ export async function POST(request: Request) {
     await ctx.supabase.from('companies').update({ geo_ranking: result }).eq('id', ctx.user.id)
 
     await cost.flush()
-    return NextResponse.json({ success: true, ...result })
+    // Cost of THIS run (the breakdown only persists during a full scan).
+    return NextResponse.json({ success: true, ...result, cost: cost.summary() })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message }, { status: 500 })
   }
