@@ -90,7 +90,7 @@ const SOURCE_NAMES: Record<string, string> = {
   'n12.co.il': 'N12', 'kan.org.il': 'כאן', 'israelhayom.co.il': 'ישראל היום', 'bizportal.co.il': 'ביזפורטל',
   'ice.co.il': 'ice', 'srugim.co.il': 'סרוגים', 'inn.co.il': 'ערוץ 7', 'kikar.co.il': 'כיכר השבת',
   'bhol.co.il': 'בחדרי חרדים', 'davar1.co.il': 'דבר', 'zman.co.il': 'זמן ישראל', 'geektime.co.il': 'גיקטיים',
-  'funder.co.il': 'פאנדר', 'news1.co.il': 'News1', 'timesofisrael.com': 'The Times of Israel', 'jpost.com': 'Jerusalem Post',
+  'funder.co.il': 'פאנדר', 'i24news.tv': 'i24NEWS', 'i24news.co.il': 'i24NEWS', 'haipo.co.il': 'חי פה', 'news1.co.il': 'News1', 'timesofisrael.com': 'The Times of Israel', 'jpost.com': 'Jerusalem Post',
 }
 
 /** Readable publisher name for a domain (ynet.co.il → "ynet"); falls back to the domain. */
@@ -107,26 +107,34 @@ const isGoogleHost = (url: string) => /(^|\.)google\.[a-z.]+$/i.test(domainOf(ur
  * page fetch — only the redirect hops) to get the real article URL + publisher.
  * Never throws; on failure the Google link is kept (it still opens the article).
  */
-export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 5000): Promise<NewsArticle[]> {
+export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8000): Promise<NewsArticle[]> {
+  const follow = async (start: string): Promise<string | null> => {
+    let cur = start
+    for (let hop = 0; hop < 4; hop++) {
+      const r = await fetch(cur, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' },
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      const loc = r.headers.get('location')
+      if (!loc) return null
+      cur = new URL(loc, cur).href
+      if (!isGoogleHost(cur)) return cur
+    }
+    return null
+  }
   return Promise.all(articles.map(async (a) => {
     if (!isGoogleHost(a.url)) return a
-    let cur = a.url
-    try {
-      for (let hop = 0; hop < 4; hop++) {
-        const r = await fetch(cur, {
-          redirect: 'manual',
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' },
-          signal: AbortSignal.timeout(timeoutMs),
-        })
-        const loc = r.headers.get('location')
-        if (!loc) break
-        cur = new URL(loc, cur).href
-        if (!isGoogleHost(cur)) {
-          const domain = domainOf(cur)
-          return { ...a, url: cur, domain, source: sourceName(domain) }
+    // One retry: Google's redirect hop is occasionally slow from serverless IPs.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const real = await follow(a.url)
+        if (real) {
+          const domain = domainOf(real)
+          return { ...a, url: real, domain, source: sourceName(domain) }
         }
-      }
-    } catch { /* keep the Google link */ }
+      } catch { /* timeout / network — retry once, then keep the Google link */ }
+    }
     return a
   }))
 }
