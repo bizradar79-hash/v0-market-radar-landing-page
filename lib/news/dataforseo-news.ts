@@ -117,13 +117,24 @@ export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8
         signal: AbortSignal.timeout(timeoutMs),
       })
       const loc = r.headers.get('location')
-      if (!loc) return null
+      if (!loc) {
+        // Sometimes Google answers with an interstitial page instead of a 302;
+        // the article link is then in the page (meta refresh / first link).
+        if (r.status !== 200) return null
+        const html = (await r.text()).slice(0, 200_000)
+        const m = html.match(/(?:url=|href=["'])(https?:\/\/[^"'\s>]+)/gi) || []
+        for (const raw of m) {
+          const u = raw.replace(/^(?:url=|href=["'])/i, '').replace(/&amp;/g, '&')
+          if (!isGoogleHost(u) && !/gstatic|googleapis|w3\.org|schema\.org/i.test(u)) return u
+        }
+        return null
+      }
       cur = new URL(loc, cur).href
       if (!isGoogleHost(cur)) return cur
     }
     return null
   }
-  return Promise.all(articles.map(async (a) => {
+  return mapLimit(articles, 3, async (a) => {
     if (!isGoogleHost(a.url)) return a
     // One retry: Google's redirect hop is occasionally slow from serverless IPs.
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -136,7 +147,16 @@ export async function resolveArticleLinks(articles: NewsArticle[], timeoutMs = 8
       } catch { /* timeout / network — retry once, then keep the Google link */ }
     }
     return a
-  }))
+  })
+}
+
+/** Run `fn` over items with at most `limit` in flight; preserves order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]) } }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
 }
 
 /** Map raw `news_search` items to articles; drops anything without a real http(s) link. */
