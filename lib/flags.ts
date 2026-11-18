@@ -46,3 +46,10 @@ export const OLD_COMPETITOR_MODULE_ENABLED =
 export const COMPETITOR_TRENDS_ENABLED =
   process.env.NEXT_PUBLIC_COMPETITOR_TRENDS_ENABLED === 'true' ||
   process.env.COMPETITOR_TRENDS_ENABLED === 'true'
+
+// News engine. 'dataforseo' (default) = Google News via DataForSEO — real
+// articles with links, ~$0.002 per request. 'grok' = the old prompt_versions
+// AI path (xAI web_search, cents per scan) — kept only so it's reversible:
+//   NEWS_ENGINE=grok
+export const NEWS_ENGINE: 'dataforseo' | 'grok' =
+  process.env.NEWS_ENGINE === 'grok' ? 'grok' : 'dataforseo'

@@ -79,6 +79,9 @@ export const REPORT_CSS = `
   .rpt .score-pill{display:inline-block;min-width:52px;text-align:center;background:var(--teal-wash);color:var(--teal-deep);font-weight:800;font-size:14px;border-radius:10px;padding:4px 10px}
   .rpt .more-link{display:block;text-align:center;padding:12px;font-size:13.5px;font-weight:700;color:var(--teal-deep);text-decoration:none;background:#f8fbfa}
   .rpt .more-link:hover{background:var(--teal-wash)}
+  .rpt .news-link{color:inherit;text-decoration:none;border-bottom:1px solid var(--teal-wash)}
+  .rpt .news-link:hover{color:var(--teal-deep);border-bottom-color:var(--teal-deep)}
+  .rpt .news-meta .news-link{color:var(--teal-deep);font-weight:700;border-bottom:0}
   .rpt .comp-change{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:5px;font-size:13px}
   .rpt .delta{font-weight:800;font-size:12.5px;border-radius:8px;padding:2px 9px}
   .rpt .delta.bad{background:var(--red-wash);color:var(--red)}
@@ -626,8 +629,19 @@ export default function ReportView({ data: r, archive, example }: { data: Report
               {r.news.map((n, i) => (
                 <div className="row" key={i}>
                   <div className="row-main">
-                    <div className="row-title">{n.title}{n.pill && <span className="pill amber">{n.pill}</span>}</div>
+                    <div className="row-title">
+                      {n.url
+                        ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="news-link">{n.title}</a>
+                        : n.title}
+                      {n.pill && <span className="pill amber">{n.pill}</span>}
+                    </div>
                     {n.sub && <div className="row-sub">{n.sub}</div>}
+                    {(n.source || n.date || n.url) && (
+                      <div className="row-sub news-meta">
+                        {[n.source, n.date].filter(Boolean).join(' · ')}
+                        {n.url && <> {(n.source || n.date) ? '· ' : ''}<a href={n.url} target="_blank" rel="noopener noreferrer" className="news-link">לכתבה המלאה ↗</a></>}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

@@ -108,7 +108,7 @@ export interface ReportData {
   demand?: { keyword: string; series: number[]; label: string } | null
   trends: Array<{ title: string; sub: string; badge: { kind: 'up' | 'down' | 'flat'; text: string }; hot?: boolean }>
   conferences: Array<{ title: string; sub: string; side: string; pill?: string }>
-  news: Array<{ title: string; sub: string; pill?: string }>
+  news: Array<{ title: string; sub: string; pill?: string; url?: string; source?: string; date?: string }>
 }
 
 const num = (v: any): number | null => (typeof v === 'number' && isFinite(v) ? v : null)
@@ -791,6 +791,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     title: n.title || '',
     sub: n.summary || '',
     pill: n.category || undefined,
+    // The article link — only real http(s) URLs are rendered as links.
+    url: typeof n.url === 'string' && /^https?:\/\//i.test(n.url) ? n.url : undefined,
+    source: n.source || undefined,
+    date: n.published_at ? heDay(n.published_at) : undefined,
   }))
 
   const scanDate = heDate(company?.last_sync_at)

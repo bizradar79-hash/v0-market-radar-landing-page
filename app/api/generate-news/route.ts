@@ -5,9 +5,12 @@ import { search } from '@/lib/search'
 import { callModel, SUPPORTED_PROVIDERS, isSupportedProvider } from '@/lib/call-model'
 import { resolveDateVars } from '@/lib/resolve-prompt-vars'
 import { filterInsertRows } from '@/lib/admin/hidden'
-import { effectiveKeywords, phraseQuery, searchSubject } from '@/lib/keywords'
+import { effectiveKeywords, fieldAnchor, phraseQuery, searchSubject } from '@/lib/keywords'
 import { NextResponse } from 'next/server'
 import type { BusinessProfile } from '@/types/business-profile'
+import { NEWS_ENGINE } from '@/lib/flags'
+import { fetchGoogleNews, selectArticles, type NewsArticle } from '@/lib/news/dataforseo-news'
+import { ScanCostCollector } from '@/lib/scan/cost-tracker'
 
 export const maxDuration = 60
 
@@ -67,6 +70,75 @@ async function fetchNewsFromTavily(heQuery: string, enQuery: string): Promise<an
     ...ilRaw.map(r => mapResult(r, 'ישראל')),
     ...intlRaw.map(r => mapResult(r, 'עולם')),
   ]
+}
+
+// ── DataForSEO Google News path (default engine) ─────────────────────────────
+
+const NEWS_LIMIT = 12
+const NEWS_MAX_AGE_DAYS = 30
+
+/**
+ * Google News via DataForSEO, keyword-driven (same keyword source as before).
+ * Query 1: the client's field phrases OR-ed ("דיקור סיני" OR "רפואה סינית") —
+ * quoted so a phrase can't be split into a word that means something else
+ * (the "סיני" → China bug). Query 2 (only if query 1 is thin): the industry
+ * anchor, so a niche business still gets field news. Hebrew, Israel.
+ * Returns null when it produced nothing usable, so the caller can fall back.
+ */
+async function runDataForSeoPath(ctx: any, steps: Record<string, any>, cost: ScanCostCollector) {
+  const bp = (ctx.company?.business_profile ?? null) as BusinessProfile | null
+  const kws = effectiveKeywords(ctx.company, bp)
+  const phrases = kws.slice(0, 3).map(k => k.trim()).filter(Boolean).map(k => (/\s/.test(k) ? `"${k}"` : k))
+  const anchor = fieldAnchor(ctx.company, bp) || ctx.company?.industry || ''
+  const queries: string[] = []
+  if (phrases.length) queries.push(phrases.join(' OR '))
+  if (anchor && !queries.includes(anchor)) queries.push(anchor)
+  if (!queries.length) { steps.dataforseo = { skipped: 'no keywords or industry' }; return null }
+
+  let pool: NewsArticle[] = []
+  const runs: any[] = []
+  for (const [i, q] of queries.entries()) {
+    // The anchor query only runs when the keyword query came back thin.
+    if (i > 0 && selectArticles(pool, { maxAgeDays: NEWS_MAX_AGE_DAYS, limit: NEWS_LIMIT }).length >= 6) break
+    const t0 = Date.now()
+    const r = await fetchGoogleNews(q, { locationName: 'Israel', languageCode: 'he', depth: 30 })
+    cost.add({ provider: 'dataforseo', model: 'google_news', costUSD: r.costUSD, ms: Date.now() - t0 })
+    runs.push({ query: q, ok: r.ok, count: r.articles.length, costUSD: r.costUSD, error: r.error })
+    if (r.ok) pool = pool.concat(r.articles)
+  }
+  steps.dataforseo = { runs }
+
+  let picked = selectArticles(pool, { maxAgeDays: NEWS_MAX_AGE_DAYS, limit: NEWS_LIMIT })
+  // Very niche fields: widen the window rather than show nothing.
+  if (picked.length < 3) picked = selectArticles(pool, { maxAgeDays: 120, limit: NEWS_LIMIT })
+  if (picked.length === 0) return null
+
+  const kept = await filterInsertRows(ctx.user.id, 'news', picked, (n: NewsArticle) => n.title)
+  if (kept.length === 0) {
+    await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+    return NextResponse.json({ success: true, engine: 'dataforseo', news: [], count: 0, steps })
+  }
+
+  await ctx.supabase.from('news').delete().eq('company_id', ctx.user.id)
+  const { data: saved, error: insertError } = await ctx.supabase.from('news').insert(
+    kept.map((n: NewsArticle) => ({
+      title: n.title,
+      source: n.source,
+      url: n.url,
+      category: /\.(co|org|gov|ac|net)\.il$|\.il$/i.test(n.domain) ? 'ישראל' : 'עולם',
+      sentiment: 'neutral',
+      summary: n.snippet,
+      company_id: ctx.user.id,
+      // Real publish time from Google News (scan time only if Google had none).
+      published_at: n.publishedAt || new Date().toISOString(),
+    }))
+  ).select()
+  if (insertError) {
+    steps.db = { ok: false, error: insertError.message, code: insertError.code }
+    return NextResponse.json({ error: 'DB insert failed', steps }, { status: 500 })
+  }
+  steps.db = { ok: true, saved: saved?.length }
+  return NextResponse.json({ success: true, engine: 'dataforseo', news: saved, count: saved?.length || 0, steps })
 }
 
 // ── POST ───────────────────────────────────────────────────────────────────
@@ -212,7 +284,23 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── AI path: use active prompt from prompt_versions if available ──────────
+    // ── DataForSEO Google News (default) ──────────────────────────────────────
+    // Replaces the Grok web_search path. On failure/empty it falls back to the
+    // cheap Tavily/Serper search path — never to Grok. Existing news is kept
+    // when nothing comes back (the delete only happens with new items in hand).
+    if (NEWS_ENGINE === 'dataforseo') {
+      const cost = new ScanCostCollector(ctx.user.id, 'news')
+      try {
+        const viaDfs = await runDataForSeoPath(ctx, steps, cost)
+        if (viaDfs) return viaDfs
+        steps.fallback = 'dataforseo returned nothing → search path'
+        return await runSearchPath(ctx, steps)
+      } finally {
+        await cost.flush()
+      }
+    }
+
+    // ── AI path (NEWS_ENGINE=grok only): active prompt from prompt_versions ───
     const { data: activePrompt } = await ctx.supabase
       .from('prompt_versions')
       .select('prompt, model_provider, model_name')
