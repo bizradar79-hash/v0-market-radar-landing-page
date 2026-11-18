@@ -105,6 +105,13 @@ export interface ReportData {
   // Legacy flat list — kept so older snapshots still render. New reports populate
   // the focused fields below and leave this empty.
   seo: Array<{ rank: string; title: string; sub: string; badge?: { kind: 'up' | 'down' | 'flat'; text: string }; warn?: boolean }>
+  // Batch 2 — the rest of each list, revealed in-report on expand (never an app link).
+  tendersMore?: ReportData['tenders']
+  actionsMore?: ReportData['actions']
+  leadsMore?: Array<{ channel: string; title: string; sub: string; matchTag?: { kind: 'high' | 'good'; text: string }; website?: string }>
+  trendsMore?: ReportData['trends']
+  industryTrendsMore?: NonNullable<ReportData['industryTrends']>
+  conferencesMore?: ReportData['conferences']
   seoMore?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }>
   newsMore?: Array<{ title: string; sub: string; pill?: string; url?: string; source?: string; date?: string }>
   seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> } | null
@@ -116,7 +123,7 @@ export interface ReportData {
   seoAiFirst?: boolean   // lead with the AI block when the client has no Google rank but shows in AI
   demand?: { keyword: string; series: number[]; label: string } | null
   trends: Array<{ title: string; sub: string; badge: { kind: 'up' | 'down' | 'flat'; text: string }; hot?: boolean }>
-  conferences: Array<{ title: string; sub: string; side: string; pill?: string }>
+  conferences: Array<{ url?: string; title: string; sub: string; side: string; pill?: string }>
   news: Array<{ title: string; sub: string; pill?: string; url?: string; source?: string; date?: string }>
 }
 
@@ -471,7 +478,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // deadlines (מכרז/כנס) keep their place at the very top, since those expire.
   const deadlineActions = storedActions.filter((a) => a.kind === 'urgent')
   const otherStored = storedActions.filter((a) => a.kind !== 'urgent')
-  const actions: ReportData['actions'] = [...deadlineActions, ...topCompetitorActions, ...otherStored].slice(0, 6)
+  const allActions: ReportData['actions'] = [...deadlineActions, ...topCompetitorActions, ...otherStored]
+  // First 6 = the week's focus (unchanged); the rest stay in priority order behind an expand.
+  const actions: ReportData['actions'] = allActions.slice(0, 6)
+  const actionsMore: ReportData['actionsMore'] = allActions.slice(6)
 
   // ── Competitors: CHANGES ONLY ───────────────────────────────────────────────
   // STEP 4: show only competitors with a real change this scan (directional
@@ -641,7 +651,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   }
 
   // ── Tenders section ─────────────────────────────────────────────────────────
-  const tendersOut: ReportData['tenders'] = openTenders.slice(0, 3).map((t: any, i: number) => {
+  const toTender = (t: any, i: number) => {
     const rs = t.relevance_score ?? null
     const daysLeft = t.deadline ? Math.ceil((new Date(t.deadline).getTime() - Date.now()) / 86400000) : null
     const side = daysLeft != null ? (daysLeft <= 10 ? `⏳ נסגר בעוד ${daysLeft} ימים` : `נסגר בעוד ${daysLeft} ימים`) : 'פתוח — ללא מועד'
@@ -649,7 +659,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       ? (rs >= 80 ? { kind: 'teal' as const, text: `התאמה ${rs}%` } : { kind: 'amber' as const, text: `התאמה ${rs}%` })
       : undefined
     return { title: t.title || '', sub: [t.organization, t.budget && t.budget !== 'לא צוין' ? t.budget : ''].filter(Boolean).join(' · '), side, pill, hot: i === 0 && (rs ?? 0) >= 80, deadline: daysLeft != null && daysLeft <= 10 }
-  })
+  }
+  // TENDERS_ENABLED off → openTenders is empty → section (and this expand) never render.
+  const tendersOut: ReportData['tenders'] = openTenders.slice(0, 3).map(toTender)
+  const tendersMore: ReportData['tenders'] = openTenders.slice(3).map((t: any) => toTender(t, 99))
 
   // ── Leads grouped by channel ────────────────────────────────────────────────
   const byChannel = new Map<string, any[]>()
@@ -664,6 +677,13 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     score >= 80 ? { kind: 'high', text: 'התאמה גבוהה' }
       : score >= 65 ? { kind: 'good', text: 'התאמה טובה' }
         : undefined
+  const leadsMore: ReportData['leadsMore'] = leadsSorted.slice(5).map((l: any) => ({
+    channel: (l.source || l.industry || 'שותפים').trim() || 'שותפים',
+    title: l.name || '',
+    sub: l.reason || l.industry || '',
+    matchTag: matchTagFor(Math.round(l.score ?? 0)),
+    website: l.website && /^https?:\/\//i.test(l.website) ? l.website : undefined,
+  }))
   const leadGroups: ReportData['leadGroups'] = [...byChannel.entries()].map(([channel, ls]) => ({
     channel,
     leads: ls.map((l: any) => ({
@@ -776,7 +796,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // ── Trends section (top 3, real deltas) ─────────────────────────────────────
   // STEP 6: every % states its base ("מהרבעון הקודם" — recent-3mo vs prior-3mo,
   // per DataForSEO). A baseless number is never shown → no real data ⇒ "יציב".
-  const trendsOut: ReportData['trends'] = trendEntries.slice(0, 3).map((k: any) => {
+  const toTrend = (k: any) => {
     const dir = k.direction as string
     const pct = num(k.changePct)
     const hasBase = pct != null && !k.lowData
@@ -791,13 +811,14 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       badge,
       hot: dir === 'rising' && hasBase && (pct as number) >= 15,
     }
-  })
+  }
+  const trendsOut: ReportData['trends'] = trendEntries.slice(0, 3).map(toTrend)
+  const trendsMore: ReportData['trendsMore'] = trendEntries.slice(3).map(toTrend)
 
   // ── Industry hot trends (stored industry_trends — read-only, real links) ────
   const itData: any[] = Array.isArray(company?.industry_trends?.trends) ? company.industry_trends.trends : []
-  const industryTrends: ReportData['industryTrends'] = itData
+  const industryAll = itData
     .filter((t: any) => t && typeof t.name === 'string' && t.name.trim())
-    .slice(0, 3)
     .map((t: any) => ({
       title: t.name.trim(),
       badge: t.direction === 'rising'
@@ -809,9 +830,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       // time — shape-check again here; absent → no link rendered (never invented).
       sourceUrl: typeof t.source_url === 'string' && /^https?:\/\/[^/]+/.test(t.source_url) ? t.source_url : undefined,
     }))
+  const industryTrends: ReportData['industryTrends'] = industryAll.slice(0, 3)
+  const industryTrendsMore: ReportData['industryTrendsMore'] = industryAll.slice(3)
 
   // ── Conferences (up to 2) ───────────────────────────────────────────────────
-  const confsOut: ReportData['conferences'] = upcomingConfs.slice(0, 2).map((c: any) => ({
+  const toConf = (c: any) => ({
+    url: typeof c.url === 'string' && /^https?:\/\//i.test(c.url) ? c.url : undefined,
     title: c.name || '',
     // Dates are free text: render a Hebrew day/month for exact ISO dates, else
     // the original text, else "מועד יוכרז" — never a blank or a stale value.
@@ -821,7 +845,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     ].filter(Boolean).join(' · '),
     side: c.url ? 'הרשמה פתוחה' : 'פרטים בקרוב',
     pill: parseConfDesc(c.description).score != null && parseConfDesc(c.description).score! >= 70 ? 'התאמה גבוהה' : undefined,
-  }))
+  })
+  // upcomingConfs is already past-date filtered — the expand shows only upcoming too.
+  const confsOut: ReportData['conferences'] = upcomingConfs.slice(0, 2).map(toConf)
+  const conferencesMore: ReportData['conferencesMore'] = upcomingConfs.slice(2).map(toConf)
 
   // ── News (up to 2) ──────────────────────────────────────────────────────────
   const toNews = (n: any) => ({
@@ -874,6 +901,12 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     seoAi,
     seoAiQuestions,
     seoMore,
+    actionsMore,
+    tendersMore,
+    leadsMore,
+    trendsMore,
+    industryTrendsMore,
+    conferencesMore,
     newsMore,
     seoExtras,
     seoAiFirst,

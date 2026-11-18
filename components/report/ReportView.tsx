@@ -331,6 +331,15 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                 <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
               </div>
             ))}
+            <Expand show={!!r.actionsMore?.length} label={`עוד ${r.actionsMore?.length ?? 0} פעולות אפשריות`}>
+              {(r.actionsMore || []).map((a, i) => (
+                <div className="xp-item" key={i}>
+                  <b>{r.actions.length + i + 1}. {a.title}</b> <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
+                  {a.why && <div className="row-sub">{a.why}</div>}
+                  {a.src && <div className="row-sub">{a.src}</div>}
+                </div>
+              ))}
+            </Expand>
           </div>
         </section>
       )}
@@ -499,7 +508,13 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <div className="row-side">{t.deadline ? <span className="deadline">{t.side}</span> : t.side}</div>
                 </div>
               ))}
-              <a className="more-link" href="/app/tenders">לכל המכרזים במערכת ←</a>
+              <div className="xp-pad">
+                <Expand show={!!r.tendersMore?.length} label={`עוד ${r.tendersMore?.length ?? 0} מכרזים פתוחים`}>
+                  {(r.tendersMore || []).map((t, i) => (
+                    <div className="xp-item" key={i}><b>{t.title}</b><div className="row-sub">{[t.sub, t.side].filter(Boolean).join(' · ')}</div></div>
+                  ))}
+                </Expand>
+              </div>
             </div>
           </div>
         </section>
@@ -531,7 +546,19 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   ))}
                 </div>
               ))}
-              <a className="more-link" href="/app/distribution-channels">לכל השותפים במערכת ←</a>
+              <div className="xp-pad">
+                <Expand show={!!r.leadsMore?.length} label={`עוד ${r.leadsMore?.length ?? 0} שותפים`}>
+                  {(r.leadsMore || []).map((l, i) => (
+                    <div className="xp-item" key={i}>
+                      <div className="row-title">
+                        {l.website ? <a className="lead-link" href={l.website} target="_blank" rel="noopener noreferrer">{l.title}</a> : l.title}
+                        {l.matchTag && <span className="pill amber">{l.matchTag.text}</span>}
+                      </div>
+                      <div className="row-sub">{[l.channel, l.sub].filter(Boolean).join(' · ')}</div>
+                    </div>
+                  ))}
+                </Expand>
+              </div>
             </div>
           </div>
         </section>
@@ -688,7 +715,24 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   ))}
                 </>
               )}
-              <a className="more-link" href="/app/trends">לניתוח הטרנדים המלא ←</a>
+              <div className="xp-pad">
+                <Expand show={!!r.trendsMore?.length} label={`עוד ${r.trendsMore?.length ?? 0} מילות מפתח`}>
+                  {(r.trendsMore || []).map((t, i) => (
+                    <div className="xp-item" key={i}>
+                      <b>{t.title}</b> <span className={`badge ${t.badge.kind}`}>{t.badge.text}</span>
+                      {t.sub && <div className="row-sub">{t.sub}</div>}
+                    </div>
+                  ))}
+                </Expand>
+                <Expand show={!!r.industryTrendsMore?.length} label={`עוד ${r.industryTrendsMore?.length ?? 0} טרנדים בתחום`}>
+                  {(r.industryTrendsMore || []).map((t, i) => (
+                    <div className="xp-item" key={i}>
+                      {t.title} <span className={`badge ${t.badge.kind}`}>{t.badge.text}</span>
+                      {t.sourceUrl && <>{' '}<a className="src-link" href={t.sourceUrl} target="_blank" rel="noopener noreferrer">מקור ←</a></>}
+                    </div>
+                  ))}
+                </Expand>
+              </div>
             </div>
           </div>
         </section>
@@ -704,13 +748,22 @@ export default function ReportView({ data: r, archive, example }: { data: Report
               {r.conferences.map((c, i) => (
                 <div className="row" key={i}>
                   <div className="row-main">
-                    <div className="row-title">{c.title}{c.pill && <span className="pill teal">{c.pill}</span>}</div>
+                    <div className="row-title">{c.url ? <a className="news-link" href={c.url} target="_blank" rel="noopener noreferrer">{c.title}</a> : c.title}{c.pill && <span className="pill teal">{c.pill}</span>}</div>
                     {c.sub && <div className="row-sub">{c.sub}</div>}
                   </div>
                   <div className="row-side">{c.side}</div>
                 </div>
               ))}
-              <a className="more-link" href="/app/conferences">לכל הכנסים במערכת ←</a>
+              <div className="xp-pad">
+                <Expand show={!!r.conferencesMore?.length} label={`עוד ${r.conferencesMore?.length ?? 0} אירועים קרובים`}>
+                  {(r.conferencesMore || []).map((c, i) => (
+                    <div className="xp-item" key={i}>
+                      <div className="row-title">{c.url ? <a className="news-link" href={c.url} target="_blank" rel="noopener noreferrer">{c.title}</a> : c.title}{c.pill && <span className="pill teal">{c.pill}</span>}</div>
+                      <div className="row-sub">{[c.sub, c.side].filter(Boolean).join(' · ')}</div>
+                    </div>
+                  ))}
+                </Expand>
+              </div>
             </div>
           </div>
         </section>
