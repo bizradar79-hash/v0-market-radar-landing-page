@@ -108,10 +108,9 @@ async function runDataForSeoPath(ctx: any, steps: Record<string, any>, cost: Sca
   }
   steps.dataforseo = { runs }
 
-  // Freshest window that still yields enough articles. Niche fields (e.g.
-  // medicinal mushrooms) rarely have a month of news; older coverage is still
-  // useful — every item carries its real publish date.
-  const WINDOWS = [NEWS_MAX_AGE_DAYS, 90, 180, 365]
+  // Freshest window that still yields enough articles, but NEVER older than
+  // ~4 months (owner's rule): fewer articles beat stale ones.
+  const WINDOWS = [NEWS_MAX_AGE_DAYS, 90, 120]
   const MIN_ARTICLES = 6
   let windowDays = WINDOWS[WINDOWS.length - 1]
   for (const w of WINDOWS) {
