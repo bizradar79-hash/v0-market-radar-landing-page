@@ -359,7 +359,7 @@ export async function POST(request: Request) {
     try {
       const t0 = Date.now()
       const rec = await askEngine('chatgpt', `כתוב 3 המלצות ספציפיות כיצד ${companyName} (${industry || coreActivityDesc}) יכול לשפר את הנוכחות שלו במנועי AI כמו ChatGPT, Gemini ו-Claude כשמחפשים "${primaryQuery}".`, {
-        webSearch: false, maxTokens: 600,
+        webSearch: false, maxTokens: 1200, // reasoning models reject < 1024
         systemMessage: 'ענה בעברית. החזר JSON בלבד בפורמט {"recommendations": ["", "", ""]} — בלי markdown.',
       })
       cost.add({ provider: 'dataforseo', model: `llm_responses:chatgpt:${rec.model}`, costUSD: rec.costUSD, ms: Date.now() - t0 })
