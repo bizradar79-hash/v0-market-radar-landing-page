@@ -97,20 +97,30 @@ function cleanName(s: string): string {
 export function parseRankedAnswer(text: string): Array<{ name: string; url: string; description: string; position: number }> {
   if (!text) return []
   const lines = text.replace(/\r/g, '').split('\n')
-  const entries: string[] = []
-  let cur: string | null = null
-  for (const raw of lines) {
-    const line = raw.trim()
-    const m = line.match(/^(\d{1,2})[.)]\s*(.*)$/)
-    if (m) {
-      if (cur != null) entries.push(cur)
-      cur = m[2]
-    } else if (cur != null) {
-      if (!line) { if (cur.trim()) { entries.push(cur); cur = null } continue }
-      cur += ' ' + line
+  // Numbered list first ("1. …" / "1)\n…"); if a model answered with bullets
+  // ("- **Name** — …" / "• …" / "### Name") use those instead, in order.
+  const collect = (marker: RegExp): string[] => {
+    const entries: string[] = []
+    let cur: string | null = null
+    for (const raw of lines) {
+      const line = raw.trim()
+      const m = line.match(marker)
+      if (m) {
+        if (cur != null) entries.push(cur)
+        cur = m[m.length - 1]
+      } else if (cur != null) {
+        if (!line) { if (cur.trim()) { entries.push(cur); cur = null } continue }
+        cur += ' ' + line
+      }
     }
+    if (cur != null && cur.trim()) entries.push(cur)
+    return entries
   }
-  if (cur != null && cur.trim()) entries.push(cur)
+  let entries = collect(/^(\d{1,2})[.)]\s*(.*)$/)
+  if (entries.length < 2) {
+    const bullets = collect(/^(?:[-•*]\s+(?=\*\*)|#{2,4}\s+)(.*)$/)
+    if (bullets.length > entries.length) entries = bullets
+  }
 
   const out: Array<{ name: string; url: string; description: string; position: number }> = []
   for (const e of entries) {

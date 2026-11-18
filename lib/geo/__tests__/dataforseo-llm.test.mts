@@ -53,3 +53,8 @@ test('client detection on parsed answers uses the shared identity matcher', () =
 test('answerText joins message sections only', () => {
   assert.equal(answerText({ items: [{ type: 'reasoning', sections: [{ text: 'x' }] }, { type: 'message', sections: [{ text: 'a' }, { text: 'b' }] }] }), 'a\nb')
 })
+
+test('parses bulleted answers when there is no numbered list', () => {
+  const r = parseRankedAnswer(`הנה כמה המלצות:\n\n- **TriTerra Farm** — triterra.co.il — גידול בגליל\n- **Funngiz** — funngiz.co.il — מיצוי כפול\n- **Real Mushrooms** — realmushrooms.com`)
+  assert.deepEqual(r.map(x => [x.name, x.position]), [['TriTerra Farm', 1], ['Funngiz', 2], ['Real Mushrooms', 3]])
+})

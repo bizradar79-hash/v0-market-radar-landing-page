@@ -366,9 +366,19 @@ export async function POST(request: Request) {
       const clean = rec.text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim()
       const rs = clean.indexOf('{'); const re = clean.lastIndexOf('}')
       if (rs !== -1 && re > rs) {
-        const parsed = JSON.parse(clean.slice(rs, re + 1))
-        recommendations = Array.isArray(parsed.recommendations) ? parsed.recommendations.filter((r: any) => typeof r === 'string').slice(0, 3) : []
+        try {
+          const parsed = JSON.parse(clean.slice(rs, re + 1))
+          recommendations = Array.isArray(parsed.recommendations) ? parsed.recommendations.filter((r: any) => typeof r === 'string').slice(0, 3) : []
+        } catch { /* fall through to the list parse */ }
       }
+      // Models often answer as a list despite the JSON instruction — take the items.
+      if (recommendations.length === 0 && rec.text) {
+        recommendations = rec.text.split('\n')
+          .map((l) => l.trim().match(/^(?:\d{1,2}[.)]|[-•*])\s+(.+)$/)?.[1]?.replace(/\*\*/g, '').trim() || '')
+          .filter((l) => l.length > 10)
+          .slice(0, 3)
+      }
+      if (recommendations.length === 0) console.warn('[GEO] recommendations unparsed:', rec.ok ? rec.text.slice(0, 300) : rec.error)
     } catch { /* fallback to empty */ }
 
     const result = {
