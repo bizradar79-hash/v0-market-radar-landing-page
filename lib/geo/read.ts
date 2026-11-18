@@ -14,14 +14,17 @@
 // with `!= null` (NOT a strict-number cast) — engine positions come from parsed
 // LLM JSON and may be a numeric string ("2"); the page accepts those, so we do too.
 
-import { type ClientIdentity, reconcileOwnPosition } from '@/lib/geo/identity'
+import { type ClientIdentity, reconcileOwnPosition, isOwnGeoResult } from '@/lib/geo/identity'
 
 export interface GeoEngineCell {
   id: 'chatgpt' | 'gemini' | 'claude' | 'grok'
   name: string
   position: number | string | null
   appeared: boolean
+  /** The engine's full ranked list (~10), as stored — `own` marks the client's row. */
+  results: GeoResultRow[]
 }
+export interface GeoResultRow { position: number | string | null; name: string; url: string; own: boolean }
 export interface GeoQuestion {
   question: string
   engines: GeoEngineCell[]
@@ -43,7 +46,17 @@ function engineTabs(eng: any): Array<{ id: GeoEngineCell['id']; name: string }> 
 // so existing wrong data self-heals in the report without a rescan.
 function cell(id: GeoEngineCell['id'], name: string, e: any, identity?: ClientIdentity | null): GeoEngineCell {
   const { appeared, position } = reconcileOwnPosition(e, identity)
-  return { id, name, position, appeared }
+  const raw: any[] = Array.isArray(e?.results) ? e.results : []
+  const results: GeoResultRow[] = raw
+    .filter((r) => r && (r.name || r.title || r.url))
+    .slice(0, 10)
+    .map((r, i) => ({
+      position: r.position ?? i + 1,
+      name: String(r.name || r.title || r.url),
+      url: typeof r.url === 'string' ? r.url : '',
+      own: !!r.isOwn || (!!identity && isOwnGeoResult(r, identity)) || (appeared && position != null && String(r.position) === String(position) && !identity),
+    }))
+  return { id, name, position, appeared, results }
 }
 
 /**

@@ -10,6 +10,7 @@ import { loadHiddenKeys, filterHidden } from '@/lib/admin/hidden'
 import { norm } from '@/lib/match/hebrew-core'
 import { deriveArea } from '@/lib/geo/area'
 import { readGeoQuestions } from '@/lib/geo/read'
+import { buildClientIdentity } from '@/lib/geo/identity'
 import { filterUpcomingConferences, conferenceDateLabel, parseConferenceDate } from '@/lib/conferences/date'
 import { TENDERS_ENABLED, COMPETITOR_TRENDS_ENABLED } from '@/lib/flags'
 import {
@@ -99,10 +100,10 @@ export interface ReportData {
   // the focused fields below and leave this empty.
   seo: Array<{ rank: string; title: string; sub: string; badge?: { kind: 'up' | 'down' | 'flat'; text: string }; warn?: boolean }>
   seoPrimary?: { query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean } | null
-  seoAi?: { question: string; engines: Array<{ name: string; rank: string; appeared: boolean }> } | null
+  seoAi?: { question: string; engines: Array<{ name: string; rank: string; appeared: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }> } | null
   // Up to 3 GEO questions, each with the client's position per engine — mirrors
   // the SEO section's 3 expressions. seoAi (above) stays = the first, for old snapshots.
-  seoAiQuestions?: Array<{ question: string; engines: Array<{ name: string; rank: string; appeared: boolean }> }>
+  seoAiQuestions?: Array<{ question: string; engines: Array<{ name: string; rank: string; appeared: boolean; results?: Array<{ position: number | string | null; name: string; url: string; own: boolean }> }> }>
   seoExtras?: Array<{ query: string; rank: string; sub: string; warn?: boolean; unranked?: boolean }>
   seoAiFirst?: boolean   // lead with the AI block when the client has no Google rank but shows in AI
   demand?: { keyword: string; series: number[]; label: string } | null
@@ -696,7 +697,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // read cast position through num() (strict number), dropping numeric-string
   // positions the page accepts. Read-only, no AI. Questions with no engine data
   // at all are skipped; unranked engines show "לא מופיע" (never a bare blank).
-  const seoAiQuestions: NonNullable<ReportData['seoAiQuestions']> = readGeoQuestions(geoRanking, 3)
+  const seoAiQuestions: NonNullable<ReportData['seoAiQuestions']> = readGeoQuestions(geoRanking, 3, buildClientIdentity(company?.name || '', company?.website || '', company?.business_profile))
     .filter((q) => q.hasEngineData)
     .map((q) => ({
       question: q.question,
@@ -704,6 +705,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         name: e.name,
         rank: e.appeared ? `#${e.position}` : 'לא מופיע',
         appeared: e.appeared,
+        results: e.results,
       })),
     }))
   const seoAi: ReportData['seoAi'] = seoAiQuestions[0] ?? null // backward compat (single)

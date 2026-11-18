@@ -142,6 +142,15 @@ export const REPORT_CSS = `
   .rpt .ai-eng{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 8px;text-align:center}
   .rpt .ai-eng .eng-name{font-size:12px;font-weight:700;color:var(--ink-soft)}
   .rpt .ai-eng .eng-rank{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:26px;line-height:1.1;margin-top:4px;color:var(--ink)}
+  .rpt .ai-lists{padding:4px 22px 14px;border-bottom:1px solid var(--line)}
+  .rpt .ai-list{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+  .rpt .ai-list summary{cursor:pointer;padding:9px 12px;font-size:13px;font-weight:700;color:var(--ink-soft)}
+  .rpt .ai-list ol{list-style:none;margin:0;padding:0 8px 8px}
+  .rpt .ai-list li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:13px;color:var(--ink)}
+  .rpt .ai-list li .pos{font-weight:700;min-width:28px;color:var(--ink-soft)}
+  .rpt .ai-list li .nm{flex:1}
+  .rpt .ai-list li.own{background:var(--teal-wash);border:1px solid var(--teal)}
+  .rpt .ai-list li .you{background:var(--teal);color:#fff;font-size:11px;font-weight:700;border-radius:6px;padding:1px 7px}
   .rpt .ai-eng.on{background:linear-gradient(160deg,var(--teal-wash),#fff 70%);border-color:var(--teal)}
   .rpt .ai-eng.on .eng-rank{color:var(--teal-deep)}
   .rpt .ai-eng.off .eng-rank{color:var(--ink-faint);font-family:'Heebo',sans-serif;font-weight:600;font-size:12.5px;margin-top:9px}
@@ -527,6 +536,24 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                             </div>
                           ))}
                         </div>
+                        {q.engines.some((e) => (e.results?.length ?? 0) > 0) && (
+                          <div className="ai-lists">
+                            {q.engines.filter((e) => (e.results?.length ?? 0) > 0).map((e, i) => (
+                              <details className="ai-list" key={i}>
+                                <summary>מה {e.name} המליץ — {e.results!.length} תוצאות</summary>
+                                <ol>
+                                  {e.results!.map((row, ri) => (
+                                    <li key={ri} className={row.own ? 'own' : ''}>
+                                      <span className="pos">#{row.position}</span>
+                                      <span className="nm">{row.name}</span>
+                                      {row.own && <span className="you">אתה</span>}
+                                    </li>
+                                  ))}
+                                </ol>
+                              </details>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </>
