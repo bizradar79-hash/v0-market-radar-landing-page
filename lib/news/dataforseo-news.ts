@@ -23,6 +23,8 @@ export interface NewsFetchResult {
   articles: NewsArticle[]
   costUSD: number
   error?: string
+  /** First raw items exactly as returned — surfaced in the route's steps for diagnosis. */
+  rawSample?: any[]
 }
 
 function authHeader(): string | null {
@@ -104,7 +106,8 @@ export async function fetchGoogleNews(keyword: string, opts?: {
     if (taskNode?.status_code && taskNode.status_code !== 20000) {
       return { ok: false, articles: [], costUSD, error: `task_${taskNode.status_code}: ${taskNode.status_message ?? ''}` }
     }
-    return { ok: true, articles: mapNewsItems(taskNode?.result?.[0]?.items ?? []), costUSD }
+    const rawItems: any[] = taskNode?.result?.[0]?.items ?? []
+    return { ok: true, articles: mapNewsItems(rawItems), costUSD, rawSample: rawItems.slice(0, 2) }
   } catch (e: any) {
     return { ok: false, articles: [], costUSD: 0, error: e?.message || 'fetch_failed' }
   }
@@ -120,7 +123,9 @@ export function selectArticles(articles: NewsArticle[], opts: { maxAgeDays: numb
   const seenUrl = new Set<string>()
   const seenTitle = new Set<string>()
   const kept = articles.filter((a) => {
-    const u = a.url.toLowerCase().replace(/[?#].*$/, '')
+    // Full URL incl. query: Google News article links are google.com/goto?url=<id>
+    // and differ ONLY in the query — stripping it collapsed 39 articles into 1.
+    const u = a.url.toLowerCase().replace(/#.*$/, '')
     const t = a.title.toLowerCase().replace(/\s+/g, ' ').trim()
     if (seenUrl.has(u) || seenTitle.has(t)) return false
     seenUrl.add(u); seenTitle.add(t)

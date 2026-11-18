@@ -103,7 +103,7 @@ async function runDataForSeoPath(ctx: any, steps: Record<string, any>, cost: Sca
     const t0 = Date.now()
     const r = await fetchGoogleNews(q, { locationName: 'Israel', languageCode: 'he', depth: 30 })
     cost.add({ provider: 'dataforseo', model: 'google_news', costUSD: r.costUSD, ms: Date.now() - t0 })
-    runs.push({ query: q, ok: r.ok, count: r.articles.length, costUSD: r.costUSD, error: r.error })
+    runs.push({ query: q, ok: r.ok, count: r.articles.length, costUSD: r.costUSD, error: r.error, rawSample: i === 0 ? r.rawSample : undefined })
     if (r.ok) pool = pool.concat(r.articles)
   }
   steps.dataforseo = { runs }
