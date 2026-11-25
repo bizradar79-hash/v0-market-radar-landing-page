@@ -241,7 +241,17 @@ export default function CompetitorTrackingPage() {
                 <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                   <CalendarDays className="h-4 w-4 text-primary" />פעילות ברשתות
                 </p>
-                {ins.noRecentActivity || !ins.cadence ? (
+                {(() => {
+                  // Every source that HAD a link failed to collect (e.g. scraper token
+                  // expired) → say so; "no activity" would be a false statement.
+                  const srcs: any[] = Array.isArray((row as any).sources) ? (row as any).sources : []
+                  const attempted = srcs.filter((x) => x?.source !== 'website' && x?.error !== 'no_url')
+                  return attempted.length > 0 && attempted.every((x) => x?.error && !(x?.posts?.length))
+                })() ? (
+                  <p className="text-sm text-amber-700">
+                    לא הצלחנו לאסוף את הפוסטים בסריקה הזו (תקלה בשירות האיסוף) — יתעדכן בסריקה הבאה.
+                  </p>
+                ) : ins.noRecentActivity || !ins.cadence ? (
                   <p className="text-sm text-muted-foreground">
                     לא זוהתה פעילות ב-{ins.windowDays ?? 45} הימים האחרונים.
                   </p>
