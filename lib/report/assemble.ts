@@ -949,10 +949,10 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   // When an action's source isn't an external page but data shown IN this
   // report (a keyword trend, an SEO keyword, a competitor card…), link to that
   // report section instead. Only to sections that actually render.
-  const norm = (x: string) => x.replace(/["'״׳]/g, '').trim().toLowerCase()
-  const trendNames = [...trendsOut, ...(trendsMore || [])].map((t) => norm(t.title))
-  const itNames = [...(industryTrends || []), ...(industryTrendsMore || [])].map((t) => norm(t.title))
-  const seoNames = seoVariants.map((v: any) => norm(String(v.query || '')))
+  const normTxt = (x: string) => x.replace(/["'״׳]/g, '').trim().toLowerCase()
+  const trendNames = [...trendsOut, ...(trendsMore || [])].map((t) => normTxt(t.title))
+  const itNames = [...(industryTrends || []), ...(industryTrendsMore || [])].map((t) => normTxt(t.title))
+  const seoNames = seoVariants.map((v: any) => normTxt(String(v.query || '')))
   const hasSection = {
     trends: trendsOut.length > 0 || (industryTrends?.length ?? 0) > 0,
     seo: !!(seoPrimary || seoAiQuestions.length),
@@ -965,7 +965,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   const INT_LABEL = 'לנתון בדוח ↓'
   const internalFor = (a: ReportData['actions'][number]): string | null => {
     const sigs = actionSignals.get(a) || []
-    const hay = [a.title, a.src, ...sigs.map((sg: any) => String(sg?.label || ''))].map((x) => norm(String(x || ''))).join(' | ')
+    const hay = [a.title, a.src, ...sigs.map((sg: any) => String(sg?.label || ''))].map((x) => normTxt(String(x || ''))).join(' | ')
     const mentions = (names: string[]) => names.some((n) => n.length >= 3 && hay.includes(n))
     if (hasSection.trends && (mentions(trendNames) || mentions(itNames))) return '#sec-trends'
     if (hasSection.seo && mentions(seoNames)) return '#sec-seo'

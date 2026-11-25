@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "npx --yes tsx --test lib/competitor-intel/__tests__/*.test.mts lib/emails/__tests__/*.test.mts lib/http/__tests__/*.test.mts lib/blog/__tests__/*.test.mts lib/news/__tests__/*.test.mts lib/conferences/__tests__/*.test.mts lib/geo/__tests__/*.test.mts"
+    "test": "npx --yes tsx --test lib/competitor-intel/__tests__/*.test.mts lib/emails/__tests__/*.test.mts lib/http/__tests__/*.test.mts lib/blog/__tests__/*.test.mts lib/news/__tests__/*.test.mts lib/report/__tests__/*.test.mts lib/conferences/__tests__/*.test.mts lib/geo/__tests__/*.test.mts"
   },
   "dependencies": {
     "@ai-sdk/groq": "^3.0.29",
