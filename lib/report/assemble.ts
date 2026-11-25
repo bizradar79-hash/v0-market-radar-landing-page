@@ -493,11 +493,23 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       const ext = typeof sg?.externalUrl === 'string' ? normUrl(sg.externalUrl) : ''
       const hit = ext ? knownSources.find((k) => normUrl(k.url) === ext) : undefined
       if (hit) { push({ label: hit.label, url: hit.url }); continue }
+      const type = String(sg?.type || '')
+      // Keyword signals have no source page — never borrow an unrelated URL.
+      if (type === 'keyword') continue
+      // The generator was fed only this client's stored URLs for these types, so
+      // their externalUrl came from our data even if the row was later replaced
+      // by a rescan (e.g. a conference no longer in the table).
+      const SRC_LABEL: Record<string, string> = { conference: 'לאתר הכנס ↗', news: 'לכתבה ↗', tender: 'למכרז ↗' }
+      if (SRC_LABEL[type] && typeof sg?.externalUrl === 'string' && /^https?:\/\/[^/\s]+\.[^/\s]+/i.test(sg.externalUrl)) {
+        push({ label: SRC_LABEL[type], url: sg.externalUrl.trim() }); continue
+      }
+      // Name match: the stored item's FULL name must appear in the signal label
+      // (not the reverse — a short keyword inside a long lead name is no match).
       const lbl = String(sg?.label || '').replace(/^[^:]{1,15}:\s*/, '').trim()
-      const byName = lbl.length >= 3 ? knownSources.find((k) => k.name.includes(lbl) || lbl.includes(k.name)) : undefined
+      const byName = lbl.length >= 3 ? knownSources.find((k) => k.name.length >= 4 && lbl.includes(k.name)) : undefined
       if (byName) push({ label: byName.label, url: byName.url })
     }
-    if (!out.length) {
+    if (!out.length && !sigs.some((sg) => sg?.type === 'keyword')) {
       const title = String(a.title || '')
       const byTitle = knownSources.find((k) => k.name.length >= 4 && title.includes(k.name))
       if (byTitle) push({ label: byTitle.label, url: byTitle.url })
