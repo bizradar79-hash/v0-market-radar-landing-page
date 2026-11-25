@@ -147,9 +147,6 @@ export const REPORT_CSS = `
   .rpt .action-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
   .rpt .action-links a{font-size:13px;font-weight:700;color:var(--teal-deep);background:var(--teal-wash);border:1px solid var(--teal);border-radius:999px;padding:3px 12px;text-decoration:none}
   .rpt .action-links a:hover{background:#fff}
-  .rpt .action-links a.int{background:#fff;border-style:dashed}
-  .rpt section[id]{scroll-margin-top:16px}
-  html{scroll-behavior:smooth}
   .rpt .xp{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
   .rpt .xp>summary{cursor:pointer;padding:9px 12px;font-size:13px;font-weight:700;color:var(--teal-deep)}
   .rpt .xp-body{padding:0 10px 10px}
@@ -335,7 +332,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   {a.src && <div className="action-src">{a.src}</div>}
                   {!!a.links?.length && (
                     <div className="action-links">
-                      {a.links.map((l, j) => l.url.startsWith('#') ? <a key={j} href={l.url} className="int">{l.label}</a> : <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}
+                      {a.links.map((l, j) => <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}
                     </div>
                   )}
                 </div>
@@ -348,7 +345,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <b>{r.actions.length + i + 1}. {a.title}</b> <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
                   {a.why && <div className="row-sub">{a.why}</div>}
                   {a.src && <div className="row-sub">{a.src}</div>}
-                  {!!a.links?.length && <div className="action-links">{a.links.map((l, j) => l.url.startsWith('#') ? <a key={j} href={l.url} className="int">{l.label}</a> : <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}</div>}
+                  {!!a.links?.length && <div className="action-links">{a.links.map((l, j) => <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}</div>}
                 </div>
               ))}
             </Expand>
@@ -360,7 +357,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
           Replaces the old "מה השתנה אצל המתחרים" change-detection section and
           its (now disabled) competitor-trends fallback. Read-only, zero AI. */}
       {r.competitorTracking && r.competitorTracking.length > 0 ? (
-        <section id="sec-competitors">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">מתחרים</span></div>
             <h2>מעקב מתחרים</h2>
@@ -495,7 +492,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
           </div>
         </section>
       ) : r.competitorsNote ? (
-        <section id="sec-competitors">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">מתחרים</span></div>
             <h2>מעקב מתחרים</h2>
@@ -506,7 +503,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* TENDERS */}
       {r.tenders.length > 0 && (
-        <section id="sec-tenders">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">מכרזים</span></div>
             <h2>{r.tenders.length} מכרזים פתוחים רלוונטיים</h2>
@@ -534,7 +531,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* PARTNERS / LEADS — word tags, verified links, no numeric scores */}
       {r.leadGroups.length > 0 && (
-        <section id="sec-leads">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">שותפים וערוצי הפצה</span></div>
             <h2>שותפים וערוצי הפצה פוטנציאליים</h2>
@@ -578,7 +575,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* SEO / GEO — focused: 1 primary keyword + 1 AI question (3 engines) + ≤3 expressions + demand */}
       {(r.seoPrimary || r.seoAi || r.seo.length > 0) && (
-        <section id="sec-seo">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">איך מוצאים אותך</span></div>
             <h2>הדירוג שלך בגוגל ובמנועי AI</h2>
@@ -694,7 +691,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* TRENDS — keyword trends + industry hot trends (stored, with real sources) */}
       {(r.trends.length > 0 || (r.industryTrends && r.industryTrends.length > 0)) && (
-        <section id="sec-trends">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">טרנדים ומילות מפתח</span></div>
             <h2>מה עולה בשוק שלך</h2>
@@ -752,7 +749,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* CONFERENCES */}
       {r.conferences.length > 0 && (
-        <section id="sec-conferences">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">כנסים ואירועים</span></div>
             <h2>{r.conferences.length} אירועים ששווים את הזמן שלך</h2>
@@ -783,7 +780,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
 
       {/* NEWS */}
       {r.news.length > 0 && (
-        <section id="sec-news">
+        <section>
           <div className="wrap">
             <div className="sec-head"><span className="sec-kicker">חדשות רלוונטיות</span></div>
             <h2>ידיעות ששוות דקה</h2>

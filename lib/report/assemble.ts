@@ -517,13 +517,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     return out.slice(0, 3)
   }
 
-  const actionSignals = new WeakMap<object, any[]>()
   const storedActions: ReportData['actions'] = sortedActions.map((a) => {
-    const out = storedActionOf(a)
-    actionSignals.set(out, Array.isArray(a.signals) ? a.signals : [])
-    return out
-  })
-  function storedActionOf(a: any): ReportData['actions'][number] {
     const sig = Array.isArray(a.signals) && a.signals[0] ? a.signals[0] : null
     const srcLabel = sig?.label ? `מקור: ${sig.label}` : (a.category ? `מקור: ${a.category}` : '')
     const isDeadline = a.category === 'מכרז' || a.category === 'כנס'
@@ -538,7 +532,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       ? { kind: 'watch' as const, text: 'הזדמנות' }
       : { kind: 'watch' as const, text: 'נקודה למחשבה' }
     return { title: a.title || '', why: a.summary || a.details || '', src: srcLabel, links: sourceLinksFor(a), chip, kind: 'watch' as const }
-  }
+  })
 
   // Competitor actions sit HIGH — above the stored recommendations — but real
   // deadlines (מכרז/כנס) keep their place at the very top, since those expire.
@@ -943,47 +937,6 @@ export async function assembleReport(db: any, companyId: string, company: any): 
   let nextScanDate = company?.next_sync_at ? new Date(company.next_sync_at) : null
   if (!nextScanDate || isNaN(nextScanDate.getTime()) || dayOf(nextScanDate) <= dayOf(scanRef)) {
     nextScanDate = new Date(scanRef.getTime() + 7 * 86400000)
-  }
-
-  // ── Internal source links for actions ─────────────────────────────────────
-  // When an action's source isn't an external page but data shown IN this
-  // report (a keyword trend, an SEO keyword, a competitor card…), link to that
-  // report section instead. Only to sections that actually render.
-  const norm = (x: string) => x.replace(/["'״׳]/g, '').trim().toLowerCase()
-  const trendNames = [...trendsOut, ...(trendsMore || [])].map((t) => norm(t.title))
-  const itNames = [...(industryTrends || []), ...(industryTrendsMore || [])].map((t) => norm(t.title))
-  const seoNames = seoVariants.map((v: any) => norm(String(v.query || '')))
-  const hasSection = {
-    trends: trendsOut.length > 0 || (industryTrends?.length ?? 0) > 0,
-    seo: !!(seoPrimary || seoAiQuestions.length),
-    competitors: competitorTracking.length > 0 || !!competitorsNote,
-    leads: leadGroups.length > 0,
-    conferences: confsOut.length > 0,
-    news: newsOut.length > 0,
-    tenders: tendersOut.length > 0,
-  }
-  const INT_LABEL = 'לנתון בדוח ↓'
-  const internalFor = (a: ReportData['actions'][number]): string | null => {
-    const sigs = actionSignals.get(a) || []
-    const hay = [a.title, a.src, ...sigs.map((sg: any) => String(sg?.label || ''))].map((x) => norm(String(x || ''))).join(' | ')
-    const mentions = (names: string[]) => names.some((n) => n.length >= 3 && hay.includes(n))
-    if (hasSection.trends && (mentions(trendNames) || mentions(itNames))) return '#sec-trends'
-    if (hasSection.seo && mentions(seoNames)) return '#sec-seo'
-    const type = String(sigs[0]?.type || '')
-    const byType: Record<string, keyof typeof hasSection> = {
-      keyword: 'trends', trend: 'trends', competitor: 'competitors', lead: 'leads',
-      conference: 'conferences', news: 'news', tender: 'tenders',
-    }
-    if (a.src === 'מקור: מעקב מתחרים' && hasSection.competitors) return '#sec-competitors'
-    const sec = byType[type]
-    if (sec && hasSection[sec]) return `#sec-${sec}`
-    if (type === 'keyword' && hasSection.seo) return '#sec-seo'
-    return null
-  }
-  for (const a of [...actions, ...(actionsMore || [])]) {
-    if (a.links?.length) continue
-    const href = internalFor(a)
-    if (href) a.links = [{ label: INT_LABEL, url: href }]
   }
 
   return {
