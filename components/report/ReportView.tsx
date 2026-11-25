@@ -144,6 +144,9 @@ export const REPORT_CSS = `
   .rpt .ai-eng .eng-name{font-size:12px;font-weight:700;color:var(--ink-soft)}
   .rpt .ai-eng .eng-rank{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:26px;line-height:1.1;margin-top:4px;color:var(--ink)}
   .rpt .ai-lists{padding:4px 22px 14px;border-bottom:1px solid var(--line)}
+  .rpt .action-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .rpt .action-links a{font-size:13px;font-weight:700;color:var(--teal-deep);background:var(--teal-wash);border:1px solid var(--teal);border-radius:999px;padding:3px 12px;text-decoration:none}
+  .rpt .action-links a:hover{background:#fff}
   .rpt .xp{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
   .rpt .xp>summary{cursor:pointer;padding:9px 12px;font-size:13px;font-weight:700;color:var(--teal-deep)}
   .rpt .xp-body{padding:0 10px 10px}
@@ -327,6 +330,11 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <div className="action-title">{a.title}</div>
                   {a.why && <div className="action-why">{a.why}</div>}
                   {a.src && <div className="action-src">{a.src}</div>}
+                  {!!a.links?.length && (
+                    <div className="action-links">
+                      {a.links.map((l, j) => <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}
+                    </div>
+                  )}
                 </div>
                 <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
               </div>
@@ -337,6 +345,7 @@ export default function ReportView({ data: r, archive, example }: { data: Report
                   <b>{r.actions.length + i + 1}. {a.title}</b> <span className={`chip ${a.chip.kind}`}>{a.chip.text}</span>
                   {a.why && <div className="row-sub">{a.why}</div>}
                   {a.src && <div className="row-sub">{a.src}</div>}
+                  {!!a.links?.length && <div className="action-links">{a.links.map((l, j) => <a key={j} href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>)}</div>}
                 </div>
               ))}
             </Expand>

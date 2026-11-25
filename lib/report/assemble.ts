@@ -54,7 +54,7 @@ export interface ReportData {
   achievement: { title: string; sub: string } | null
   thesis: { big: string; sub: string }
   metrics: Array<{ num: string; badge?: { kind: 'up' | 'down' | 'flat' | 'new'; text: string }; label: string; hot?: boolean }>
-  actions: Array<{ title: string; why: string; src: string; chip: { kind: 'urgent' | 'watch' | 'go'; text: string }; kind: 'urgent' | 'watch' | '' }>
+  actions: Array<{ title: string; why: string; src: string; links?: Array<{ label: string; url: string }>; chip: { kind: 'urgent' | 'watch' | 'go'; text: string }; kind: 'urgent' | 'watch' | '' }>
   competitors: Array<{ name: string; sub: string; deltas: Array<{ kind: 'good' | 'bad' | 'neutral'; text: string }>; hot?: boolean }>
   competitorsNote?: string | null   // calm line / intro when no competitor changed this scan
   /**
@@ -175,8 +175,16 @@ export async function assembleReport(db: any, companyId: string, company: any): 
       .sort((a: any, b: any) => ((b.likes ?? 0) + (b.comments ?? 0)) - ((a.likes ?? 0) + (a.comments ?? 0)))[0]
     const wchanges = (Array.isArray(row?.website?.changes) ? row.website.changes : [])
       .filter((c: any) => c && String(c.text || '').trim())
+    const rl = (row?.resolved_links || {}) as Record<string, string>
+    const httpOk = (u: any) => typeof u === 'string' && /^https?:\/\//i.test(u) ? u : undefined
     return {
       name: String(row?.competitor_name || '').trim(),
+      websiteUrl: httpOk(rl.website) || httpOk(row?.website?.url),
+      googleUrl: googleListingUrl(rl, rv) || undefined,
+      bestPostUrl: httpOk(bestPost?.postUrl) || httpOk(bestPost?.url),
+      bestPostSource: bestPost?.source as string | undefined,
+      latestWeekPostUrl: httpOk(weekPosts.slice().sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((p: any) => p.postUrl || p.url)[0]),
+      socialUrl: httpOk(rl.instagram) || httpOk(rl.facebook) || httpOk(rl.linkedin),
       websiteChanges: wchanges,
       weekPosts: weekPosts.length,
       negatives,
@@ -404,6 +412,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         title: `${t.name} ${what}`,
         why: `${String(c.text).slice(0, 160)}${c.soWhat ? ` — ${String(c.soWhat).slice(0, 120)}` : ''}`,
         src: MODULE_SRC,
+        links: t.websiteUrl ? [{ label: 'לאתר שלהם ↗', url: t.websiteUrl }] : [],
         chip: { kind: 'watch' as const, text: 'שינוי אצל מתחרה' },
         kind: 'watch' as const,
       })
@@ -416,6 +425,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         title: `${t.name} קיבל ביקורת שלילית`,
         why: `${ng.rating != null ? `${ng.rating}★ — ` : ''}${(ng.text || '').slice(0, 120)}${(ng.text || '').length > 120 ? '…' : ''} — הזדמנות לפנות ללקוחות שלא קיבלו מענה טוב`,
         src: MODULE_SRC,
+        links: t.googleUrl ? [{ label: 'לביקורות בגוגל ↗', url: t.googleUrl }] : [],
         chip: { kind: 'watch' as const, text: 'הזדמנות' },
         kind: 'watch' as const,
       })
@@ -427,6 +437,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         title: `פוסט של ${t.name} קיבל תגובות רבות`,
         why: `${t.bestPost.engagement.toLocaleString('he-IL')} לייקים ותגובות${t.bestPost.caption ? ` — "${t.bestPost.caption}"` : ''}. שווה לראות מה עבד שם.`,
         src: MODULE_SRC,
+        links: t.bestPostUrl ? [{ label: 'לפוסט ↗', url: t.bestPostUrl }] : [],
         chip: { kind: 'watch' as const, text: 'נקודה למחשבה' },
         kind: 'watch' as const,
       })
@@ -438,6 +449,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
         title: `${t.name} פרסם ${t.weekPosts} פוסטים השבוע`,
         why: 'קצב פרסום גבוה מהרגיל — כדאי לבדוק מה הם מקדמים כרגע.',
         src: MODULE_SRC,
+        links: (t.latestWeekPostUrl || t.socialUrl) ? [{ label: t.latestWeekPostUrl ? 'לפוסט האחרון ↗' : 'לעמוד שלהם ↗', url: (t.latestWeekPostUrl || t.socialUrl)! }] : [],
         chip: { kind: 'watch' as const, text: 'נקודה למחשבה' },
         kind: 'watch' as const,
       })
@@ -457,13 +469,49 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     .slice(0, COMPETITOR_ACTION_CAP)
     .map(({ weight, ...a }) => a)
 
+  // Source links for stored (generated) actions: ONLY URLs that exist in this
+  // client's stored scan data. A model-supplied externalUrl is accepted only if
+  // it matches one of them; otherwise we match the signal/title to a stored item
+  // by name. Never render a URL we didn't collect.
+  const knownSources: Array<{ name: string; url: string; label: string }> = []
+  const addSrc = (name: any, url: any, label: string) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url) && typeof name === 'string' && name.trim())
+      knownSources.push({ name: name.trim(), url, label })
+  }
+  for (const n of news || []) addSrc(n.title, n.url, 'לכתבה ↗')
+  for (const c of conferences || []) addSrc(c.name, c.url, 'לאתר הכנס ↗')
+  for (const t of tenders || []) addSrc(t.title, t.link, 'למכרז ↗')
+  for (const l of leads || []) addSrc(l.name, l.website, 'לאתר ↗')
+  for (const t of trackStats) addSrc(t.name, t.websiteUrl || t.googleUrl || t.socialUrl, 'לעמוד המתחרה ↗')
+  for (const t of (Array.isArray(company?.industry_trends?.trends) ? company.industry_trends.trends : [])) addSrc(t?.name, t?.source_url, 'למקור ↗')
+  const normUrl = (u: string) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[/#?]+$/, '')
+  const sourceLinksFor = (a: any): Array<{ label: string; url: string }> => {
+    const out: Array<{ label: string; url: string }> = []
+    const push = (x: { label: string; url: string }) => { if (!out.some((o) => o.url === x.url)) out.push(x) }
+    const sigs: any[] = Array.isArray(a.signals) ? a.signals : []
+    for (const sg of sigs) {
+      const ext = typeof sg?.externalUrl === 'string' ? normUrl(sg.externalUrl) : ''
+      const hit = ext ? knownSources.find((k) => normUrl(k.url) === ext) : undefined
+      if (hit) { push({ label: hit.label, url: hit.url }); continue }
+      const lbl = String(sg?.label || '').replace(/^[^:]{1,15}:\s*/, '').trim()
+      const byName = lbl.length >= 3 ? knownSources.find((k) => k.name.includes(lbl) || lbl.includes(k.name)) : undefined
+      if (byName) push({ label: byName.label, url: byName.url })
+    }
+    if (!out.length) {
+      const title = String(a.title || '')
+      const byTitle = knownSources.find((k) => k.name.length >= 4 && title.includes(k.name))
+      if (byTitle) push({ label: byTitle.label, url: byTitle.url })
+    }
+    return out.slice(0, 3)
+  }
+
   const storedActions: ReportData['actions'] = sortedActions.map((a) => {
     const sig = Array.isArray(a.signals) && a.signals[0] ? a.signals[0] : null
     const srcLabel = sig?.label ? `מקור: ${sig.label}` : (a.category ? `מקור: ${a.category}` : '')
     const isDeadline = a.category === 'מכרז' || a.category === 'כנס'
     if (isDeadline) {
       return {
-        title: a.title || '', why: a.summary || a.details || '', src: srcLabel,
+        title: a.title || '', why: a.summary || a.details || '', src: srcLabel, links: sourceLinksFor(a),
         chip: { kind: 'urgent' as const, text: a.category === 'כנס' ? 'מועד קרוב' : 'דדליין' },
         kind: 'urgent' as const,
       }
@@ -471,7 +519,7 @@ export async function assembleReport(db: any, companyId: string, company: any): 
     const chip = a.category === 'ליד'
       ? { kind: 'watch' as const, text: 'הזדמנות' }
       : { kind: 'watch' as const, text: 'נקודה למחשבה' }
-    return { title: a.title || '', why: a.summary || a.details || '', src: srcLabel, chip, kind: 'watch' as const }
+    return { title: a.title || '', why: a.summary || a.details || '', src: srcLabel, links: sourceLinksFor(a), chip, kind: 'watch' as const }
   })
 
   // Competitor actions sit HIGH — above the stored recommendations — but real
